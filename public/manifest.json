@@ -1,0 +1,17 @@
+{
+  "short_name": "ERP Fini",
+  "name": "ERP Fini - Controlador de Estoque",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍬</text></svg>",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#090d16",
+  "theme_color": "#0f172a",
+  "display": "standalone",
+  "orientation": "any",
+  "description": "Sistema moderno de gestão de estoque ERP para Fini Nova Friburgo com suporte PWA, funcionamento offline e sincronização Firestore em tempo real."
+}

@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "tenants": {
+      "title": "Tenants / Empresas / Unidades",
+      "description": "Unidades de negócio e empresas cadastradas no sistema ERP multi-tenant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID único do tenant" },
+        "code": { "type": "string", "description": "Código identificador da unidade" },
+        "name": { "type": "string", "description": "Nome fantasia ou razão social da unidade" },
+        "cnpj": { "type": "string", "description": "CNPJ da empresa" },
+        "city": { "type": "string", "description": "Cidade" },
+        "state": { "type": "string", "description": "UF" },
+        "active": { "type": "boolean", "description": "Status de atividade" },
+        "isMaster": { "type": "boolean", "description": "Se é a matriz principal" },
+        "createdAt": { "type": "string", "description": "Data de cadastro ISO" }
+      },
+      "required": ["id", "code", "name", "active"]
+    },
+    "users": {
+      "title": "Usuários do ERP",
+      "description": "Perfis de usuários, operantes, administradores e gerentes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID do usuário" },
+        "name": { "type": "string", "description": "Nome do operador" },
+        "email": { "type": "string", "description": "E-mail de acesso" },
+        "role": { "type": "string", "description": "Cargo / Função" },
+        "pin": { "type": "string", "description": "PIN numérico de 4 dígitos" },
+        "active": { "type": "boolean", "description": "Ativo ou inativo" },
+        "tenantIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Lista de IDs de tenants permitidos para acesso"
+        },
+        "avatarUrl": { "type": "string", "description": "URL de avatar ou emoji" }
+      },
+      "required": ["id", "name", "email", "role", "pin"]
+    },
+    "products": {
+      "title": "Produtos / Estoque por Tenant",
+      "description": "Itens do catálogo e estoques segregados por empresa/unidade.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID do produto" },
+        "tenantId": { "type": "string", "description": "ID da empresa/unidade proprietária" },
+        "sku": { "type": "string", "description": "SKU único no tenant" },
+        "ean": { "type": "string", "description": "Código de barras" },
+        "name": { "type": "string", "description": "Descrição do item" },
+        "category": { "type": "string", "description": "Categoria" },
+        "unit": { "type": "string", "description": "Embalagem/Apresentação" },
+        "stockDeposito": { "type": "number", "description": "Saldo em Depósito" },
+        "stockLoja": { "type": "number", "description": "Saldo em Loja" },
+        "minStockDeposito": { "type": "number" },
+        "minStockLoja": { "type": "number" },
+        "costPrice": { "type": "number" },
+        "sellPrice": { "type": "number" },
+        "expirationDate": { "type": "string" },
+        "batchNumber": { "type": "string" },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "sku", "name", "category"]
+    },
+    "nfEntries": {
+      "title": "Notas Fiscais de Entrada por Tenant",
+      "description": "Registros de compras e notas fiscais de fornecedores.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "numberNF": { "type": "string" },
+        "supplier": { "type": "string" },
+        "totalValue": { "type": "number" },
+        "receiveDate": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "numberNF", "supplier"]
+    },
+    "movements": {
+      "title": "Movimentações e Histórico de Estoque",
+      "description": "Log auditável de entradas, saídas, vendas e perdas.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "date": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "type": { "type": "string" },
+        "quantity": { "type": "number" },
+        "location": { "type": "string" },
+        "userName": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "date", "productId", "type", "quantity"]
+    },
+    "transfers": {
+      "title": "Transferências Internas Depósito ➔ Loja",
+      "description": "Transferências registradas entre almoxarifado e área de vendas.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "date": { "type": "string" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "tenantId", "date", "productId", "quantity"]
+    }
+  }
+}

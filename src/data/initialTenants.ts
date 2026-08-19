@@ -1,0 +1,48 @@
+import { Tenant } from '../types';
+
+export const INITIAL_TENANTS: Tenant[] = [
+  {
+    id: 'tenant-master',
+    code: 'MASTER',
+    name: 'SaaS Master Admin System',
+    cnpj: '00.000.000/0001-00',
+    city: 'Central',
+    state: 'BR',
+    active: true,
+    isMaster: true,
+    createdAt: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'tenant-friburgo',
+    code: 'FRIBURGO-01',
+    name: 'Doceria Nova Friburgo (Matriz)',
+    cnpj: '02.408.821/0001-44',
+    city: 'Nova Friburgo',
+    state: 'RJ',
+    active: true,
+    isMaster: true,
+    createdAt: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'tenant-petropolis',
+    code: 'PETROPOLIS-01',
+    name: 'Doceria Petrópolis (Filial 01)',
+    cnpj: '02.408.821/0002-27',
+    city: 'Petrópolis',
+    state: 'RJ',
+    active: true,
+    isMaster: false,
+    createdAt: '2026-03-15T00:00:00Z',
+  },
+  {
+    id: 'tenant-niteroi',
+    code: 'NITEROI-02',
+    name: 'Atacado & Varejo Niterói (Unidade 02)',
+    cnpj: '08.921.112/0001-99',
+    city: 'Niterói',
+    state: 'RJ',
+    active: true,
+    isMaster: false,
+    createdAt: '2026-05-10T00:00:00Z',
+  },
+];
