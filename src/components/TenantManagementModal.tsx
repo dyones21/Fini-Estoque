@@ -1,3 +1,10 @@
+/**
+ * NOTA ARQUITETURAL - EXPANSÃO SAAS MULTI-TENANT:
+ * Este componente (TenantManagementModal) está preservado para a fase futura de expansão SaaS.
+ * Na fase de lançamento atual, o sistema é Single-Tenant ("Fini Nova Friburgo").
+ * A funcionalidade será reativada quando o banco de dados incluir colunas 'tenant_id' para isolamento multi-empresa.
+ */
+
 import React, { useState } from 'react';
 import {
   X,

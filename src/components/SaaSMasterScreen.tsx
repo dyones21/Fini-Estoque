@@ -1,3 +1,10 @@
+/**
+ * NOTA ARQUITETURAL - EXPANSÃO SAAS MULTI-TENANT:
+ * Este componente (SaaSMasterScreen) está preservado para a fase futura de expansão SaaS.
+ * Na fase atual, o ERP opera como Single-Tenant dedicado para "Fini Nova Friburgo".
+ * A reativação desta tela ocorrerá quando o PostgreSQL receber colunas 'tenant_id' com particionamento/isolamento por empresa.
+ */
+
 import React, { useState } from 'react';
 import {
   Building2,

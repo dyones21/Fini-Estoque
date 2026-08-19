@@ -1,3 +1,9 @@
+/**
+ * NOTA ARQUITETURAL - EXPANSÃO SAAS MULTI-TENANT:
+ * Este componente (DeleteTenantModal) está preservado para a fase futura de expansão SaaS.
+ * Na fase de lançamento atual, o sistema é Single-Tenant ("Fini Nova Friburgo").
+ */
+
 import React, { useState } from 'react';
 import { AlertTriangle, Lock, ShieldAlert, Trash2, X, KeyRound, Building2 } from 'lucide-react';
 import { Tenant, UserProfile } from '../types';

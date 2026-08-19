@@ -50,7 +50,15 @@ const MainApp: React.FC = () => {
   } = useStock();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [saasViewMode, setSaasViewMode] = useState<'master' | 'erp'>('master');
+  
+  /**
+   * MULTI-TENANT ARCHITECTURAL NOTE:
+   * O sistema opera em modo Single-Tenant dedicado para "Fini Nova Friburgo".
+   * A gestão multi-tenant (SaaSMasterScreen, TenantManagementModal, SaaSManagementModal)
+   * foi desativada da navegação e fica reservada para uma fase futura de expansão com
+   * colunas 'tenant_id' em todas as tabelas do PostgreSQL.
+   */
+  const [saasViewMode, setSaasViewMode] = useState<'master' | 'erp'>('erp');
 
   // Stock table filter state for drill-down navigation from Dashboard
   const [stockFilters, setStockFilters] = useState<StockFilterOptions>({});
@@ -66,6 +74,7 @@ const MainApp: React.FC = () => {
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
+  // Multi-tenant modals desativados para fase single-tenant
   const [isSaaSModalOpen, setIsSaaSModalOpen] = useState(false);
 
   // Selected product for modals
@@ -96,20 +105,12 @@ const MainApp: React.FC = () => {
     setIsSaleModalOpen(true);
   };
 
-  // Dedicated SaaS Master Screen for System Owner (Dyones)
-  if (currentUser?.role === 'super_admin' && saasViewMode === 'master') {
-    return (
-      <>
-        <SaaSMasterScreen onSwitchToERP={() => setSaasViewMode('erp')} />
-        <LoginPage />
-      </>
-    );
-  }
+  // Nota: SaaSMasterScreen desativada para manter fluxo single-tenant direto no ERP Fini Nova Friburgo
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-800 antialiased selection:bg-rose-500 selection:text-white">
       
-      {/* Header with activeTab sync, sale modal trigger, and SaaS Master switch */}
+      {/* Header with activeTab sync and sale modal trigger */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -117,8 +118,6 @@ const MainApp: React.FC = () => {
         onOpenSaleModal={() => handleOpenSaleForProduct()}
         onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMobileMenuOpen={isMobileMenuOpen}
-        onOpenSaaSModal={() => setIsSaaSModalOpen(true)}
-        onSwitchToSaaSMaster={() => setSaasViewMode('master')}
       />
 
       {/* Main Content Layout */}
@@ -247,11 +246,12 @@ const MainApp: React.FC = () => {
       {/* Global Dedicated Login Page & Account Switcher Portal */}
       <LoginPage />
 
-      {/* SaaS Master Management Panel for System Owner */}
-      <SaaSManagementModal isOpen={isSaaSModalOpen} onClose={() => setIsSaaSModalOpen(false)} />
-
-      {/* Multi-Tenant Unit Management Modal */}
-      <TenantManagementModal isOpen={isTenantModalOpen} onClose={closeTenantModal} />
+      {/* 
+        MULTI-TENANT / SAAS MODALS (Desativados para a fase Single-Tenant "Fini Nova Friburgo"):
+        - SaaSManagementModal
+        - TenantManagementModal
+        A infraestrutura de múltiplos tenants será reativada quando o banco for migrado para multi-tenant (com tenant_id).
+      */}
 
       {/* Operational Modals */}
       <StoreSaleModal

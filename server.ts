@@ -12,6 +12,8 @@ import {
   getAllSales,
   insertSale,
 } from './src/db/dbService.ts';
+import { getOrCreateUser } from './src/db/users.ts';
+import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 
 async function startServer() {
   const app = express();
@@ -24,8 +26,28 @@ async function startServer() {
     res.json({ status: 'ok', database: 'Cloud SQL PostgreSQL' });
   });
 
+  // USER SYNC API (Firebase Auth -> Postgres Users Table)
+  app.post('/api/users/sync', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const uid = req.user?.uid;
+      const email = req.user?.email || req.body?.email || '';
+      const name = req.body?.name || req.user?.name || (email ? email.split('@')[0] : 'Usuário Fini');
+      const role = req.body?.role || 'Operador Depósito/Loja';
+
+      if (!uid || !email) {
+        return res.status(400).json({ error: 'UID e E-mail são obrigatórios para sincronização' });
+      }
+
+      const syncedUser = await getOrCreateUser(uid, email, name, role);
+      res.json({ success: true, user: syncedUser });
+    } catch (error: any) {
+      console.error('API Error POST /api/users/sync:', error);
+      res.status(500).json({ error: error.message || 'Erro ao sincronizar usuário no Postgres' });
+    }
+  });
+
   // PRODUCTS API
-  app.get('/api/products', async (req, res) => {
+  app.get('/api/products', requireAuth, async (req, res) => {
     try {
       const items = await getAllProducts();
       res.json(items);
@@ -35,7 +57,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/products', async (req, res) => {
+  app.post('/api/products', requireAuth, async (req, res) => {
     try {
       const productData = req.body;
       const saved = await saveProduct(productData);
@@ -46,7 +68,7 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/products/:id', async (req, res) => {
+  app.delete('/api/products/:id', requireAuth, async (req, res) => {
     try {
       await deleteProductById(req.params.id);
       res.json({ success: true });
@@ -57,7 +79,7 @@ async function startServer() {
   });
 
   // STOCK MOVEMENTS API
-  app.get('/api/movements', async (req, res) => {
+  app.get('/api/movements', requireAuth, async (req, res) => {
     try {
       const items = await getAllMovements();
       res.json(items);
@@ -67,7 +89,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/movements', async (req, res) => {
+  app.post('/api/movements', requireAuth, async (req, res) => {
     try {
       const movementData = req.body;
       const saved = await insertMovement(movementData);
@@ -79,7 +101,7 @@ async function startServer() {
   });
 
   // NF ENTRIES API
-  app.get('/api/nf-entries', async (req, res) => {
+  app.get('/api/nf-entries', requireAuth, async (req, res) => {
     try {
       const entries = await getAllNFEntries();
       res.json(entries);
@@ -89,7 +111,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/nf-entries', async (req, res) => {
+  app.post('/api/nf-entries', requireAuth, async (req, res) => {
     try {
       const nfData = req.body;
       const saved = await insertNFEntry(nfData);
@@ -101,7 +123,7 @@ async function startServer() {
   });
 
   // SALES API
-  app.get('/api/sales', async (req, res) => {
+  app.get('/api/sales', requireAuth, async (req, res) => {
     try {
       const sales = await getAllSales();
       res.json(sales);
@@ -111,7 +133,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/sales', async (req, res) => {
+  app.post('/api/sales', requireAuth, async (req, res) => {
     try {
       const saleData = req.body;
       const saved = await insertSale(saleData);

@@ -16,6 +16,7 @@ export async function getOrCreateUser(uid: string, email: string, name?: string,
         set: {
           email,
           ...(name ? { name } : {}),
+          ...(role ? { role } : {}),
         },
       })
       .returning();

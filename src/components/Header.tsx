@@ -263,16 +263,10 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
             
-            {currentUser?.role === 'super_admin' && onSwitchToSaaSMaster && (
-              <button
-                onClick={onSwitchToSaaSMaster}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-900 to-indigo-900 text-purple-200 border border-purple-700/80 text-xs font-bold shadow-md hover:from-purple-800 hover:to-indigo-800 transition-all cursor-pointer"
-                title="Voltar ao Painel SaaS Master"
-              >
-                <span>👑</span>
-                <span className="hidden sm:inline">Painel Master</span>
-              </button>
-            )}
+            {/* 
+              Painel SaaS Master desativado para a fase Single-Tenant "Fini Nova Friburgo".
+              Ficará disponível em fase futura com suporte a multi-empresa no banco de dados.
+            */}
 
             {onOpenSaleModal && checkPermission('canRegisterMovements') && (
               <button

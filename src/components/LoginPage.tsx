@@ -13,6 +13,7 @@ import { UserProfile, Tenant } from '../types';
 import { useStock } from '../context/StockContext';
 import { auth } from '../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
+import { syncUserWithPostgres } from '../utils/apiAuth';
 
 interface LoginPageProps {
   isOpen?: boolean;
@@ -202,7 +203,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     // Attempt Firebase Email Auth fallback
     try {
       if (targetUser.email) {
-        await signInWithEmailAndPassword(auth, targetUser.email, passText);
+        const userCred = await signInWithEmailAndPassword(auth, targetUser.email, passText);
+        if (userCred.user) {
+          syncUserWithPostgres(
+            {
+              uid: userCred.user.uid,
+              email: userCred.user.email,
+              displayName: targetUser.name || userCred.user.displayName,
+            },
+            targetUser.role
+          ).catch((e) => console.error('Erro na sincronização do login:', e));
+        }
         loginWithPin(targetUser.id, targetUser.pin);
         setSuccessMessage(`Bem-vindo(a), ${targetUser.name}!`);
         setIsLoading(false);

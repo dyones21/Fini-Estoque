@@ -8,6 +8,13 @@ import {
   doublePrecision,
 } from 'drizzle-orm/pg-core';
 
+/**
+ * ARCHITECTURAL NOTE - MULTI-TENANT ROADMAP:
+ * O sistema opera atualmente em arquitetura Single-Tenant dedicada exclusivamente para "Fini Nova Friburgo".
+ * A modelagem multi-empresa real (com adição de coluna 'tenant_id' nas tabelas products, stock_movements,
+ * nf_entries, sales e users, além do isolamento por tenant no banco) fica reservada para uma fase futura de expansão SaaS.
+ */
+
 // Users Table (Firebase Auth sync)
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),

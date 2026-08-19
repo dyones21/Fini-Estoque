@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-fini-v1';
+const CACHE_NAME = 'erp-fini-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

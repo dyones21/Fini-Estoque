@@ -1,3 +1,9 @@
+/**
+ * NOTA ARQUITETURAL - EXPANSÃO SAAS MULTI-TENANT:
+ * Este componente (SaaSManagementModal) está preservado para a fase futura de expansão SaaS.
+ * Na fase atual, o ERP opera como Single-Tenant ("Fini Nova Friburgo").
+ */
+
 import React, { useState } from 'react';
 import {
   Building2,

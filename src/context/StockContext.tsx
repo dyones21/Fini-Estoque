@@ -22,10 +22,11 @@ import {
 import { INITIAL_TENANTS } from '../data/initialTenants';
 import { getStarterProductsForTenant } from '../utils/tenantUtils';
 import { isLowStock, getDaysToExpiration } from '../utils/inventoryUtils';
-import { db } from '../lib/firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { getRolePermissions } from '../utils/permissionUtils';
 import { notifyLowStock, notifyNewNFEntry } from '../utils/notificationService';
+import { authFetch, syncUserWithPostgres } from '../utils/apiAuth';
 
 interface StockContextType {
   // State
@@ -187,14 +188,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
     setCurrentTenantId(newId);
 
-    if (db) {
-      try {
-        await setDoc(doc(db, 'tenants', created.id), created);
-      } catch (e) {
-        console.error('Error adding tenant to Firestore:', e);
-      }
-    }
-
     return created;
   };
 
@@ -208,14 +201,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
       return updated;
     });
-
-    if (db) {
-      try {
-        await setDoc(doc(db, 'tenants', updatedTenant.id), updatedTenant, { merge: true });
-      } catch (e) {
-        console.error('Error updating tenant in Firestore:', e);
-      }
-    }
   };
 
   const deleteTenant = async (tenantId: string) => {
@@ -230,14 +215,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
     if (currentTenantId === tenantId) {
       setCurrentTenantId(INITIAL_TENANTS[0].id);
-    }
-
-    if (db) {
-      try {
-        await deleteDoc(doc(db, 'tenants', tenantId));
-      } catch (e) {
-        console.error('Error deleting tenant from Firestore:', e);
-      }
     }
   };
 
@@ -389,228 +366,36 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [allUsers]);
 
-  // Firestore real-time listener for users collection
+  // Firebase Auth state listener - Auto-sync with Postgres users table via getOrCreateUser
   useEffect(() => {
-    if (!db) return;
-    try {
-      const usersRef = collection(db, 'users');
-      const unsubscribe = onSnapshot(
-        usersRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const firestoreUsers: UserProfile[] = [];
-            snapshot.forEach((docSnap) => {
-              const data = docSnap.data() as UserProfile;
-              if (data && data.id) {
-                const formattedUser: UserProfile = {
-                  ...data,
-                  permissions: data.permissions || getRolePermissions(data.role),
-                };
-                firestoreUsers.push(formattedUser);
-              }
-            });
-            if (firestoreUsers.length > 0) {
-              setAllUsers(firestoreUsers);
-              try {
-                localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(firestoreUsers));
-              } catch (e) {
-                console.error('Error saving Firestore users to localStorage:', e);
-              }
-            }
-          } else {
-            // Seed initial users into Firestore if collection is empty
-            INITIAL_USERS.forEach((u) => {
-              const userWithPerms = {
-                ...u,
-                permissions: u.permissions || getRolePermissions(u.role),
-              };
-              setDoc(doc(db, 'users', u.id), userWithPerms).catch((err) =>
-                console.error('Error seeding initial user to Firestore:', err)
-              );
-            });
-          }
-        },
-        (error) => {
-          console.error('Firestore users onSnapshot error:', error);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Look up user in allUsers to get configured role if available
+        const localUser = allUsers.find(
+          (u) =>
+            u.email?.toLowerCase() === firebaseUser.email?.toLowerCase() ||
+            u.id === firebaseUser.uid
+        );
+        const role = localUser?.role || (firebaseUser.email?.toLowerCase().includes('dyones') ? 'super_admin' : 'Operador Depósito/Loja');
+        const name = localUser?.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário Fini';
+
+        try {
+          await syncUserWithPostgres(
+            {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              displayName: name,
+            },
+            role
+          );
+        } catch (error) {
+          console.error('Erro na sincronização automática do usuário no Postgres:', error);
         }
-      );
-      return () => unsubscribe();
-    } catch (e) {
-      console.error('Failed to subscribe to Firestore users:', e);
-    }
-  }, []);
+      }
+    });
 
-  // Firestore real-time listener for tenants collection
-  useEffect(() => {
-    if (!db) return;
-    try {
-      const tenantsRef = collection(db, 'tenants');
-      const unsubscribe = onSnapshot(
-        tenantsRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const list: Tenant[] = [];
-            snapshot.forEach((docSnap) => {
-              const data = docSnap.data() as Tenant;
-              if (data && data.id) list.push(data);
-            });
-            if (list.length > 0) {
-              setTenants(list);
-              try {
-                localStorage.setItem(TENANTS_STORAGE_KEY, JSON.stringify(list));
-              } catch (e) {
-                console.error('Error saving Firestore tenants to localStorage:', e);
-              }
-            }
-          } else {
-            INITIAL_TENANTS.forEach((t) => {
-              setDoc(doc(db, 'tenants', t.id), t).catch((err) =>
-                console.error('Error seeding initial tenant to Firestore:', err)
-              );
-            });
-          }
-        },
-        (err) => console.error('Firestore tenants onSnapshot error:', err)
-      );
-      return () => unsubscribe();
-    } catch (e) {
-      console.error('Failed to subscribe to Firestore tenants:', e);
-    }
-  }, []);
-
-  // Firestore real-time listener for products collection
-  useEffect(() => {
-    if (!db) return;
-    try {
-      const productsRef = collection(db, 'products');
-      const unsubscribe = onSnapshot(
-        productsRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const list: Product[] = [];
-            snapshot.forEach((docSnap) => {
-              const data = docSnap.data() as Product;
-              if (data && data.id) list.push(data);
-            });
-            if (list.length > 0) {
-              setAllProducts(list);
-              setCloudInfo((prev) => ({
-                ...prev,
-                status: 'synced',
-                lastSyncTime: new Date().toISOString(),
-                totalRecords: list.length,
-              }));
-            }
-          } else {
-            INITIAL_PRODUCTS.forEach((p) => {
-              const pTagged = { ...p, tenantId: p.tenantId || 'tenant-friburgo' };
-              setDoc(doc(db, 'products', p.id), pTagged).catch((err) =>
-                console.error('Error seeding initial product to Firestore:', err)
-              );
-            });
-          }
-        },
-        (err) => console.error('Firestore products onSnapshot error:', err)
-      );
-      return () => unsubscribe();
-    } catch (e) {
-      console.error('Failed to subscribe to Firestore products:', e);
-    }
-  }, []);
-
-  // Firestore real-time listener for movements collection
-  useEffect(() => {
-    if (!db) return;
-    try {
-      const movementsRef = collection(db, 'movements');
-      const unsubscribe = onSnapshot(
-        movementsRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const list: StockMovement[] = [];
-            snapshot.forEach((docSnap) => {
-              const data = docSnap.data() as StockMovement;
-              if (data && data.id) list.push(data);
-            });
-            list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-            setAllMovements(list);
-          } else {
-            INITIAL_MOVEMENTS.forEach((m) => {
-              setDoc(doc(db, 'movements', m.id), m).catch((err) =>
-                console.error('Error seeding initial movement to Firestore:', err)
-              );
-            });
-          }
-        },
-        (err) => console.error('Firestore movements onSnapshot error:', err)
-      );
-      return () => unsubscribe();
-    } catch (e) {
-      console.error('Failed to subscribe to Firestore movements:', e);
-    }
-  }, []);
-
-  // Firestore real-time listener for nfEntries collection
-  useEffect(() => {
-    if (!db) return;
-    try {
-      const nfRef = collection(db, 'nfEntries');
-      const unsubscribe = onSnapshot(
-        nfRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const list: NFEntry[] = [];
-            snapshot.forEach((docSnap) => {
-              const data = docSnap.data() as NFEntry;
-              if (data && data.id) list.push(data);
-            });
-            setAllNfEntries(list);
-          } else {
-            INITIAL_NF_ENTRIES.forEach((nf) => {
-              setDoc(doc(db, 'nfEntries', nf.id), nf).catch((err) =>
-                console.error('Error seeding initial NF to Firestore:', err)
-              );
-            });
-          }
-        },
-        (err) => console.error('Firestore nfEntries onSnapshot error:', err)
-      );
-      return () => unsubscribe();
-    } catch (e) {
-      console.error('Failed to subscribe to Firestore nfEntries:', e);
-    }
-  }, []);
-
-  // Firestore real-time listener for transfers collection
-  useEffect(() => {
-    if (!db) return;
-    try {
-      const transfersRef = collection(db, 'transfers');
-      const unsubscribe = onSnapshot(
-        transfersRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const list: StockTransfer[] = [];
-            snapshot.forEach((docSnap) => {
-              const data = docSnap.data() as StockTransfer;
-              if (data && data.id) list.push(data);
-            });
-            setAllTransfers(list);
-          } else {
-            INITIAL_TRANSFERS.forEach((tr) => {
-              setDoc(doc(db, 'transfers', tr.id), tr).catch((err) =>
-                console.error('Error seeding initial transfer to Firestore:', err)
-              );
-            });
-          }
-        },
-        (err) => console.error('Firestore transfers onSnapshot error:', err)
-      );
-      return () => unsubscribe();
-    } catch (e) {
-      console.error('Failed to subscribe to Firestore transfers:', e);
-    }
-  }, []);
+    return () => unsubscribe();
+  }, [allUsers]);
 
   // Auth Functions
   const loginWithPin = (userId: string, pin: string): boolean => {
@@ -659,14 +444,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return next;
     });
     setCurrentUser((prev) => (prev && prev.id === userToSave.id ? userToSave : prev));
-
-    if (db) {
-      try {
-        await setDoc(doc(db, 'users', userToSave.id), userToSave, { merge: true });
-      } catch (e) {
-        console.error('Error updating user in Firestore:', e);
-      }
-    }
   };
 
   const addUser = async (newUser: UserProfile) => {
@@ -687,14 +464,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
       return next;
     });
-
-    if (db) {
-      try {
-        await setDoc(doc(db, 'users', userWithTenant.id), userWithTenant);
-      } catch (e) {
-        console.error('Error adding user to Firestore:', e);
-      }
-    }
   };
 
   const deleteUser = async (userId: string) => {
@@ -722,14 +491,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
       return prev;
     });
-
-    if (db) {
-      try {
-        await deleteDoc(doc(db, 'users', userId));
-      } catch (e) {
-        console.error('Error deleting user from Firestore:', e);
-      }
-    }
   };
 
   const checkPermission = (permissionKey: keyof UserPermissions): boolean => {
@@ -745,9 +506,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
 
       const [resProd, resMov, resNF] = await Promise.all([
-        fetch('/api/products').then((r) => r.json()).catch(() => []),
-        fetch('/api/movements').then((r) => r.json()).catch(() => []),
-        fetch('/api/nf-entries').then((r) => r.json()).catch(() => []),
+        authFetch('/api/products').then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        authFetch('/api/movements').then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        authFetch('/api/nf-entries').then((r) => (r.ok ? r.json() : [])).catch(() => []),
       ]);
 
       let loadedProducts: Product[] = Array.isArray(resProd) ? resProd : [];
@@ -763,7 +524,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (loadedProducts.length === 0) {
         for (const p of INITIAL_PRODUCTS) {
           const pTagged = { ...p, tenantId: 'tenant-friburgo' };
-          await fetch('/api/products', {
+          await authFetch('/api/products', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(pTagged),
@@ -943,16 +704,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     setAllProducts((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
 
-    if (db) {
-      try {
-        await setDoc(doc(db, 'products', created.id), created);
-      } catch (e) {
-        console.error('Erro ao salvar produto no Firestore:', e);
-      }
-    }
-
     try {
-      await fetch('/api/products', {
+      await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(created),
@@ -985,16 +738,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return [newProd, ...prev];
     });
 
-    if (db) {
-      try {
-        await setDoc(doc(db, 'products', newProd.id), newProd, { merge: true });
-      } catch (e) {
-        console.error('Erro ao atualizar produto no Firestore:', e);
-      }
-    }
-
     try {
-      await fetch('/api/products', {
+      await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProd),
@@ -1014,16 +759,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     setAllProducts((prev) => prev.filter((p) => p.id !== id));
 
-    if (db) {
-      try {
-        await deleteDoc(doc(db, 'products', id));
-      } catch (e) {
-        console.error('Erro ao deletar produto do Firestore:', e);
-      }
-    }
-
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      await authFetch(`/api/products/${id}`, { method: 'DELETE' });
     } catch (e) {
       console.error('Erro ao deletar produto do Cloud SQL:', e);
     }
@@ -1144,31 +881,16 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       newNF.totalValue
     );
 
-    // Sync to Firestore real-time DB
-    if (db) {
-      try {
-        await setDoc(doc(db, 'nfEntries', newNF.id), newNF);
-        for (const p of finalUpdatedProds) {
-          await setDoc(doc(db, 'products', p.id), p, { merge: true });
-        }
-        for (const m of newMovements) {
-          await setDoc(doc(db, 'movements', m.id), m);
-        }
-      } catch (e) {
-        console.error('Erro ao salvar NF no Firestore:', e);
-      }
-    }
-
     // Sync to Cloud SQL
     try {
-      await fetch('/api/nf-entries', {
+      await authFetch('/api/nf-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newNF),
       });
 
       for (const p of finalUpdatedProds) {
-        await fetch('/api/products', {
+        await authFetch('/api/products', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(p),
@@ -1176,7 +898,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
 
       for (const m of newMovements) {
-        await fetch('/api/movements', {
+        await authFetch('/api/movements', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(m),
@@ -1252,26 +974,15 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     setAllMovements((prev) => [newMovement, ...prev]);
 
-    // Sync to Firestore real-time DB
-    if (db) {
-      try {
-        await setDoc(doc(db, 'products', updatedProd.id), updatedProd, { merge: true });
-        await setDoc(doc(db, 'transfers', newTransfer.id), newTransfer);
-        await setDoc(doc(db, 'movements', newMovement.id), newMovement);
-      } catch (e) {
-        console.error('Erro ao salvar transferência no Firestore:', e);
-      }
-    }
-
     // Persist changes to Cloud SQL
     try {
-      await fetch('/api/products', {
+      await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedProd),
       });
 
-      await fetch('/api/movements', {
+      await authFetch('/api/movements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newMovement),
@@ -1355,31 +1066,21 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     setAllMovements((prev) => [newMov, ...prev]);
 
-    // Sync to Firestore real-time DB
-    if (db) {
-      try {
-        await setDoc(doc(db, 'products', updatedProd.id), updatedProd, { merge: true });
-        await setDoc(doc(db, 'movements', newMov.id), newMov);
-      } catch (e) {
-        console.error('Erro ao salvar movimentação no Firestore:', e);
-      }
-    }
-
     try {
-      await fetch('/api/products', {
+      await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedProd),
       });
 
-      await fetch('/api/movements', {
+      await authFetch('/api/movements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newMov),
       });
 
       if (type === 'venda_loja') {
-        await fetch('/api/sales', {
+        await authFetch('/api/sales', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
