@@ -1,7 +1,13 @@
 import { UserPermissions, UserRole } from '../types';
 
-export function getRolePermissions(role: UserRole): UserPermissions {
-  switch (role) {
+/**
+ * Normaliza e calcula a matriz de permissões de acordo com o papel (role) do usuário.
+ * Compartilhado estritamente entre Frontend e Backend Express para integridade de segurança.
+ */
+export function getRolePermissions(role?: string | UserRole | null): UserPermissions {
+  const normalizedRole = (role || '').trim().toLowerCase();
+
+  switch (normalizedRole) {
     case 'super_admin':
     case 'admin':
       return {
@@ -14,7 +20,10 @@ export function getRolePermissions(role: UserRole): UserPermissions {
         canManageUsers: true,
         canManageBackup: true,
       };
+
     case 'gerente_loja':
+    case 'gerente geral':
+    case 'gerente':
       return {
         canViewDashboard: true,
         canViewStock: true,
@@ -25,7 +34,11 @@ export function getRolePermissions(role: UserRole): UserPermissions {
         canManageUsers: false,
         canManageBackup: true,
       };
+
     case 'operador_deposito':
+    case 'operador depósito/loja':
+    case 'operador deposito/loja':
+    case 'operador':
       return {
         canViewDashboard: true,
         canViewStock: true,
@@ -36,6 +49,7 @@ export function getRolePermissions(role: UserRole): UserPermissions {
         canManageUsers: false,
         canManageBackup: false,
       };
+
     case 'caixa':
       return {
         canViewDashboard: true,
@@ -47,6 +61,7 @@ export function getRolePermissions(role: UserRole): UserPermissions {
         canManageUsers: false,
         canManageBackup: false,
       };
+
     case 'auditor':
       return {
         canViewDashboard: true,
@@ -58,6 +73,7 @@ export function getRolePermissions(role: UserRole): UserPermissions {
         canManageUsers: false,
         canManageBackup: false,
       };
+
     default:
       return {
         canViewDashboard: true,

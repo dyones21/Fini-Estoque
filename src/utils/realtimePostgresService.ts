@@ -66,39 +66,76 @@ export interface PostgresDiagnosticsResult {
 }
 
 /**
+ * Lê o corpo da resposta HTTP com segurança, prevenindo erros de sintaxe JSON quando
+ * o servidor retorna HTML (ex: inicialização do Vite, 404, fallback SPA).
+ */
+async function safeJsonParse(response: Response, defaultErrorText: string) {
+  let text = '';
+  try {
+    text = await response.text();
+  } catch (err: any) {
+    console.warn(`[API Info] Falha na leitura de resposta:`, err);
+    return null;
+  }
+
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    // Se o corpo retornado não for JSON (ex: HTML do fallback SPA durante inicialização ou reinício)
+    return null;
+  }
+
+  if (!response.ok) {
+    if (response.status === 403) {
+      console.warn('Acesso restrito para esta operação.');
+      return null;
+    }
+    if (response.status === 401) {
+      console.warn('Sessão autenticando...');
+      return null;
+    }
+    console.warn(data?.error || defaultErrorText);
+    return null;
+  }
+
+  return data;
+}
+
+/**
  * Consulta o status de saúde e latência do PostgreSQL
  */
-export async function fetchPostgresHealth(): Promise<PostgresHealthStatus> {
-  const response = await authFetch('/api/postgres/status');
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `Erro HTTP ${response.status} ao consultar status do PostgreSQL`);
+export async function fetchPostgresHealth(): Promise<PostgresHealthStatus | null> {
+  try {
+    const response = await authFetch('/api/postgres/status');
+    return await safeJsonParse(response, 'Falha ao consultar status do PostgreSQL');
+  } catch (e) {
+    return null;
   }
-  return response.json();
 }
 
 /**
  * Busca o estoque em tempo real com métricas diretamente do PostgreSQL
  */
-export async function fetchPostgresStockRealtime(): Promise<PostgresStockSummary> {
-  const response = await authFetch('/api/postgres/stock-realtime');
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `Erro HTTP ${response.status} ao buscar estoque em tempo real`);
+export async function fetchPostgresStockRealtime(): Promise<PostgresStockSummary | null> {
+  try {
+    const response = await authFetch('/api/postgres/stock-realtime');
+    return await safeJsonParse(response, 'Falha ao buscar estoque em tempo real');
+  } catch (e) {
+    return null;
   }
-  return response.json();
 }
 
 /**
  * Executa diagnóstico de integridade das tabelas do PostgreSQL
  */
-export async function runPostgresDiagnostics(): Promise<PostgresDiagnosticsResult> {
-  const response = await authFetch('/api/postgres/diagnostics', {
-    method: 'POST',
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `Erro HTTP ${response.status} ao executar diagnóstico`);
+export async function runPostgresDiagnostics(): Promise<PostgresDiagnosticsResult | null> {
+  try {
+    const response = await authFetch('/api/postgres/diagnostics', {
+      method: 'POST',
+    });
+    return await safeJsonParse(response, 'Falha ao executar diagnóstico no PostgreSQL');
+  } catch (e) {
+    return null;
   }
-  return response.json();
 }

@@ -2,11 +2,21 @@ import { db } from './index.ts';
 import { users } from './schema.ts';
 import { eq, or } from 'drizzle-orm';
 
+let hasLoggedSuperAdminWarning = false;
+
 /**
  * Retorna a lista de e-mails configurados como super administradores do sistema.
+ * Se SUPER_ADMIN_EMAILS não estiver configurada, retorna lista vazia e loga um aviso no console.
  */
 export function getSuperAdminEmails(): string[] {
-  const envEmails = process.env.SUPER_ADMIN_EMAILS || 'dyones21@gmail.com';
+  const envEmails = process.env.SUPER_ADMIN_EMAILS;
+  if (!envEmails || !envEmails.trim()) {
+    if (!hasLoggedSuperAdminWarning) {
+      console.warn('⚠️ [Segurança] Nenhuma variável SUPER_ADMIN_EMAILS configurada no ambiente. Nenhum usuário receberá o papel super_admin automaticamente.');
+      hasLoggedSuperAdminWarning = true;
+    }
+    return [];
+  }
   return envEmails
     .split(',')
     .map((e) => e.trim().toLowerCase())

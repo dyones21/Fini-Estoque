@@ -16,6 +16,7 @@ import {
 import { getPostgresHealth, getPostgresConnectionInfo, pool } from './src/db/index.ts';
 import { getOrCreateUser, updateUserRoleInDb, getAllUsersFromDb } from './src/db/users.ts';
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
+import { requirePermission } from './src/middleware/requirePermission.ts';
 
 async function startServer() {
   const app = express();
@@ -49,8 +50,8 @@ async function startServer() {
     }
   });
 
-  // LIST USERS API (Postgres Users Table)
-  app.get('/api/users', requireAuth, async (req, res) => {
+  // LIST USERS API (Postgres Users Table) - Exige permissão canManageUsers
+  app.get('/api/users', requireAuth, requirePermission('canManageUsers'), async (req, res) => {
     try {
       const allUsers = await getAllUsersFromDb();
       res.json(allUsers);
@@ -60,8 +61,8 @@ async function startServer() {
     }
   });
 
-  // UPDATE USER ROLE API (Apenas super_admin pode alterar roles de outros usuários)
-  app.patch('/api/users/:uid/role', requireAuth, async (req: AuthRequest, res) => {
+  // UPDATE USER ROLE API - Exige permissão canManageUsers e validação interna de super_admin
+  app.patch('/api/users/:uid/role', requireAuth, requirePermission('canManageUsers'), async (req: AuthRequest, res) => {
     try {
       const requesterUid = req.user?.uid;
       const targetUid = req.params.uid;
@@ -88,6 +89,7 @@ async function startServer() {
   });
 
   // PRODUCTS API
+  // Leitura: Permitida para qualquer usuário autenticado (canViewStock/canViewDashboard)
   app.get('/api/products', requireAuth, async (req, res) => {
     try {
       const items = await getAllProducts();
@@ -98,7 +100,8 @@ async function startServer() {
     }
   });
 
-  app.post('/api/products', requireAuth, async (req, res) => {
+  // Criação/Edição de Produtos: Exige canManageProducts
+  app.post('/api/products', requireAuth, requirePermission('canManageProducts'), async (req, res) => {
     try {
       const productData = req.body;
       const saved = await saveProduct(productData);
@@ -109,7 +112,8 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/products/:id', requireAuth, async (req, res) => {
+  // Exclusão de Produtos: Exige canManageProducts
+  app.delete('/api/products/:id', requireAuth, requirePermission('canManageProducts'), async (req, res) => {
     try {
       await deleteProductById(req.params.id);
       res.json({ success: true });
@@ -120,6 +124,7 @@ async function startServer() {
   });
 
   // STOCK MOVEMENTS API
+  // Leitura: Permitida para qualquer usuário autenticado
   app.get('/api/movements', requireAuth, async (req, res) => {
     try {
       const items = await getAllMovements();
@@ -130,18 +135,33 @@ async function startServer() {
     }
   });
 
-  app.post('/api/movements', requireAuth, async (req, res) => {
-    try {
-      const movementData = req.body;
-      const saved = await insertMovement(movementData);
-      res.json(saved);
-    } catch (error: any) {
-      console.error('API Error POST /api/movements:', error);
-      res.status(500).json({ error: error.message || 'Erro ao registrar movimentação no Cloud SQL' });
+  // Registro de Movimentações:
+  // Se for transferência depósito -> loja, exige canTransferStock.
+  // Outras movimentações (venda, perda, ajuste), exige canRegisterMovements.
+  app.post(
+    '/api/movements',
+    requireAuth,
+    requirePermission((perms, req) => {
+      const movType = req.body?.type;
+      if (movType === 'transferencia_deposito_loja') {
+        return perms.canTransferStock;
+      }
+      return perms.canRegisterMovements;
+    }),
+    async (req, res) => {
+      try {
+        const movementData = req.body;
+        const saved = await insertMovement(movementData);
+        res.json(saved);
+      } catch (error: any) {
+        console.error('API Error POST /api/movements:', error);
+        res.status(500).json({ error: error.message || 'Erro ao registrar movimentação no Cloud SQL' });
+      }
     }
-  });
+  );
 
   // NF ENTRIES API
+  // Leitura: Permitida para qualquer usuário autenticado
   app.get('/api/nf-entries', requireAuth, async (req, res) => {
     try {
       const entries = await getAllNFEntries();
@@ -152,7 +172,8 @@ async function startServer() {
     }
   });
 
-  app.post('/api/nf-entries', requireAuth, async (req, res) => {
+  // Entrada por Nota Fiscal: Exige canAddNFEntries
+  app.post('/api/nf-entries', requireAuth, requirePermission('canAddNFEntries'), async (req, res) => {
     try {
       const nfData = req.body;
       const saved = await insertNFEntry(nfData);
@@ -164,6 +185,7 @@ async function startServer() {
   });
 
   // SALES API
+  // Leitura: Permitida para qualquer usuário autenticado
   app.get('/api/sales', requireAuth, async (req, res) => {
     try {
       const sales = await getAllSales();
@@ -174,7 +196,8 @@ async function startServer() {
     }
   });
 
-  app.post('/api/sales', requireAuth, async (req, res) => {
+  // Registro de Vendas: Exige canRegisterMovements
+  app.post('/api/sales', requireAuth, requirePermission('canRegisterMovements'), async (req, res) => {
     try {
       const saleData = req.body;
       const saved = await insertSale(saleData);
@@ -186,7 +209,7 @@ async function startServer() {
   });
 
   // POSTGRESQL REALTIME INTEGRATION API
-  // Status de saúde, latência e estatísticas de conexão do PostgreSQL
+  // Status de saúde do PostgreSQL
   app.get('/api/postgres/status', requireAuth, async (req, res) => {
     try {
       const health = await getPostgresHealth();
@@ -197,7 +220,7 @@ async function startServer() {
     }
   });
 
-  // Busca automática de estoque em tempo real com métricas agregadas
+  // Monitoramento de estoque em tempo real
   app.get('/api/postgres/stock-realtime', requireAuth, async (req, res) => {
     try {
       const summary = await getRealtimeStockSummary();
@@ -208,8 +231,8 @@ async function startServer() {
     }
   });
 
-  // Diagnóstico e teste de integridade SQL
-  app.post('/api/postgres/diagnostics', requireAuth, async (req, res) => {
+  // Diagnóstico e teste de integridade SQL: Exige canManageBackup
+  app.post('/api/postgres/diagnostics', requireAuth, requirePermission('canManageBackup'), async (req, res) => {
     const start = performance.now();
     try {
       const client = await pool.connect();
@@ -245,6 +268,22 @@ async function startServer() {
     }
   });
 
+  // 404 handler for unmatched /api routes so they NEVER fall through to Vite SPA index.html
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `Endpoint da API não encontrado: ${req.method} ${req.originalUrl}` });
+  });
+
+  // Global Error Handler for API routes
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.originalUrl && req.originalUrl.startsWith('/api')) {
+      console.error('Express Uncaught API Error:', err);
+      return res.status(err.status || err.statusCode || 500).json({
+        error: err.message || 'Erro interno no servidor',
+      });
+    }
+    next(err);
+  });
+
   // Vite middleware for development vs static serve for production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -253,7 +292,7 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -261,7 +300,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Fini Nova Friburgo Cloud SQL server running on http://localhost:${PORT}`);
+    console.log(`🚀 ERP Server rodando em http://localhost:${PORT}`);
   });
 }
 

@@ -4,8 +4,8 @@ export const INITIAL_USERS: UserProfile[] = [
   // Super Admin Master SaaS Owner
   {
     id: 'u0',
-    name: 'Dyones (Proprietário SaaS)',
-    email: 'dyones21@gmail.com',
+    name: 'Super Admin Master',
+    email: 'superadmin@fini-erp.local',
     role: 'super_admin',
     pin: '2101',
     active: true,

@@ -816,6 +816,25 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (found) setCurrentUser(found);
   };
 
+  // Helper de notificação amigável para acessos bloqueados por falta de permissão (HTTP 403)
+  const handle403PermissionDenied = (actionName?: string) => {
+    const errorText = 'Você não tem permissão para esta ação.';
+    console.warn(`[Segurança 403] Bloqueio de autorização no servidor: ${actionName || 'Ação restrita'}`);
+
+    setNotifications((prev) => [
+      {
+        id: `perm-error-${Date.now()}`,
+        title: 'Acesso Restrito (Permissão 403)',
+        message: actionName ? `${errorText} (${actionName})` : errorText,
+        type: 'system',
+        severity: 'high',
+        timestamp: new Date().toISOString(),
+        read: false,
+      },
+      ...prev,
+    ]);
+  };
+
   // Add Product with Firestore real-time sync & Cloud SQL fallback
   const addProduct = async (
     newP: Partial<Product> & Omit<Product, 'lastUpdated' | 'totalSalesQuantity' | 'totalSalesValue'> & { id?: string }
@@ -849,13 +868,21 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setAllProducts((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
 
     try {
-      await authFetch('/api/products', {
+      const response = await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(created),
       });
-    } catch (e) {
-      console.error('Erro ao salvar produto no Cloud SQL:', e);
+
+      if (response.status === 403) {
+        handle403PermissionDenied('cadastrar produto');
+        setAllProducts((prev) => prev.filter((p) => p.id !== created.id));
+        throw new Error('Você não tem permissão para esta ação.');
+      }
+    } catch (e: any) {
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao salvar produto no Cloud SQL:', e);
+      }
     }
 
     return created;
@@ -867,6 +894,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const targetProduct = products.find((p) => p.id === id) || allProducts.find((p) => p.id === id);
     if (!targetProduct) return;
 
+    const previousProduct = { ...targetProduct };
     const newProd = {
       ...targetProduct,
       ...updated,
@@ -883,13 +911,21 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
 
     try {
-      await authFetch('/api/products', {
+      const response = await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProd),
       });
-    } catch (e) {
-      console.error('Erro ao atualizar produto no Cloud SQL:', e);
+
+      if (response.status === 403) {
+        handle403PermissionDenied('editar produto');
+        setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct : p)));
+        throw new Error('Você não tem permissão para esta ação.');
+      }
+    } catch (e: any) {
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao atualizar produto no Cloud SQL:', e);
+      }
     }
   };
 
@@ -901,12 +937,21 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return;
     }
 
+    const previousProducts = [...allProducts];
     setAllProducts((prev) => prev.filter((p) => p.id !== id));
 
     try {
-      await authFetch(`/api/products/${id}`, { method: 'DELETE' });
-    } catch (e) {
-      console.error('Erro ao deletar produto do Cloud SQL:', e);
+      const response = await authFetch(`/api/products/${id}`, { method: 'DELETE' });
+
+      if (response.status === 403) {
+        handle403PermissionDenied('excluir produto');
+        setAllProducts(previousProducts);
+        throw new Error('Você não tem permissão para esta ação.');
+      }
+    } catch (e: any) {
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao deletar produto do Cloud SQL:', e);
+      }
     }
   };
 
@@ -1027,11 +1072,18 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     // Sync to Cloud SQL
     try {
-      await authFetch('/api/nf-entries', {
+      const response = await authFetch('/api/nf-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newNF),
       });
+
+      if (response.status === 403) {
+        handle403PermissionDenied('lançar nota fiscal (NF)');
+        // Reverte as alterações locais
+        await fetchCloudSqlData();
+        throw new Error('Você não tem permissão para esta ação.');
+      }
 
       for (const p of finalUpdatedProds) {
         await authFetch('/api/products', {
@@ -1048,8 +1100,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           body: JSON.stringify(m),
         });
       }
-    } catch (e) {
-      console.error('Erro ao salvar NF no Cloud SQL:', e);
+    } catch (e: any) {
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao salvar NF no Cloud SQL:', e);
+      }
     }
   };
 
@@ -1070,6 +1124,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       };
     }
 
+    const previousProducts = [...allProducts];
     const nowISO = new Date().toISOString();
     const updatedProd: Product = {
       ...product,
@@ -1120,18 +1175,29 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     // Persist changes to Cloud SQL
     try {
+      const movRes = await authFetch('/api/movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMovement),
+      });
+
+      if (movRes.status === 403) {
+        handle403PermissionDenied('transferir estoque');
+        setAllProducts(previousProducts);
+        setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
+        setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
+        return {
+          success: false,
+          message: 'Você não tem permissão para esta ação.',
+        };
+      }
+
       await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedProd),
       });
-
-      await authFetch('/api/movements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMovement),
-      });
-    } catch (e) {
+    } catch (e: any) {
       console.error('Erro ao salvar transferência no Cloud SQL:', e);
     }
 
@@ -1154,6 +1220,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const product = products.find((p) => p.id === productId);
     if (!product || quantity <= 0) return;
 
+    const previousProducts = [...allProducts];
     const nowISO = new Date().toISOString();
     const price = unitPrice ?? (type === 'venda_loja' ? product.sellPrice : product.costPrice);
     const totalVal = price * quantity;
@@ -1211,20 +1278,27 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setAllMovements((prev) => [newMov, ...prev]);
 
     try {
+      const movRes = await authFetch('/api/movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMov),
+      });
+
+      if (movRes.status === 403) {
+        handle403PermissionDenied('registrar movimentação');
+        setAllProducts(previousProducts);
+        setAllMovements((prev) => prev.filter((m) => m.id !== newMov.id));
+        return;
+      }
+
       await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedProd),
       });
 
-      await authFetch('/api/movements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMov),
-      });
-
       if (type === 'venda_loja') {
-        await authFetch('/api/sales', {
+        const saleRes = await authFetch('/api/sales', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1240,9 +1314,15 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             timestamp: nowISO,
           }),
         });
+
+        if (saleRes.status === 403) {
+          handle403PermissionDenied('registrar venda');
+        }
       }
-    } catch (e) {
-      console.error('Erro ao salvar movimentação no Cloud SQL:', e);
+    } catch (e: any) {
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao salvar movimentação no Cloud SQL:', e);
+      }
     }
   };
 

@@ -1,10 +1,71 @@
 import { auth } from '../lib/firebase';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+
+let authInitializationPromise: Promise<void> | null = null;
+
+/**
+ * Garante que o Firebase Auth completou a inicialização e que há uma sessão de usuário ativa
+ * com token JWT válido antes de qualquer requisição de API.
+ */
+export async function ensureAuthReady(): Promise<void> {
+  if (auth.currentUser) return;
+
+  if (!authInitializationPromise) {
+    authInitializationPromise = new Promise<void>((resolve) => {
+      // 1. Verifica se authStateReady existe no SDK
+      if (typeof (auth as any).authStateReady === 'function') {
+        (auth as any)
+          .authStateReady()
+          .then(async () => {
+            if (!auth.currentUser) {
+              try {
+                await signInAnonymously(auth);
+              } catch (e) {
+                console.warn('Não foi possível autenticar anonimamente no Firebase:', e);
+              }
+            }
+            resolve();
+          })
+          .catch(async () => {
+            if (!auth.currentUser) {
+              try {
+                await signInAnonymously(auth);
+              } catch (e) {
+                console.warn('Não foi possível autenticar anonimamente no Firebase:', e);
+              }
+            }
+            resolve();
+          });
+      } else {
+        // Fallback para onAuthStateChanged
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+          unsubscribe();
+          if (!user) {
+            try {
+              await signInAnonymously(auth);
+            } catch (e) {
+              console.warn('Não foi possível autenticar anonimamente no Firebase:', e);
+            }
+          }
+          resolve();
+        });
+      }
+    });
+  }
+
+  await authInitializationPromise;
+}
 
 /**
  * Obtém o ID token JWT do usuário atualmente autenticado no Firebase Auth.
+ * Aguarda a resolução da sessão se ainda não estiver pronta.
  */
 export async function getFirebaseAuthToken(): Promise<string | null> {
   try {
+    if (!auth.currentUser) {
+      await ensureAuthReady();
+    }
+
     if (auth.currentUser) {
       return await auth.currentUser.getIdToken();
     }
@@ -19,7 +80,14 @@ export async function getFirebaseAuthToken(): Promise<string | null> {
  * com o token do usuário autenticado no Firebase Auth.
  */
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const token = await getFirebaseAuthToken();
+  let token = await getFirebaseAuthToken();
+
+  // Retry rápido caso o Firebase ainda estivesse assinando o token
+  if (!token) {
+    await new Promise((r) => setTimeout(r, 200));
+    token = await getFirebaseAuthToken();
+  }
+
   const headers = new Headers(init.headers || {});
 
   if (token) {
@@ -82,6 +150,9 @@ export async function updateUserRoleViaApi(targetUid: string, newRole: string) {
   });
 
   if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error('Você não tem permissão para esta ação.');
+    }
     const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido ao alterar cargo' }));
     throw new Error(errorData.error || `Erro HTTP ${response.status} ao alterar cargo`);
   }
