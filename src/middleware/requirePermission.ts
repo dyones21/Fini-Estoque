@@ -13,6 +13,7 @@ export type PermissionCheck =
  * 
  * Regras:
  * - Deve rodar estritamente após o middleware `requireAuth`.
+ * - Bloqueia qualquer tentativa de autenticação anônima (403 Forbidden).
  * - Busca o usuário no PostgreSQL pelo UID do token autenticado.
  * - Se o usuário for recém-autenticado no Firebase Auth e não estiver no Postgres, auto-provisiona.
  * - Calcula a matriz de permissões com `getRolePermissions(user.role)`.
@@ -24,6 +25,14 @@ export function requirePermission(permissionCheck: PermissionCheck) {
       const uid = req.user?.uid;
       if (!uid) {
         return res.status(401).json({ error: 'Não autorizado: Token ou UID ausente' });
+      }
+
+      // Bloqueio rigoroso de autenticação anônima (camada de proteção extra)
+      if ((req.user as any)?.firebase?.sign_in_provider === 'anonymous') {
+        console.warn(`[RBAC 403] Tentativa de acesso bloqueada: Provedor anônimo detectado (UID=${uid})`);
+        return res.status(403).json({
+          error: 'Acesso negado: Autenticação anônima não é permitida.',
+        });
       }
 
       // Buscar usuário persistido no Postgres

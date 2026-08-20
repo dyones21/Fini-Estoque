@@ -1,11 +1,11 @@
 import { auth } from '../lib/firebase';
-import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 
 let authInitializationPromise: Promise<void> | null = null;
 
 /**
- * Garante que o Firebase Auth completou a inicialização e que há uma sessão de usuário ativa
- * com token JWT válido antes de qualquer requisição de API.
+ * Garante que o Firebase Auth completou a inicialização antes de realizar chamadas à API.
+ * Não autentica anonimamente nem cria sessões ocultas para visitantes não logados.
  */
 export async function ensureAuthReady(): Promise<void> {
   if (auth.currentUser) return;
@@ -16,37 +16,12 @@ export async function ensureAuthReady(): Promise<void> {
       if (typeof (auth as any).authStateReady === 'function') {
         (auth as any)
           .authStateReady()
-          .then(async () => {
-            if (!auth.currentUser) {
-              try {
-                await signInAnonymously(auth);
-              } catch (e) {
-                console.warn('Não foi possível autenticar anonimamente no Firebase:', e);
-              }
-            }
-            resolve();
-          })
-          .catch(async () => {
-            if (!auth.currentUser) {
-              try {
-                await signInAnonymously(auth);
-              } catch (e) {
-                console.warn('Não foi possível autenticar anonimamente no Firebase:', e);
-              }
-            }
-            resolve();
-          });
+          .then(() => resolve())
+          .catch(() => resolve());
       } else {
         // Fallback para onAuthStateChanged
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+        const unsubscribe = onAuthStateChanged(auth, () => {
           unsubscribe();
-          if (!user) {
-            try {
-              await signInAnonymously(auth);
-            } catch (e) {
-              console.warn('Não foi possível autenticar anonimamente no Firebase:', e);
-            }
-          }
           resolve();
         });
       }
@@ -58,7 +33,7 @@ export async function ensureAuthReady(): Promise<void> {
 
 /**
  * Obtém o ID token JWT do usuário atualmente autenticado no Firebase Auth.
- * Aguarda a resolução da sessão se ainda não estiver pronta.
+ * Retorna null imediatamente se nenhum usuário estiver autenticado.
  */
 export async function getFirebaseAuthToken(): Promise<string | null> {
   try {
@@ -78,15 +53,10 @@ export async function getFirebaseAuthToken(): Promise<string | null> {
 /**
  * Wrapper de fetch que anexa automaticamente o cabeçalho Authorization: Bearer <token>
  * com o token do usuário autenticado no Firebase Auth.
+ * Se não houver usuário logado, segue sem o header Authorization (o servidor retorna 401 normalmente).
  */
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  let token = await getFirebaseAuthToken();
-
-  // Retry rápido caso o Firebase ainda estivesse assinando o token
-  if (!token) {
-    await new Promise((r) => setTimeout(r, 200));
-    token = await getFirebaseAuthToken();
-  }
+  const token = await getFirebaseAuthToken();
 
   const headers = new Headers(init.headers || {});
 

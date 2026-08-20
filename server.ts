@@ -209,8 +209,8 @@ async function startServer() {
   });
 
   // POSTGRESQL REALTIME INTEGRATION API
-  // Status de saúde do PostgreSQL
-  app.get('/api/postgres/status', requireAuth, async (req, res) => {
+  // Status de saúde do PostgreSQL: Exige canManageBackup
+  app.get('/api/postgres/status', requireAuth, requirePermission('canManageBackup'), async (req, res) => {
     try {
       const health = await getPostgresHealth();
       res.json(health);
@@ -220,8 +220,8 @@ async function startServer() {
     }
   });
 
-  // Monitoramento de estoque em tempo real
-  app.get('/api/postgres/stock-realtime', requireAuth, async (req, res) => {
+  // Monitoramento de estoque em tempo real: Exige canManageBackup
+  app.get('/api/postgres/stock-realtime', requireAuth, requirePermission('canManageBackup'), async (req, res) => {
     try {
       const summary = await getRealtimeStockSummary();
       res.json(summary);
