@@ -167,14 +167,14 @@ export const SaaSMasterScreen: React.FC<SaaSMasterScreenProps> = ({ onSwitchToER
   const [newCompanyState, setNewCompanyState] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
-  const [adminPin, setAdminPin] = useState('1234');
+  const [adminPin, setAdminPin] = useState('');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // New User Form State for Tab 3
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPin, setNewUserPin] = useState('1234');
+  const [newUserPin, setNewUserPin] = useState('');
   const [newUserTenantId, setNewUserTenantId] = useState(tenants[0]?.id || 'all');
   const [newUserRole, setNewUserRole] = useState<UserRole>('admin');
 
@@ -216,7 +216,7 @@ export const SaaSMasterScreen: React.FC<SaaSMasterScreenProps> = ({ onSwitchToER
         name: adminName,
         email: adminEmail,
         role: 'admin',
-        pin: adminPin || '1234',
+        pin: adminPin.trim() || undefined,
         active: true,
         tenantIds: [createdTenant.id],
         avatarUrl: 'emoji:🏢',
@@ -246,7 +246,7 @@ export const SaaSMasterScreen: React.FC<SaaSMasterScreenProps> = ({ onSwitchToER
     setNewCompanyState('');
     setAdminName('');
     setAdminEmail('');
-    setAdminPin('1234');
+    setAdminPin('');
 
     setTimeout(() => {
       setSuccessMsg(null);
@@ -263,7 +263,7 @@ export const SaaSMasterScreen: React.FC<SaaSMasterScreenProps> = ({ onSwitchToER
       name: newUserName,
       email: newUserEmail,
       role: newUserRole,
-      pin: newUserPin || '1234',
+      pin: newUserPin.trim() || undefined,
       active: true,
       tenantIds: [newUserTenantId],
       avatarUrl: 'emoji:👤',
@@ -274,7 +274,7 @@ export const SaaSMasterScreen: React.FC<SaaSMasterScreenProps> = ({ onSwitchToER
     setIsAddingUser(false);
     setNewUserName('');
     setNewUserEmail('');
-    setNewUserPin('1234');
+    setNewUserPin('');
   };
 
   const handleExportDatabase = () => {

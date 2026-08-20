@@ -66,7 +66,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
   const [isAddingUserSaaS, setIsAddingUserSaaS] = useState(false);
   const [saasUserName, setSaasUserName] = useState('');
   const [saasUserEmail, setSaasUserEmail] = useState('');
-  const [saasUserPin, setSaasUserPin] = useState('1234');
+  const [saasUserPin, setSaasUserPin] = useState('');
   const [saasUserRole, setSaasUserRole] = useState<UserRole>('admin');
   const [saasUserTenantId, setSaasUserTenantId] = useState<string>('all');
 
@@ -78,7 +78,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
   const [newCompanyState, setNewCompanyState] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
-  const [adminPin, setAdminPin] = useState('1234');
+  const [adminPin, setAdminPin] = useState('');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -105,7 +105,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
         name: adminName,
         email: adminEmail,
         role: 'admin',
-        pin: adminPin || '1234',
+        pin: adminPin.trim() || undefined,
         active: true,
         tenantIds: [createdTenant.id],
         avatarUrl: 'emoji:🏢',
@@ -126,7 +126,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
     setNewCompanyState('');
     setAdminName('');
     setAdminEmail('');
-    setAdminPin('1234');
+    setAdminPin('');
 
     setTimeout(() => {
       setSuccessMsg(null);
@@ -164,7 +164,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
       name: saasUserName.trim(),
       email: saasUserEmail.trim(),
       role: saasUserRole,
-      pin: saasUserPin || '1234',
+      pin: saasUserPin.trim() || undefined,
       active: true,
       tenantIds: [saasUserTenantId],
       avatarUrl: 'emoji:👤',
@@ -175,7 +175,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
     setIsAddingUserSaaS(false);
     setSaasUserName('');
     setSaasUserEmail('');
-    setSaasUserPin('1234');
+    setSaasUserPin('');
   };
 
   const handleDeleteSaasUser = (userId: string, userName: string) => {

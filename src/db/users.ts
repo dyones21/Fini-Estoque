@@ -172,7 +172,7 @@ export async function saveUserInDb(userData: {
   const cleanName = userData.name?.trim() || cleanEmail.split('@')[0] || 'Usuário Fini';
   const cleanUid = userData.uid?.trim() || `usr-${Date.now()}`;
   const cleanRole = userData.role?.trim() || 'Operador Depósito/Loja';
-  const cleanPin = userData.pin?.trim() || '1234';
+  const cleanPin = userData.pin?.trim() || null;
 
   const existing = await db
     .select()

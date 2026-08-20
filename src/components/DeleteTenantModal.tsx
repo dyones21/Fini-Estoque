@@ -45,9 +45,9 @@ export const DeleteTenantModal: React.FC<DeleteTenantModalProps> = ({
       return;
     }
 
-    const expectedPin = currentUser?.pin || '1234';
-    if (pinInput.trim() !== expectedPin) {
-      setErrorMsg(`PIN de autorização incorreto! Verifique o PIN do usuário ${currentUser?.name || 'administrador'}.`);
+    const expectedPin = (currentUser?.pin || '').trim();
+    if (!expectedPin || pinInput.trim() !== expectedPin) {
+      setErrorMsg(`PIN de autorização incorreto! Verifique o PIN cadastrado para ${currentUser?.name || 'sua conta'}.`);
       return;
     }
 

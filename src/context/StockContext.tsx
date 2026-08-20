@@ -31,8 +31,6 @@ import {
   syncUserWithPostgres,
   saveUserViaApi,
   deleteUserViaApi,
-  obtainUserSession,
-  setSessionToken,
 } from '../utils/apiAuth';
 
 interface StockContextType {
@@ -448,7 +446,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               name: syncedUser.name || name,
               email: syncedUser.email || firebaseUser.email || '',
               role: role,
-              pin: localUser?.pin || '1234',
+              pin: localUser?.pin || '',
               active: true,
               tenantIds: ['tenant-friburgo'],
               avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
@@ -498,7 +496,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Auth Functions
   const loginWithPin = (userId: string, pin: string): boolean => {
     const target = allUsers.find((u) => u.id === userId);
-    if (target && target.pin === pin) {
+    if (target && target.pin && target.pin === pin) {
       setCurrentUser(target);
       setIsAuthenticated(true);
       setIsAuthModalOpen(false);
@@ -507,16 +505,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } catch (e) {
         console.error('Error saving current user:', e);
       }
-
-      // Garante que o token de sessão do backend seja obtido
-      obtainUserSession({
-        id: target.id,
-        email: target.email || `${target.id}@finifriburgo.com.br`,
-        name: target.name,
-        role: target.role,
-        pin: target.pin,
-      }).catch((e) => console.warn('Aviso: Falha ao emitir token de sessão:', e));
-
       return true;
     }
     return false;
@@ -525,7 +513,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const logoutAndLock = () => {
     setIsAuthenticated(false);
     setIsAuthModalOpen(true);
-    setSessionToken(null);
   };
 
   const openSwitchUserModal = () => {
@@ -560,7 +547,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         email: userToSave.email,
         name: userToSave.name,
         role: userToSave.role,
-        pin: userToSave.pin || '1234',
+        pin: userToSave.pin || undefined,
       });
     } catch (e) {
       console.warn('Aviso: Falha ao sincronizar atualização do usuário no Postgres:', e);
@@ -592,7 +579,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         email: userWithTenant.email,
         name: userWithTenant.name,
         role: userWithTenant.role,
-        pin: userWithTenant.pin || '1234',
+        pin: userWithTenant.pin || undefined,
       });
     } catch (e) {
       console.warn('Aviso: Falha ao persistir novo usuário no Postgres:', e);
@@ -697,7 +684,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               name: dbUser.name || 'Usuário Fini',
               email: dbUser.email,
               role: role,
-              pin: dbUser.pin || localMatch?.pin || '1234',
+              pin: dbUser.pin || localMatch?.pin || '',
               active: true,
               tenantIds: ['tenant-friburgo'],
               avatarUrl: localMatch?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),

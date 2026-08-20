@@ -22,7 +22,7 @@ import {
   saveUserInDb,
   deleteUserFromDb,
 } from './src/db/users.ts';
-import { requireAuth, AuthRequest, signSessionToken } from './src/middleware/auth.ts';
+import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { requirePermission } from './src/middleware/requirePermission.ts';
 
 async function startServer() {
@@ -34,101 +34,6 @@ async function startServer() {
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', database: 'Cloud SQL PostgreSQL' });
-  });
-
-  // AUTH SESSION API: Cria/Renova um token de sessão assinado para o usuário ativo do ERP
-  app.post('/api/auth/session', async (req, res) => {
-    try {
-      const { uid, email, name, pin } = req.body || {};
-      const cleanEmail = (email || '').trim().toLowerCase();
-      const cleanUid = (uid || '').trim() || (cleanEmail ? `usr-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : `usr-${Date.now()}`);
-      const cleanName = (name || '').trim() || (cleanEmail ? cleanEmail.split('@')[0] : 'Usuário Fini');
-
-      if (!cleanEmail && !cleanUid) {
-        return res.status(400).json({ error: 'UID ou E-mail é obrigatório para gerar sessão.' });
-      }
-
-      // Sincroniza/busca no Postgres
-      let dbUser = await getOrCreateUser(cleanUid, cleanEmail || `${cleanUid}@finifriburgo.com.br`, cleanName);
-
-      if (pin && (!dbUser.pin || dbUser.pin === '1234')) {
-        await saveUserInDb({
-          uid: dbUser.uid,
-          email: dbUser.email,
-          name: dbUser.name,
-          role: dbUser.role,
-          pin: pin.trim(),
-        });
-      }
-
-      const token = signSessionToken({
-        uid: dbUser.uid,
-        email: dbUser.email,
-        name: dbUser.name,
-        role: dbUser.role,
-      });
-
-      res.json({
-        success: true,
-        token,
-        user: dbUser,
-      });
-    } catch (error: any) {
-      console.error('API Error POST /api/auth/session:', error);
-      res.status(500).json({ error: error.message || 'Erro ao gerar token de sessão.' });
-    }
-  });
-
-  // LOGIN COM PIN API: Valida credenciais e emite token de sessão seguro
-  app.post('/api/auth/login-pin', async (req, res) => {
-    try {
-      const { emailOrId, pin } = req.body || {};
-      if (!emailOrId || !pin) {
-        return res.status(400).json({ error: 'Identificador e PIN são obrigatórios.' });
-      }
-
-      const cleanInput = String(emailOrId).trim().toLowerCase();
-      const inputPin = String(pin).trim();
-
-      const allDbUsers = await getAllUsersFromDb();
-      let matchedUser = allDbUsers.find(
-        (u) =>
-          u.uid.toLowerCase() === cleanInput ||
-          u.email.toLowerCase() === cleanInput ||
-          u.name.toLowerCase() === cleanInput ||
-          String(u.id) === cleanInput
-      );
-
-      // Se o usuário ainda não foi sincronizado para o Postgres, auto-provisiona caso seja admin padrão ou crie registro
-      if (!matchedUser) {
-        matchedUser = await getOrCreateUser(
-          `usr-${Date.now()}`,
-          cleanInput.includes('@') ? cleanInput : `${cleanInput}@finifriburgo.com.br`,
-          cleanInput
-        );
-      }
-
-      const expectedPin = (matchedUser.pin || '1234').trim();
-      if (inputPin !== expectedPin && inputPin !== '1234') {
-        return res.status(401).json({ error: 'PIN de acesso incorreto.' });
-      }
-
-      const token = signSessionToken({
-        uid: matchedUser.uid,
-        email: matchedUser.email,
-        name: matchedUser.name,
-        role: matchedUser.role,
-      });
-
-      res.json({
-        success: true,
-        token,
-        user: matchedUser,
-      });
-    } catch (error: any) {
-      console.error('API Error POST /api/auth/login-pin:', error);
-      res.status(500).json({ error: error.message || 'Erro no login com PIN.' });
-    }
   });
 
   // USER SYNC API (Firebase Auth -> Postgres Users Table)
@@ -422,20 +327,22 @@ async function startServer() {
         return res.status(400).json({ error: 'PIN de administrador é obrigatório para confirmar a exclusão do sistema.' });
       }
 
-      // Validação do PIN com base no PIN cadastrado para o usuário autenticado ou PIN de admin do banco
+      // Validação estrita do PIN com base no PIN cadastrado para o usuário autenticado ou administradores
       const userPin = (dbUser?.pin || '').trim();
       const inputPin = pin.trim();
 
       let isPinValid = false;
       if (userPin && inputPin === userPin) {
         isPinValid = true;
-      } else if (inputPin === '1234') {
-        isPinValid = true;
       } else {
-        // Verificar se coincide com o PIN de algum outro administrador cadastrado
+        // Verificar se coincide estritamente com o PIN configurado de algum outro super_admin / gerente
         const allDbUsers = await getAllUsersFromDb();
         isPinValid = allDbUsers.some(
-          (u) => (u.role === 'super_admin' || u.role === 'admin' || u.role?.toLowerCase().includes('gerente')) && u.pin?.trim() === inputPin
+          (u) =>
+            (u.role === 'super_admin' || u.role === 'admin' || u.role?.toLowerCase().includes('gerente')) &&
+            u.pin &&
+            u.pin.trim() !== '' &&
+            u.pin.trim() === inputPin
         );
       }
 

@@ -28,7 +28,7 @@ export const INITIAL_USERS: UserProfile[] = [
     name: 'Carlos Eduardo (Admin Matriz)',
     email: 'carlos.admin@doceriagroup.com.br',
     role: 'admin',
-    pin: '1234',
+    pin: '9420',
     active: true,
     tenantIds: ['tenant-friburgo', 'tenant-petropolis', 'tenant-niteroi'], // Master Admin access
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',

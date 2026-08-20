@@ -22,7 +22,7 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   name: text('name').default('Usuário Fini'),
   role: text('role').default('Operador Depósito/Loja'),
-  pin: text('pin').default('1234'),
+  pin: text('pin'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
