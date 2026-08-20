@@ -266,20 +266,25 @@ export const UserManagementView: React.FC = () => {
     showNotification(`Usuário "${createdUser.name}" cadastrado com sucesso! PIN de Acesso: ${createdUser.pin}`);
   };
 
-  const handleDeleteUser = (u: UserProfile) => {
+  const handleDeleteUser = async (u: UserProfile) => {
     if (u.id === currentUser.id) {
       alert('Você não pode excluir a sua própria conta de usuário logada.');
       return;
     }
-    if (window.confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?`)) {
-      deleteUser(u.id);
-      showNotification(`Usuário "${u.name}" removido com sucesso.`);
-      
-      const remaining = users.filter((x) => x.id !== u.id);
-      if (remaining.length > 0) {
-        handleSelectUser(remaining[0]);
-      } else {
-        handleSelectUser(currentUser);
+    if (window.confirm(`Tem certeza que deseja excluir o usuário "${u.name}" permanentemente do banco de dados?`)) {
+      try {
+        await deleteUser(u.id);
+        showNotification(`Usuário "${u.name}" removido com sucesso.`);
+        
+        const remaining = users.filter((x) => x.id !== u.id);
+        if (remaining.length > 0) {
+          handleSelectUser(remaining[0]);
+        } else {
+          handleSelectUser(currentUser);
+        }
+      } catch (err: any) {
+        console.error('Erro ao excluir usuário:', err);
+        alert(err.message || 'Erro ao excluir usuário no banco de dados.');
       }
     }
   };

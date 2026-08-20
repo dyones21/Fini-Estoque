@@ -26,7 +26,14 @@ import { auth } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getRolePermissions } from '../utils/permissionUtils';
 import { notifyLowStock, notifyNewNFEntry } from '../utils/notificationService';
-import { authFetch, syncUserWithPostgres } from '../utils/apiAuth';
+import {
+  authFetch,
+  syncUserWithPostgres,
+  saveUserViaApi,
+  deleteUserViaApi,
+  obtainUserSession,
+  setSessionToken,
+} from '../utils/apiAuth';
 
 interface StockContextType {
   // State
@@ -98,7 +105,7 @@ interface StockContextType {
   exportBackupJSON: () => void;
   importBackupJSON: (jsonData: string) => boolean;
   resetToDefaultData: () => Promise<void>;
-  wipeSystemData: () => Promise<void>;
+  wipeSystemData: (pin?: string) => Promise<void>;
   verifyAdminPin: (pin: string) => boolean;
 
   // PostgreSQL Realtime Sync Engine
@@ -500,6 +507,16 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } catch (e) {
         console.error('Error saving current user:', e);
       }
+
+      // Garante que o token de sessão do backend seja obtido
+      obtainUserSession({
+        id: target.id,
+        email: target.email || `${target.id}@finifriburgo.com.br`,
+        name: target.name,
+        role: target.role,
+        pin: target.pin,
+      }).catch((e) => console.warn('Aviso: Falha ao emitir token de sessão:', e));
+
       return true;
     }
     return false;
@@ -508,6 +525,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const logoutAndLock = () => {
     setIsAuthenticated(false);
     setIsAuthModalOpen(true);
+    setSessionToken(null);
   };
 
   const openSwitchUserModal = () => {
@@ -535,6 +553,18 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return next;
     });
     setCurrentUser((prev) => (prev && prev.id === userToSave.id ? userToSave : prev));
+
+    try {
+      await saveUserViaApi({
+        uid: userToSave.id,
+        email: userToSave.email,
+        name: userToSave.name,
+        role: userToSave.role,
+        pin: userToSave.pin || '1234',
+      });
+    } catch (e) {
+      console.warn('Aviso: Falha ao sincronizar atualização do usuário no Postgres:', e);
+    }
   };
 
   const addUser = async (newUser: UserProfile) => {
@@ -544,9 +574,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       permissions: newUser.permissions || getRolePermissions(newUser.role),
     };
     setAllUsers((prev) => {
-      const exists = prev.some((u) => u.id === userWithTenant.id);
+      const exists = prev.some((u) => u.id === userWithTenant.id || u.email?.toLowerCase() === userWithTenant.email?.toLowerCase());
       const next = exists
-        ? prev.map((u) => (u.id === userWithTenant.id ? userWithTenant : u))
+        ? prev.map((u) => (u.id === userWithTenant.id || u.email?.toLowerCase() === userWithTenant.email?.toLowerCase() ? userWithTenant : u))
         : [...prev, userWithTenant];
       try {
         localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(next));
@@ -555,23 +585,51 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
       return next;
     });
+
+    try {
+      await saveUserViaApi({
+        uid: userWithTenant.id,
+        email: userWithTenant.email,
+        name: userWithTenant.name,
+        role: userWithTenant.role,
+        pin: userWithTenant.pin || '1234',
+      });
+    } catch (e) {
+      console.warn('Aviso: Falha ao persistir novo usuário no Postgres:', e);
+    }
   };
 
   const deleteUser = async (userId: string) => {
+    const targetUser = allUsers.find((u) => u.id === userId || u.email?.toLowerCase() === userId.toLowerCase());
+    const targetIdentifier = targetUser?.id || targetUser?.email || userId;
+
+    // 1. Remove do estado local e localStorage
     setAllUsers((prev) => {
-      const next = prev.filter((u) => u.id !== userId);
+      const next = prev.filter(
+        (u) => u.id !== userId && u.id !== targetIdentifier && u.email?.toLowerCase() !== targetIdentifier.toLowerCase()
+      );
       try {
         localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(next));
       } catch (e) {
-        console.error('Error deleting user:', e);
+        console.error('Error deleting user from localStorage:', e);
       }
       return next;
     });
 
     // Handle fallback if currently logged in user is deleted
     setCurrentUser((prev) => {
-      if (prev && prev.id === userId) {
-        const remaining = allUsers.filter((u) => u.id !== userId);
+      if (
+        prev &&
+        (prev.id === userId ||
+          prev.id === targetIdentifier ||
+          prev.email?.toLowerCase() === targetIdentifier.toLowerCase())
+      ) {
+        const remaining = allUsers.filter(
+          (u) =>
+            u.id !== userId &&
+            u.id !== targetIdentifier &&
+            u.email?.toLowerCase() !== targetIdentifier.toLowerCase()
+        );
         const fallback = remaining[0] || INITIAL_USERS[0];
         try {
           localStorage.setItem(CURRENT_USER_KEY, fallback.id);
@@ -582,6 +640,14 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
       return prev;
     });
+
+    // 2. Chama a API para apagar permanentemente no banco PostgreSQL real
+    try {
+      await deleteUserViaApi(targetIdentifier);
+    } catch (error) {
+      console.error('Erro na chamada DELETE /api/users:', error);
+      throw error;
+    }
   };
 
   const checkPermission = (permissionKey: keyof UserPermissions): boolean => {
@@ -617,28 +683,47 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       if (loadedUsers.length > 0) {
         setAllUsers((prev) => {
-          const updated = [...prev];
+          const dbUids = new Set(loadedUsers.map((u: any) => u.uid).filter(Boolean));
+          const dbEmails = new Set(loadedUsers.map((u: any) => u.email?.toLowerCase()).filter(Boolean));
+          const updated: UserProfile[] = [];
+
           for (const dbUser of loadedUsers) {
-            const index = updated.findIndex((u) => u.id === dbUser.uid || u.email?.toLowerCase() === dbUser.email?.toLowerCase());
+            const localMatch = prev.find(
+              (u) => u.id === dbUser.uid || u.email?.toLowerCase() === dbUser.email?.toLowerCase()
+            );
             const role = (dbUser.role || 'Operador Depósito/Loja') as UserRole;
             const mappedUser: UserProfile = {
-              id: dbUser.uid,
+              id: dbUser.uid || `usr-${dbUser.id}`,
               name: dbUser.name || 'Usuário Fini',
               email: dbUser.email,
               role: role,
-              pin: index >= 0 ? updated[index].pin : '1234',
+              pin: dbUser.pin || localMatch?.pin || '1234',
               active: true,
               tenantIds: ['tenant-friburgo'],
-              avatarUrl: index >= 0 ? updated[index].avatarUrl : (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+              avatarUrl: localMatch?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
               permissions: getRolePermissions(role),
             };
+            updated.push(mappedUser);
+          }
 
-            if (index >= 0) {
-              updated[index] = { ...updated[index], ...mappedUser };
-            } else {
-              updated.push(mappedUser);
+          // Mantém usuários locais estáticos que não colidem com os do banco
+          for (const localUser of prev) {
+            const isFromDb =
+              dbUids.has(localUser.id) ||
+              (localUser.email && dbEmails.has(localUser.email.toLowerCase()));
+            if (!isFromDb) {
+              if (
+                !updated.some(
+                  (u) =>
+                    u.id === localUser.id ||
+                    (localUser.email && u.email?.toLowerCase() === localUser.email.toLowerCase())
+                )
+              ) {
+                updated.push(localUser);
+              }
             }
           }
+
           return updated;
         });
       }
@@ -1395,10 +1480,21 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const verifyAdminPin = (pin: string): boolean => {
     if (!pin) return false;
-    return allUsers.some((u) => u.role === 'admin' && u.active && u.pin === pin);
+    return allUsers.some((u) => (u.role === 'admin' || u.role === 'super_admin') && u.active && u.pin === pin);
   };
 
-  const wipeSystemData = async () => {
+  const wipeSystemData = async (pin?: string) => {
+    const response = await authFetch('/api/system/wipe', {
+      method: 'DELETE',
+      body: JSON.stringify({ pin: pin || '' }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Erro HTTP ${response.status} ao zerar dados do sistema.`);
+    }
+
+    // Só limpa o estado local após confirmação com sucesso do PostgreSQL
     setAllProducts([]);
     setAllNfEntries([]);
     setAllTransfers([]);

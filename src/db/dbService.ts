@@ -363,3 +363,33 @@ export async function getRealtimeStockSummary() {
   }
 }
 
+/**
+ * Wipe all stock-related tables in PostgreSQL inside a single atomic transaction.
+ * Tables deleted in order: nf_items -> nf_entries -> stock_movements -> store_sales -> products.
+ * Note: The 'users' table is strictly preserved to prevent locking out administrators and users.
+ */
+export async function wipeAllStockData(): Promise<{ success: boolean; message: string }> {
+  try {
+    await db.transaction(async (tx) => {
+      // 1. Delete NF items first (foreign key references nf_entries)
+      await tx.delete(nfItems);
+      // 2. Delete NF entries
+      await tx.delete(nfEntries);
+      // 3. Delete Stock Movements
+      await tx.delete(stockMovements);
+      // 4. Delete Store Sales
+      await tx.delete(storeSales);
+      // 5. Delete Products
+      await tx.delete(products);
+    });
+
+    return {
+      success: true,
+      message: 'Todos os registros de produtos, estoque, notas fiscais, movimentações e vendas foram apagados com sucesso.',
+    };
+  } catch (error) {
+    console.error('Error wiping system stock data in transaction:', error);
+    throw new Error('Falha ao zerar dados do sistema no banco de dados. Nenhuma alteração foi realizada (rollback executado).', { cause: error });
+  }
+}
+

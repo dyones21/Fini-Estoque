@@ -54,6 +54,7 @@ export const CloudBackupModal: React.FC = () => {
   const [adminPin, setAdminPin] = useState<string>('');
   const [pinError, setPinError] = useState<string>('');
   const [wipeSuccess, setWipeSuccess] = useState<string>('');
+  const [isWiping, setIsWiping] = useState<boolean>(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -81,18 +82,21 @@ export const CloudBackupModal: React.FC = () => {
       return;
     }
 
-    const isValid = verifyAdminPin(adminPin.trim());
-    if (!isValid) {
-      setPinError('PIN de administrador incorreto ou usuário sem privilégios.');
-      return;
+    try {
+      setIsWiping(true);
+      setPinError('');
+      await wipeSystemData(adminPin.trim());
+      setIsWipeModalOpen(false);
+      setAdminPin('');
+      setPinError('');
+      setWipeSuccess('Sistema zerado com sucesso! Todos os dados e registros foram apagados do banco de dados.');
+      setTimeout(() => setWipeSuccess(''), 6000);
+    } catch (err: any) {
+      console.error('Erro ao zerar sistema:', err);
+      setPinError(err.message || 'Falha ao zerar dados do sistema no servidor.');
+    } finally {
+      setIsWiping(false);
     }
-
-    await wipeSystemData();
-    setIsWipeModalOpen(false);
-    setAdminPin('');
-    setPinError('');
-    setWipeSuccess('Sistema zerado com sucesso! Todos os dados e registros foram apagados.');
-    setTimeout(() => setWipeSuccess(''), 6000);
   };
 
   return (
@@ -370,11 +374,11 @@ export const CloudBackupModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleConfirmWipe}
-                  disabled={!adminPin.trim()}
+                  disabled={!adminPin.trim() || isWiping}
                   className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-xs shadow-md shadow-rose-900/30 transition-all flex items-center gap-2"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Confirmar e Zerar Sistema</span>
+                  <Trash2 className={`w-4 h-4 ${isWiping ? 'animate-spin' : ''}`} />
+                  <span>{isWiping ? 'Apagando banco de dados...' : 'Confirmar e Zerar Sistema'}</span>
                 </button>
               </div>
             </div>

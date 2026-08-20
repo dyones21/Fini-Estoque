@@ -13,7 +13,7 @@ import { UserProfile, Tenant } from '../types';
 import { useStock } from '../context/StockContext';
 import { auth } from '../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { syncUserWithPostgres } from '../utils/apiAuth';
+import { syncUserWithPostgres, obtainUserSession } from '../utils/apiAuth';
 
 interface LoginPageProps {
   isOpen?: boolean;
@@ -190,6 +190,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     if (passText === targetUser.pin) {
       const success = loginWithPin(targetUser.id, targetUser.pin);
       if (success) {
+        // Auto-provisiona / renova token de sessão no backend para requisições seguras ao Postgres
+        obtainUserSession({
+          id: targetUser.id,
+          email: targetUser.email || `${targetUser.id}@finifriburgo.com.br`,
+          name: targetUser.name,
+          role: targetUser.role,
+          pin: targetUser.pin,
+        }).catch((e) => console.warn('Aviso: Falha ao renovar token de sessão:', e));
+
         setSuccessMessage(`Bem-vindo(a), ${targetUser.name}!`);
         setIsLoading(false);
         setPasswordInput('');
