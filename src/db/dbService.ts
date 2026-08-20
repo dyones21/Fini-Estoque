@@ -283,3 +283,83 @@ export async function insertSale(s: Sale): Promise<Sale> {
     throw new Error('Falha ao salvar venda da loja no Cloud SQL', { cause: error });
   }
 }
+
+/**
+ * Realtime Stock Summary diretamente do PostgreSQL
+ */
+export async function getRealtimeStockSummary() {
+  const start = performance.now();
+  try {
+    const allProds = await getAllProducts();
+    const allMovs = await getAllMovements();
+    const allSales = await getAllSales();
+
+    let totalDepositoUnits = 0;
+    let totalLojaUnits = 0;
+    let totalCostValue = 0;
+    let totalSellValue = 0;
+    let lowStockCount = 0;
+    let criticalStockCount = 0;
+
+    const itemsWithMetrics = allProds.map((p) => {
+      const totalUnits = p.stockDeposito + p.stockLoja;
+      totalDepositoUnits += p.stockDeposito;
+      totalLojaUnits += p.stockLoja;
+      totalCostValue += totalUnits * p.costPrice;
+      totalSellValue += totalUnits * p.sellPrice;
+
+      const isLowDeposito = p.stockDeposito <= p.minStockDeposito;
+      const isLowLoja = p.stockLoja <= p.minStockLoja;
+      const isZero = totalUnits === 0;
+
+      let status: 'critico' | 'alerta' | 'normal' = 'normal';
+      if (isZero || (p.stockDeposito === 0 && p.stockLoja === 0)) {
+        status = 'critico';
+        criticalStockCount++;
+      } else if (isLowDeposito || isLowLoja) {
+        status = 'alerta';
+        lowStockCount++;
+      }
+
+      // Sales for this product
+      const pSales = allSales.filter((s) => s.productId === p.id);
+      const totalSalesQty = pSales.reduce((acc, s) => acc + (s.quantity || 0), 0);
+      const totalSalesVal = pSales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+
+      return {
+        ...p,
+        totalStock: totalUnits,
+        totalSalesQuantity: totalSalesQty,
+        totalSalesValue: totalSalesVal,
+        totalCostValue: Math.round(totalUnits * p.costPrice * 100) / 100,
+        totalSellValue: Math.round(totalUnits * p.sellPrice * 100) / 100,
+        stockStatus: status,
+      };
+    });
+
+    const latencyMs = Math.round((performance.now() - start) * 10) / 10;
+
+    return {
+      timestamp: new Date().toISOString(),
+      latencyMs,
+      summary: {
+        productsCount: allProds.length,
+        totalDepositoUnits,
+        totalLojaUnits,
+        totalUnits: totalDepositoUnits + totalLojaUnits,
+        totalCostValue: Math.round(totalCostValue * 100) / 100,
+        totalSellValue: Math.round(totalSellValue * 100) / 100,
+        lowStockCount,
+        criticalStockCount,
+        movementsCount: allMovs.length,
+        salesCount: allSales.length,
+      },
+      products: itemsWithMetrics,
+      recentMovements: allMovs.slice(0, 10),
+    };
+  } catch (error) {
+    console.error('Error computing realtime stock summary from PostgreSQL:', error);
+    throw new Error('Falha ao gerar sumário de estoque em tempo real do PostgreSQL', { cause: error });
+  }
+}
+

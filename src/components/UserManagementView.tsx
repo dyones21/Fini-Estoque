@@ -25,6 +25,7 @@ import { useStock } from '../context/StockContext';
 import { UserProfile, UserRole, UserPermissions } from '../types';
 import { UserAvatar } from './UserAvatar';
 import { AvatarPickerModal } from './AvatarPickerModal';
+import { updateUserRoleViaApi } from '../utils/apiAuth';
 
 export const UserManagementView: React.FC = () => {
   const { users, currentUser, updateUser, addUser, deleteUser, checkPermission } = useStock();
@@ -200,7 +201,7 @@ export const UserManagementView: React.FC = () => {
     setNewUserPermissions(getRolePermissions(role));
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     const trimmedName = formData.name.trim();
     if (!trimmedName) {
       alert('O nome do usuário não pode ficar em branco.');
@@ -211,17 +212,26 @@ export const UserManagementView: React.FC = () => {
       return;
     }
 
-    const updatedUser: UserProfile = {
-      ...formData,
-      name: trimmedName,
-      email: formData.email.trim(),
-    };
+    try {
+      // Se o cargo foi alterado, envia a atualização via PATCH /api/users/:uid/role para o Postgres
+      if (formData.role !== selectedUser.role) {
+        await updateUserRoleViaApi(selectedUser.id, formData.role);
+      }
 
-    updateUser(updatedUser);
-    setSelectedUser(updatedUser);
-    setFormData(updatedUser);
-    showNotification(`Dados do usuário "${updatedUser.name}" salvos com sucesso!`);
-    setIsEditing(false);
+      const updatedUser: UserProfile = {
+        ...formData,
+        name: trimmedName,
+        email: formData.email.trim(),
+      };
+
+      await updateUser(updatedUser);
+      setSelectedUser(updatedUser);
+      setFormData(updatedUser);
+      showNotification(`Dados e cargo do usuário "${updatedUser.name}" salvos com sucesso no servidor!`);
+      setIsEditing(false);
+    } catch (error: any) {
+      alert(`Falha ao alterar cargo no servidor: ${error.message || 'Apenas super_admin tem autorização para alterar cargos de usuários.'}`);
+    }
   };
 
   const handleConfirmCreateUser = (e: React.FormEvent) => {
@@ -276,6 +286,8 @@ export const UserManagementView: React.FC = () => {
 
   const getRoleBadge = (role: UserRole) => {
     switch (role) {
+      case 'super_admin':
+        return <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[10px] font-black uppercase border border-purple-200">Super Admin</span>;
       case 'admin':
         return <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black uppercase border border-rose-200">Administrador</span>;
       case 'gerente_loja':
@@ -490,7 +502,8 @@ export const UserManagementView: React.FC = () => {
                 onChange={(e) => handleRolePreset(e.target.value as UserRole)}
                 className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100"
               >
-                <option value="admin">Administrador (Acesso Total)</option>
+                <option value="super_admin">Super Administrador (Acesso Total)</option>
+                <option value="admin">Administrador Geral</option>
                 <option value="gerente_loja">Gerente de Loja</option>
                 <option value="operador_deposito">Operador do Depósito Central</option>
                 <option value="caixa">Operador de Caixa / Vendas</option>

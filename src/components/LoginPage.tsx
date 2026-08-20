@@ -205,14 +205,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       if (targetUser.email) {
         const userCred = await signInWithEmailAndPassword(auth, targetUser.email, passText);
         if (userCred.user) {
-          syncUserWithPostgres(
-            {
-              uid: userCred.user.uid,
-              email: userCred.user.email,
-              displayName: targetUser.name || userCred.user.displayName,
-            },
-            targetUser.role
-          ).catch((e) => console.error('Erro na sincronização do login:', e));
+          syncUserWithPostgres({
+            uid: userCred.user.uid,
+            email: userCred.user.email,
+            displayName: targetUser.name || userCred.user.displayName,
+          }).catch((e) => console.error('Erro na sincronização do login:', e));
         }
         loginWithPin(targetUser.id, targetUser.pin);
         setSuccessMessage(`Bem-vindo(a), ${targetUser.name}!`);

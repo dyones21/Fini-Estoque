@@ -93,13 +93,22 @@ interface StockContextType {
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
 
-  // Cloud & Backup
+  // Cloud & Backup & PostgreSQL Realtime
   triggerCloudSync: () => Promise<void>;
   exportBackupJSON: () => void;
   importBackupJSON: (jsonData: string) => boolean;
   resetToDefaultData: () => Promise<void>;
   wipeSystemData: () => Promise<void>;
   verifyAdminPin: (pin: string) => boolean;
+
+  // PostgreSQL Realtime Sync Engine
+  postgresSyncInterval: number;
+  setPostgresSyncInterval: (seconds: number) => void;
+  isRealtimeAutoSyncEnabled: boolean;
+  setIsRealtimeAutoSyncEnabled: (enabled: boolean) => void;
+  postgresLatencyMs: number;
+  lastPostgresSyncTimestamp: string | null;
+  refreshPostgresRealtime: () => Promise<void>;
 }
 
 const StockContext = createContext<StockContextType | undefined>(undefined);
@@ -357,6 +366,44 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     backupSizeKB: 14.2,
   });
 
+  // PostgreSQL Realtime Sync Engine State
+  const [postgresSyncInterval, setPostgresSyncIntervalState] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem('FINI_PG_SYNC_INTERVAL')) || 15;
+    } catch {
+      return 15;
+    }
+  });
+
+  const [isRealtimeAutoSyncEnabled, setIsRealtimeAutoSyncEnabledState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('FINI_PG_AUTOSYNC') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const [postgresLatencyMs, setPostgresLatencyMs] = useState<number>(0);
+  const [lastPostgresSyncTimestamp, setLastPostgresSyncTimestamp] = useState<string | null>(null);
+
+  const setPostgresSyncInterval = (seconds: number) => {
+    setPostgresSyncIntervalState(seconds);
+    try {
+      localStorage.setItem('FINI_PG_SYNC_INTERVAL', String(seconds));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const setIsRealtimeAutoSyncEnabled = (enabled: boolean) => {
+    setIsRealtimeAutoSyncEnabledState(enabled);
+    try {
+      localStorage.setItem('FINI_PG_AUTOSYNC', String(enabled));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Save users to localStorage whenever users list changes
   useEffect(() => {
     try {
@@ -367,27 +414,60 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [allUsers]);
 
   // Firebase Auth state listener - Auto-sync with Postgres users table via getOrCreateUser
+  // O papel (role) e as permissões são determinados exclusivamente pelo servidor no backend.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Look up user in allUsers to get configured role if available
+        // Look up local user info (for avatar/pin preferences)
         const localUser = allUsers.find(
           (u) =>
             u.email?.toLowerCase() === firebaseUser.email?.toLowerCase() ||
             u.id === firebaseUser.uid
         );
-        const role = localUser?.role || (firebaseUser.email?.toLowerCase().includes('dyones') ? 'super_admin' : 'Operador Depósito/Loja');
         const name = localUser?.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário Fini';
 
         try {
-          await syncUserWithPostgres(
-            {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
-              displayName: name,
-            },
-            role
-          );
+          // O backend decide o cargo baseado na lista do servidor SUPER_ADMIN_EMAILS ou mantém o existente
+          const syncedUser = await syncUserWithPostgres({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: name,
+          });
+
+          if (syncedUser) {
+            const role = (syncedUser.role || 'Operador Depósito/Loja') as UserRole;
+            const updatedProfile: UserProfile = {
+              id: syncedUser.uid,
+              name: syncedUser.name || name,
+              email: syncedUser.email || firebaseUser.email || '',
+              role: role,
+              pin: localUser?.pin || '1234',
+              active: true,
+              tenantIds: ['tenant-friburgo'],
+              avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+              permissions: getRolePermissions(role),
+            };
+
+            setAllUsers((prev) => {
+              const exists = prev.some(
+                (u) => u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
+              );
+              if (exists) {
+                return prev.map((u) =>
+                  u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
+                    ? { ...u, ...updatedProfile }
+                    : u
+                );
+              }
+              return [...prev, updatedProfile];
+            });
+
+            setCurrentUser(updatedProfile);
+            setIsAuthenticated(true);
+
+            // Puxa automaticamente os dados atualizados do Cloud SQL PostgreSQL
+            fetchCloudSqlData();
+          }
         } catch (error) {
           console.error('Erro na sincronização automática do usuário no Postgres:', error);
         }
@@ -395,7 +475,18 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
 
     return () => unsubscribe();
-  }, [allUsers]);
+  }, []);
+
+  // Sincronização periódica em tempo real baseada no intervalo configurado (5s a 60s)
+  useEffect(() => {
+    if (!isRealtimeAutoSyncEnabled) return;
+    const interval = setInterval(() => {
+      if (auth.currentUser) {
+        fetchCloudSqlData();
+      }
+    }, postgresSyncInterval * 1000);
+    return () => clearInterval(interval);
+  }, [isRealtimeAutoSyncEnabled, postgresSyncInterval]);
 
   // Auth Functions
   const loginWithPin = (userId: string, pin: string): boolean => {
@@ -502,34 +593,87 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Fetch initial data from Cloud SQL via /api/* endpoints
   const fetchCloudSqlData = async () => {
     setIsLoadingCloudSql(true);
+    const startTime = performance.now();
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
 
-      const [resProd, resMov, resNF] = await Promise.all([
+      const [resProd, resMov, resNF, resUsers, resSales] = await Promise.all([
         authFetch('/api/products').then((r) => (r.ok ? r.json() : [])).catch(() => []),
         authFetch('/api/movements').then((r) => (r.ok ? r.json() : [])).catch(() => []),
         authFetch('/api/nf-entries').then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        authFetch('/api/users').then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        authFetch('/api/sales').then((r) => (r.ok ? r.json() : [])).catch(() => []),
       ]);
+
+      const latency = Math.round((performance.now() - startTime) * 10) / 10;
+      setPostgresLatencyMs(latency);
+      setLastPostgresSyncTimestamp(new Date().toISOString());
 
       let loadedProducts: Product[] = Array.isArray(resProd) ? resProd : [];
       let loadedMovements: StockMovement[] = Array.isArray(resMov) ? resMov : [];
       let loadedNFs: NFEntry[] = Array.isArray(resNF) ? resNF : [];
+      let loadedUsers: any[] = Array.isArray(resUsers) ? resUsers : [];
+      let loadedSales: any[] = Array.isArray(resSales) ? resSales : [];
+
+      if (loadedUsers.length > 0) {
+        setAllUsers((prev) => {
+          const updated = [...prev];
+          for (const dbUser of loadedUsers) {
+            const index = updated.findIndex((u) => u.id === dbUser.uid || u.email?.toLowerCase() === dbUser.email?.toLowerCase());
+            const role = (dbUser.role || 'Operador Depósito/Loja') as UserRole;
+            const mappedUser: UserProfile = {
+              id: dbUser.uid,
+              name: dbUser.name || 'Usuário Fini',
+              email: dbUser.email,
+              role: role,
+              pin: index >= 0 ? updated[index].pin : '1234',
+              active: true,
+              tenantIds: ['tenant-friburgo'],
+              avatarUrl: index >= 0 ? updated[index].avatarUrl : (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+              permissions: getRolePermissions(role),
+            };
+
+            if (index >= 0) {
+              updated[index] = { ...updated[index], ...mappedUser };
+            } else {
+              updated.push(mappedUser);
+            }
+          }
+          return updated;
+        });
+      }
 
       // Tag loaded records with default tenant if missing
       loadedProducts = loadedProducts.map((p) => ({ ...p, tenantId: p.tenantId || 'tenant-friburgo' }));
       loadedMovements = loadedMovements.map((m) => ({ ...m, tenantId: m.tenantId || 'tenant-friburgo' }));
       loadedNFs = loadedNFs.map((nf) => ({ ...nf, tenantId: nf.tenantId || 'tenant-friburgo' }));
 
-      // Seed initial data to Cloud SQL if empty
-      if (loadedProducts.length === 0) {
-        for (const p of INITIAL_PRODUCTS) {
-          const pTagged = { ...p, tenantId: 'tenant-friburgo' };
-          await authFetch('/api/products', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(pTagged),
-          }).catch((err) => console.error('Erro ao seedar produto:', err));
+      // Compute sales aggregates per product from real sales
+      if (loadedSales.length > 0) {
+        const salesByProd: Record<string, { qty: number; val: number }> = {};
+        for (const s of loadedSales) {
+          if (!salesByProd[s.productId]) {
+            salesByProd[s.productId] = { qty: 0, val: 0 };
+          }
+          salesByProd[s.productId].qty += Number(s.quantity || 0);
+          salesByProd[s.productId].val += Number(s.totalAmount || 0);
         }
+
+        loadedProducts = loadedProducts.map((p) => {
+          const saleAgg = salesByProd[p.id];
+          if (saleAgg) {
+            return {
+              ...p,
+              totalSalesQuantity: saleAgg.qty,
+              totalSalesValue: saleAgg.val,
+            };
+          }
+          return p;
+        });
+      }
+
+      // Se a lista de produtos retornada estiver vazia (ex: offline ou banco inicial), usa os dados iniciais locais
+      if (loadedProducts.length === 0) {
         loadedProducts = INITIAL_PRODUCTS.map((p) => ({ ...p, tenantId: 'tenant-friburgo' }));
       }
 
@@ -537,13 +681,13 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setAllMovements(loadedMovements);
       setAllNfEntries(loadedNFs);
 
-      const totalCount = loadedProducts.length + loadedNFs.length + loadedMovements.length;
+      const totalCount = loadedProducts.length + loadedNFs.length + loadedMovements.length + loadedSales.length;
       setCloudInfo({
         lastSyncTime: new Date().toISOString(),
         status: 'synced',
         autoSyncEnabled: true,
         totalRecords: totalCount,
-        backupSizeKB: 18.5,
+        backupSizeKB: Math.round((totalCount * 0.45 + 15) * 10) / 10,
       });
     } catch (e) {
       console.error('Falha na comunicação com Cloud SQL:', e);
@@ -1241,6 +1385,13 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         resetToDefaultData,
         wipeSystemData,
         verifyAdminPin,
+        postgresSyncInterval,
+        setPostgresSyncInterval,
+        isRealtimeAutoSyncEnabled,
+        setIsRealtimeAutoSyncEnabled,
+        postgresLatencyMs,
+        lastPostgresSyncTimestamp,
+        refreshPostgresRealtime: fetchCloudSqlData,
       }}
     >
       {children}

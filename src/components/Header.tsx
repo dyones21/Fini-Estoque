@@ -25,6 +25,7 @@ import {
   WifiOff,
   BellRing,
   Send,
+  Database,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { LocationType, UserRole } from '../types';
@@ -267,6 +268,23 @@ export const Header: React.FC<HeaderProps> = ({
               Painel SaaS Master desativado para a fase Single-Tenant "Fini Nova Friburgo".
               Ficará disponível em fase futura com suporte a multi-empresa no banco de dados.
             */}
+
+            {/* PostgreSQL Realtime Sync Badge */}
+            <button
+              onClick={() => {
+                if (setActiveTab) {
+                  setActiveTab('postgres_sync');
+                } else {
+                  triggerCloudSync();
+                }
+              }}
+              title="Integração PostgreSQL em Tempo Real (.env). Clique para visualizar status e diagnósticos."
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-[10px] sm:text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+            >
+              <Database className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span className="hidden sm:inline">PostgreSQL</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            </button>
 
             {onOpenSaleModal && checkPermission('canRegisterMovements') && (
               <button

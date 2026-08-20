@@ -19,6 +19,7 @@ import {
   KeyRound,
   Settings,
   Building2,
+  Database,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { LocationType } from '../types';
@@ -32,6 +33,7 @@ export type ActiveTab =
   | 'relatorios'
   | 'curva_abc_ranking'
   | 'backup'
+  | 'postgres_sync'
   | 'usuarios';
 
 interface SidebarProps {
@@ -61,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(() => {
-    return activeTab === 'backup' || activeTab === 'usuarios';
+    return activeTab === 'backup' || activeTab === 'usuarios' || activeTab === 'postgres_sync';
   });
 
   const toggleCollapse = () => {
@@ -124,6 +126,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const configNavItems = [
     ...(checkPermission('canManageBackup')
       ? [
+          {
+            id: 'postgres_sync',
+            label: 'Integração PostgreSQL',
+            icon: Database,
+            badge: 'Live SQL',
+          },
           {
             id: 'backup',
             label: 'Backup em Nuvem',

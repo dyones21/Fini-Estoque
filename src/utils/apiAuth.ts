@@ -37,12 +37,14 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
 }
 
 /**
- * Sincroniza o usuário autenticado do Firebase Auth com a tabela users do Postgres via API.
+ * Sincroniza o usuário autenticado do Firebase Auth com o backend.
+ * Nota de Segurança: O papel (role) é estritamente determinado pelo servidor no backend.
  */
-export async function syncUserWithPostgres(
-  user: { uid: string; email?: string | null; displayName?: string | null },
-  role?: string
-) {
+export async function syncUserWithPostgres(user: {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+}) {
   try {
     const token = await getFirebaseAuthToken();
     if (!token) return null;
@@ -53,7 +55,6 @@ export async function syncUserWithPostgres(
         uid: user.uid,
         email: user.email || '',
         name: user.displayName || user.email?.split('@')[0] || 'Usuário Fini',
-        role: role || 'Operador Depósito/Loja',
       }),
     });
 
@@ -68,4 +69,23 @@ export async function syncUserWithPostgres(
     console.error('Erro ao sincronizar usuário no Postgres via API:', error);
   }
   return null;
+}
+
+/**
+ * Altera o cargo (role) de outro usuário no servidor PostgreSQL.
+ * Apenas usuários autenticados com o cargo 'super_admin' no banco recebem autorização.
+ */
+export async function updateUserRoleViaApi(targetUid: string, newRole: string) {
+  const response = await authFetch(`/api/users/${targetUid}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role: newRole }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido ao alterar cargo' }));
+    throw new Error(errorData.error || `Erro HTTP ${response.status} ao alterar cargo`);
+  }
+
+  const data = await response.json();
+  return data.user;
 }
