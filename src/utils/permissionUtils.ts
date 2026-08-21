@@ -87,3 +87,12 @@ export function getRolePermissions(role?: string | UserRole | null): UserPermiss
       };
   }
 }
+
+/**
+ * Verifica se um papel de usuário possui uma determinada permissão.
+ */
+export function hasPermission(role?: string | UserRole | null, permissionKey?: keyof UserPermissions): boolean {
+  if (!role || !permissionKey) return false;
+  const permissions = getRolePermissions(role);
+  return Boolean(permissions[permissionKey]);
+}

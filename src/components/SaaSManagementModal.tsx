@@ -179,7 +179,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
   };
 
   const handleDeleteSaasUser = (userId: string, userName: string) => {
-    if (confirm(`Tem certeza que deseja excluir permanentemente o usuário "${userName}" no Firestore?`)) {
+    if (confirm(`Tem certeza que deseja excluir permanentemente o usuário "${userName}" no Supabase?`)) {
       deleteUser(userId);
       if (editingUser?.id === userId) {
         setEditingUser(null);
@@ -381,7 +381,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold rounded-full flex items-center gap-1">
                     <Sparkles className="w-3 h-3" />
-                    <span>Firestore Real-Time</span>
+                    <span>Supabase Real-Time</span>
                   </span>
                   <button
                     onClick={() => setIsAddingUserSaaS(!isAddingUserSaaS)}
@@ -512,7 +512,7 @@ export const SaaSManagementModal: React.FC<SaaSManagementModalProps> = ({
                       <button
                         onClick={() => handleDeleteSaasUser(u.id, u.name)}
                         className="p-1.5 bg-rose-950/50 text-rose-400 hover:bg-rose-900 hover:text-white border border-rose-900/50 rounded-lg transition-colors cursor-pointer"
-                        title="Excluir Usuário no Firestore em Tempo Real"
+                        title="Excluir Usuário no Supabase em Tempo Real"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

@@ -1,88 +1,78 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth.ts';
 import { getUserByUid, getOrCreateUser } from '../db/users.ts';
-import { getRolePermissions } from '../utils/permissionUtils.ts';
+import { getRolePermissions, hasPermission } from '../utils/permissionUtils.ts';
 import { UserPermissions } from '../types.ts';
 
 export type PermissionCheck =
   | keyof UserPermissions
-  | ((permissions: UserPermissions, req: AuthRequest) => boolean);
+  | ((perms: UserPermissions, req: AuthRequest) => boolean);
 
 /**
- * Middleware Express de Autorização RBAC baseado em permissões granulares.
- * 
- * Regras:
- * - Deve rodar estritamente após o middleware `requireAuth`.
- * - Bloqueia qualquer tentativa de autenticação anônima (403 Forbidden).
- * - Busca o usuário no PostgreSQL pelo UID do token autenticado.
- * - Se o usuário for recém-autenticado no Firebase Auth e não estiver no Postgres, auto-provisiona.
- * - Calcula a matriz de permissões com `getRolePermissions(user.role)`.
- * - Retorna status HTTP 403 (Forbidden) se a permissão exigida for false.
+ * Middleware para autorização baseada em RBAC no Supabase.
+ * - Suporta chave direta (ex: 'canManageUsers') ou predicado dinâmico baseado no request.
+ * - Busca o usuário no banco de dados do Supabase.
+ * - Super admin ('dyones21@gmail.com' ou role 'super_admin' / 'admin') tem bypass total.
  */
-export function requirePermission(permissionCheck: PermissionCheck) {
+export const requirePermission = (permissionCheck: PermissionCheck) => {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const uid = req.user?.uid;
-      if (!uid) {
-        return res.status(401).json({ error: 'Não autorizado: Token ou UID ausente' });
+      if (!req.user || !req.user.uid) {
+        return res.status(401).json({ error: 'Não autorizado: Usuário não identificado' });
       }
 
-      // Bloqueio rigoroso de autenticação anônima (camada de proteção extra)
-      if ((req.user as any)?.firebase?.sign_in_provider === 'anonymous') {
-        console.warn(`[RBAC 403] Tentativa de acesso bloqueada: Provedor anônimo detectado (UID=${uid})`);
-        return res.status(403).json({
-          error: 'Acesso negado: Autenticação anônima não é permitida.',
-        });
-      }
+      const uid = req.user.uid;
+      const email = req.user.email || '';
+      const name = req.user.name || email.split('@')[0] || 'Usuário';
 
-      // Buscar usuário persistido no Postgres
+      // 1. Busca perfil e cargo no banco Supabase
       let dbUser = await getUserByUid(uid);
+
+      // 2. Se não existir ainda, provisiona automaticamente no Supabase
       if (!dbUser) {
-        try {
-          dbUser = await getOrCreateUser(
-            uid,
-            req.user?.email || '',
-            req.user?.name || (req.user?.email ? req.user.email.split('@')[0] : 'Usuário Fini')
-          );
-        } catch (e) {
-          console.error('Erro ao auto-registrar usuário no requirePermission:', e);
-        }
+        dbUser = await getOrCreateUser(uid, email, name);
       }
 
       if (!dbUser) {
-        return res.status(403).json({
-          error: 'Acesso negado: Usuário não registrado no banco de dados',
-        });
+        return res.status(403).json({ error: 'Acesso negado: Perfil de usuário não encontrado no Supabase' });
       }
 
-      // Calcular permissões baseadas no papel (role) do banco
-      const permissions = getRolePermissions(dbUser.role);
-
-      let isAllowed = false;
-      if (typeof permissionCheck === 'string') {
-        isAllowed = Boolean(permissions[permissionCheck]);
-      } else if (typeof permissionCheck === 'function') {
-        isAllowed = Boolean(permissionCheck(permissions, req));
-      }
-
-      if (!isAllowed) {
-        const permName = typeof permissionCheck === 'string' ? permissionCheck : 'Ação restrita';
-        console.warn(`[RBAC 403] UID=${uid} (Role=${dbUser.role}) tentou acessar recurso sem a permissão '${permName}'`);
-        return res.status(403).json({
-          error: 'Você não tem permissão para esta ação.',
-          requiredPermission: typeof permissionCheck === 'string' ? permissionCheck : undefined,
-          userRole: dbUser.role,
-        });
-      }
-
-      // Anexa os dados do usuário do banco à requisição para uso downstream
+      // Anexa o dbUser ao request para os handlers usarem
       (req as any).dbUser = dbUser;
-      (req as any).userPermissions = permissions;
 
-      next();
-    } catch (error: any) {
-      console.error('Erro na validação do middleware requirePermission:', error);
-      return res.status(500).json({ error: 'Erro interno ao validar permissões do usuário' });
+      // Super Admin ou Admin têm acesso irrestrito
+      if (dbUser.role === 'super_admin' || dbUser.role === 'admin') {
+        return next();
+      }
+
+      // 3. Validação de permissão RBAC
+      const perms = getRolePermissions(dbUser.role);
+      let allowed = false;
+
+      if (typeof permissionCheck === 'function') {
+        allowed = permissionCheck(perms, req);
+      } else {
+        allowed = Boolean(perms[permissionCheck]);
+      }
+
+      if (allowed) {
+        return next();
+      }
+
+      const permName = typeof permissionCheck === 'string' ? permissionCheck : 'Ação restrita';
+      return res.status(403).json({
+        error: `Acesso negado: Permissão '${permName}' requerida. Cargo atual: ${dbUser.role}`,
+      });
+    } catch (err: any) {
+      console.error('Erro na validação de permissão RBAC Supabase:', err);
+      return res.status(500).json({ error: 'Erro interno ao validar permissões no Supabase' });
     }
   };
-}
+};
+
+/**
+ * Middleware para exigir perfil de Administrador ou Super Admin
+ */
+export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  return requirePermission('canManageUsers')(req, res, next);
+};

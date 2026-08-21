@@ -777,7 +777,7 @@ export const UserManagementView: React.FC = () => {
                 <div>
                   <p className="text-xs font-bold">Backup e Sincronização em Nuvem</p>
                   <p className="text-[10px] text-slate-500">
-                    Forçar backup manual e gerenciar banco Google Cloud SQL.
+                    Forçar backup manual e gerenciar banco de dados na nuvem Supabase.
                   </p>
                 </div>
               </label>

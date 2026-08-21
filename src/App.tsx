@@ -19,7 +19,6 @@ import { SaaSManagementModal } from './components/SaaSManagementModal';
 import { SaaSMasterScreen } from './components/SaaSMasterScreen';
 import { UserManagementView } from './components/UserManagementView';
 import { ReportsView } from './components/ReportsView';
-import { PostgresIntegrationView } from './components/PostgresIntegrationView';
 import { Product } from './types';
 import { StockFilterOptions } from './components/Dashboard';
 
@@ -223,17 +222,6 @@ const MainApp: React.FC = () => {
               </div>
             ) : (
               <AccessDeniedMessage featureName="Análise Curva ABC & Ranking" />
-            )
-          )}
-
-          {activeTab === 'postgres_sync' && (
-            checkPermission('canManageBackup') ? (
-              <PostgresIntegrationView
-                onOpenTransferModal={handleOpenTransferForProduct}
-                onOpenMovementModal={handleOpenMovementForProduct}
-              />
-            ) : (
-              <AccessDeniedMessage featureName="Integração PostgreSQL em Tempo Real" />
             )
           )}
 

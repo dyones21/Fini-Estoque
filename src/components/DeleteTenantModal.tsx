@@ -113,7 +113,7 @@ export const DeleteTenantModal: React.FC<DeleteTenantModalProps> = ({
           <div className="p-3 bg-rose-950/40 border border-rose-900/50 rounded-2xl flex items-start gap-2.5 text-xs text-rose-200">
             <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-rose-300">Atenção:</strong> Esta ação exclui permanentemente o cadastro da empresa no banco de dados Firestore.
+              <strong className="text-rose-300">Atenção:</strong> Esta ação exclui permanentemente o cadastro da empresa no banco de dados Supabase.
             </p>
           </div>
 

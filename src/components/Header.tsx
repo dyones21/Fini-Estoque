@@ -25,8 +25,9 @@ import {
   WifiOff,
   BellRing,
   Send,
-  Database,
+  LogOut,
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 import { useStock } from '../context/StockContext';
 import { LocationType, UserRole } from '../types';
 import { formatDateTime } from '../utils/inventoryUtils';
@@ -249,42 +250,20 @@ export const Header: React.FC<HeaderProps> = ({
             {!isOnline ? (
               <div
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 text-amber-800 border border-amber-300 text-[11px] font-bold animate-pulse"
-                title="Sistema operando offline com cache ativado via Service Worker (PWA)"
+                title="Sistema operando offline com cache local ativado"
               >
                 <WifiOff className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span className="hidden sm:inline">Offline (Cache PWA)</span>
+                <span className="hidden sm:inline">Offline</span>
               </div>
             ) : (
               <div
                 className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold"
-                title="Sincronizado e Protegido com Service Worker PWA"
+                title="Sistema conectado e operacional"
               >
                 <Wifi className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>PWA Ativo</span>
+                <span>Online</span>
               </div>
             )}
-            
-            {/* 
-              Painel SaaS Master desativado para a fase Single-Tenant "Fini Nova Friburgo".
-              Ficará disponível em fase futura com suporte a multi-empresa no banco de dados.
-            */}
-
-            {/* PostgreSQL Realtime Sync Badge */}
-            <button
-              onClick={() => {
-                if (setActiveTab) {
-                  setActiveTab('postgres_sync');
-                } else {
-                  triggerCloudSync();
-                }
-              }}
-              title="Integração PostgreSQL em Tempo Real (.env). Clique para visualizar status e diagnósticos."
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-[10px] sm:text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
-            >
-              <Database className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="hidden sm:inline">PostgreSQL</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            </button>
 
             {onOpenSaleModal && checkPermission('canRegisterMovements') && (
               <button
@@ -519,6 +498,24 @@ export const Header: React.FC<HeaderProps> = ({
                         </span>
                       </button>
                     )}
+
+                    <button
+                      onClick={async () => {
+                        setShowUserMenu(false);
+                        try {
+                          await supabase.auth.signOut();
+                        } catch (e) {
+                          console.warn('Erro signOut Supabase:', e);
+                        }
+                        openSwitchUserModal();
+                      }}
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold text-red-600 hover:bg-red-50 transition-colors text-left border-t border-slate-100 mt-1 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 text-left">
+                        <LogOut className="w-4 h-4 text-red-600 shrink-0" />
+                        <span className="text-left">Sair da Conta (Logout)</span>
+                      </div>
+                    </button>
                   </div>
                 </div>
               )}

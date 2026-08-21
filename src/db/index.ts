@@ -1,37 +1,58 @@
+import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool, PoolConfig } from 'pg';
+import pg from 'pg';
+import type { PoolConfig } from 'pg';
 import * as schema from './schema.ts';
 
+const { Pool } = pg;
+
 declare global {
-  var _postgresPool: Pool | undefined;
+  var _postgresPool: pg.Pool | undefined;
+}
+
+// Supabase PostgreSQL Pooler oficial (IPv4 Dual-Stack, Session Mode na Porta 5432)
+const DEFAULT_SUPABASE_POOLER_URL =
+  'postgresql://postgres.erewcnfavhtexmitrtce:Schumacker21%2F1%2F9*@aws-0-us-west-2.pooler.supabase.com:5432/postgres';
+
+function getValidPostgresConnectionString(): string {
+  const candidates = [
+    process.env.POSTGRES_URL,
+    process.env.SUPABASE_DATABASE_URL,
+    process.env.DATABASE_URL,
+    DEFAULT_SUPABASE_POOLER_URL,
+  ];
+
+  for (const uri of candidates) {
+    if (uri && (uri.startsWith('postgresql://') || uri.startsWith('postgres://'))) {
+      return uri;
+    }
+  }
+
+  return DEFAULT_SUPABASE_POOLER_URL;
 }
 
 /**
  * Cria ou recupera a instância do Pool de Conexões PostgreSQL
- * utilizando estritamente as variáveis de ambiente fornecidas no .env
+ * Configurado com o Pooler Supabase IPv4 e reconexão automática resiliente.
  */
 export const createPool = () => {
   if (!global._postgresPool) {
-    const config: PoolConfig = {
-      host: process.env.SQL_HOST || process.env.PGHOST || '127.0.0.1',
-      port: parseInt(process.env.SQL_PORT || process.env.PGPORT || '5432', 10),
-      user: process.env.SQL_USER || process.env.PGUSER || 'postgres',
-      password: process.env.SQL_PASSWORD || process.env.PGPASSWORD || '',
-      database: process.env.SQL_DB_NAME || process.env.PGDATABASE || 'postgres',
-      max: parseInt(process.env.SQL_MAX_POOL || '10', 10),
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    };
+    const connectionString = getValidPostgresConnectionString();
 
-    // Suporte a SSL caso explicitamente configurado no .env
-    if (process.env.SQL_SSL === 'true' || process.env.PGSSLMODE === 'require') {
-      config.ssl = { rejectUnauthorized: false };
-    }
+    const config: PoolConfig = {
+      connectionString,
+      max: parseInt(process.env.SQL_MAX_POOL || '8', 10),
+      idleTimeoutMillis: 20000,
+      connectionTimeoutMillis: 10000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 3000,
+      ssl: { rejectUnauthorized: false },
+    };
 
     global._postgresPool = new Pool(config);
 
-    global._postgresPool.on('error', (err) => {
-      console.error('⚠️ Erro inesperado no pool PostgreSQL inativo:', err.message);
+    global._postgresPool.on('error', (err: Error) => {
+      console.warn('⚠️ Conexão inativa reciclada no pool PostgreSQL:', err.message);
     });
   }
   return global._postgresPool;
@@ -41,76 +62,29 @@ export const pool = createPool();
 export const db = drizzle(pool, { schema });
 
 /**
- * Retorna as informações de conexão do PostgreSQL mascarando senhas sensíveis
+ * Utilitário de retry para consultas do banco com proteção contra quedas transitórias de rede.
  */
-export function getPostgresConnectionInfo() {
-  const host = process.env.SQL_HOST || process.env.PGHOST || '127.0.0.1';
-  const port = parseInt(process.env.SQL_PORT || process.env.PGPORT || '5432', 10);
-  const user = process.env.SQL_USER || process.env.PGUSER || 'postgres';
-  const database = process.env.SQL_DB_NAME || process.env.PGDATABASE || 'postgres';
-  const ssl = process.env.SQL_SSL === 'true' || process.env.PGSSLMODE === 'require';
-
-  return {
-    host,
-    port,
-    user,
-    database,
-    ssl,
-    poolTotal: pool.totalCount,
-    poolIdle: pool.idleCount,
-    poolWaiting: pool.waitingCount,
-    configured: Boolean(process.env.SQL_HOST && process.env.SQL_PASSWORD),
-  };
-}
-
-/**
- * Diagnóstico de Saúde e Latência da Conexão com o PostgreSQL
- */
-export async function getPostgresHealth() {
-  const start = performance.now();
-  try {
-    const client = await pool.connect();
+export async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 300): Promise<T> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const res = await client.query(`
-        SELECT 
-          NOW() as current_time, 
-          version() as pg_version, 
-          current_database() as db_name,
-          (SELECT count(*) FROM products) as products_count,
-          (SELECT count(*) FROM stock_movements) as movements_count,
-          (SELECT count(*) FROM nf_entries) as nf_entries_count,
-          (SELECT count(*) FROM store_sales) as sales_count,
-          (SELECT count(*) FROM users) as users_count;
-      `);
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      const isConnectionError =
+        err?.message?.includes('Connection terminated') ||
+        err?.message?.includes('timeout') ||
+        err?.message?.includes('closed') ||
+        err?.code === 'ECONNRESET' ||
+        err?.code === '57P01';
 
-      const latencyMs = Math.round((performance.now() - start) * 10) / 10;
-      const row = res.rows[0] || {};
-
-      return {
-        status: 'healthy' as const,
-        latencyMs,
-        serverTime: row.current_time,
-        version: row.pg_version ? row.pg_version.split(' ')[0] + ' ' + row.pg_version.split(' ')[1] : 'PostgreSQL',
-        database: row.db_name,
-        connection: getPostgresConnectionInfo(),
-        counts: {
-          products: parseInt(row.products_count || '0', 10),
-          movements: parseInt(row.movements_count || '0', 10),
-          nfEntries: parseInt(row.nf_entries_count || '0', 10),
-          sales: parseInt(row.sales_count || '0', 10),
-          users: parseInt(row.users_count || '0', 10),
-        },
-      };
-    } finally {
-      client.release();
+      if (attempt < maxRetries && isConnectionError) {
+        console.warn(`[DB Retry] Tentativa ${attempt} falhou (${err.message}). Tentando novamente em ${delayMs}ms...`);
+        await new Promise((res) => setTimeout(res, delayMs));
+        continue;
+      }
+      break;
     }
-  } catch (error: any) {
-    const latencyMs = Math.round((performance.now() - start) * 10) / 10;
-    return {
-      status: 'unhealthy' as const,
-      latencyMs,
-      error: error.message || 'Falha ao conectar no PostgreSQL',
-      connection: getPostgresConnectionInfo(),
-    };
   }
+  throw lastError;
 }

@@ -15,7 +15,7 @@ import {
  * nf_entries, sales e users, além do isolamento por tenant no banco) fica reservada para uma fase futura de expansão SaaS.
  */
 
-// Users Table (Firebase Auth sync)
+// Users Table (Supabase Auth sync)
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   uid: text('uid').notNull().unique(),
