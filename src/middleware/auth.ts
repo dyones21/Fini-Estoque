@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { adminAuth } from '../lib/firebase-admin.ts';
 import { getUserByUid, getOrCreateUser } from '../db/users.ts';
 
 export interface AuthUserPayload {
@@ -14,24 +15,9 @@ export interface AuthRequest extends Request {
 }
 
 /**
- * Utilitário para decodificar payloads de JWT com segurança no Node backend
- */
-function decodeJwtPayload(token: string): any {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const jsonStr = Buffer.from(base64, 'base64').toString('utf8');
-    return JSON.parse(jsonStr);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Middleware Express para autenticação centralizada:
- * 1. JWT (Firebase Auth / OpenID JWT)
- * 2. Sessão Local / PIN do Operador autenticado no ERP
+ * Middleware Express para autenticação estrita:
+ * Valida a assinatura criptográfica do ID Token via Firebase Admin SDK.
+ * Rejeita qualquer token não assinado, inválido, forjado ou expirado.
  */
 export const requireAuth = async (
   req: AuthRequest,
@@ -43,61 +29,40 @@ export const requireAuth = async (
     return res.status(401).json({ error: 'Não autorizado: Token ausente' });
   }
 
-  const token = authHeader.split('Bearer ')[1]?.trim();
-  if (!token) {
-    return res.status(401).json({ error: 'Não autorizado: Token ausente' });
+  const token = authHeader.substring(7).trim();
+  if (!token || token === 'null' || token === 'undefined' || token.split('.').length !== 3) {
+    return res.status(401).json({ error: 'Não autorizado: Formato de token inválido' });
   }
 
-  // 1. Validar Token JWT (Firebase Auth / Google JWT)
-  if (token.startsWith('eyJ') || token.includes('.')) {
-    try {
-      const payload = decodeJwtPayload(token);
-      if (payload) {
-        const uid = payload.user_id || payload.sub || payload.uid || payload.id;
-        const email = payload.email || '';
-        const name = payload.name || payload.displayName || (email ? email.split('@')[0] : 'Usuário');
+  try {
+    // Validação estrita e criptográfica da assinatura do token no Firebase
+    const decodedToken = await adminAuth.verifyIdToken(token);
 
-        if (uid) {
-          req.user = {
-            uid,
-            email,
-            name,
-            ...payload,
-          };
-          return next();
-        }
-      }
-    } catch (err) {
-      console.warn('Erro ao decodificar token JWT:', err);
+    if (!decodedToken || !decodedToken.uid) {
+      return res.status(401).json({ error: 'Não autorizado: Token inválido' });
     }
-  }
 
-  // 2. Validação de Sessão Local / PIN do ERP no banco de dados
-  if (token.startsWith('local-session:') || token.startsWith('local:')) {
-    try {
-      const parts = token.split(':');
-      const uid = parts[1] || 'u0';
-      const email = parts[2] || 'dyones21@gmail.com';
-      const name = parts[3] ? decodeURIComponent(parts[3]) : 'Usuário Fini';
+    const uid = decodedToken.uid;
+    const email = (decodedToken.email || '').trim().toLowerCase();
+    const name = decodedToken.name || (email ? email.split('@')[0] : 'Usuário Fini');
 
-      let dbUser = await getUserByUid(uid);
-      if (!dbUser && email) {
-        dbUser = await getOrCreateUser(uid, email, name);
-      }
-
-      if (dbUser) {
-        req.user = {
-          uid: dbUser.uid,
-          email: dbUser.email,
-          name: dbUser.name,
-          role: dbUser.role,
-        };
-        return next();
-      }
-    } catch (err) {
-      console.warn('Erro ao processar sessão local de usuário:', err);
+    // Carrega ou registra o usuário sincronizado no PostgreSQL
+    let dbUser = await getUserByUid(uid);
+    if (!dbUser && email) {
+      dbUser = await getOrCreateUser(uid, email, name);
     }
-  }
 
-  return res.status(401).json({ error: 'Não autorizado: Token inválido ou expirado' });
+    req.user = {
+      uid,
+      email: dbUser?.email || email,
+      name: dbUser?.name || name,
+      role: dbUser?.role || 'Operador Depósito/Loja',
+      ...decodedToken,
+    };
+
+    return next();
+  } catch (err: any) {
+    console.warn('[Segurança] Falha na validação de assinatura do token Firebase:', err?.message || err);
+    return res.status(401).json({ error: 'Não autorizado: Token inválido ou expirado' });
+  }
 };

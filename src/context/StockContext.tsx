@@ -26,6 +26,7 @@ import { getRolePermissions } from '../utils/permissionUtils';
 import { notifyLowStock, notifyNewNFEntry } from '../utils/notificationService';
 import {
   authFetch,
+  safeParseJson,
   syncUserWithPostgres,
   saveUserViaApi,
   deleteUserViaApi,
@@ -71,7 +72,7 @@ interface StockContextType {
   setActiveLocation: (loc: LocationType) => void;
   setCurrentUserRole: (role: UserRole) => void;
   loginWithPin: (userId: string, pin: string) => boolean;
-  loginWithGoogleAccount: (customEmail?: string, customName?: string) => Promise<{ success: boolean; redirected?: boolean }>;
+  loginWithGoogleAccount: () => Promise<{ success: boolean; redirected?: boolean }>;
   logoutAndLock: () => void;
   openSwitchUserModal: () => void;
   closeAuthModal: () => void;
@@ -341,7 +342,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   // Login com Conta Google via Firebase
-  const loginWithGoogleAccount = async (customEmail?: string, customName?: string): Promise<{ success: boolean; redirected?: boolean }> => {
+  const loginWithGoogleAccount = async (): Promise<{ success: boolean; redirected?: boolean }> => {
     try {
       const user = await signInWithGoogle();
       if (user) {
@@ -353,15 +354,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return { success: true, redirected: false };
       }
     } catch (err: any) {
-      console.warn('Fluxo de popup Firebase interceptado, sincronizando usuário:', err?.message);
-      const email = (customEmail || 'dyones21@gmail.com').trim().toLowerCase();
-      const name = customName || (email === 'dyones21@gmail.com' ? 'Dyones Silva' : email.split('@')[0]);
-      await handleUserAuthenticated({
-        uid: `usr-${email.replace(/[^a-zA-Z0-9]/g, '_')}`,
-        email,
-        displayName: name,
-      });
-      return { success: true, redirected: false };
+      console.error('Erro no login com Google:', err);
+      throw err;
     }
     return { success: false, redirected: false };
   };
@@ -545,30 +539,19 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       let loadedUsers: any[] = [];
       let loadedSales: any[] = [];
 
-      if (resProd && resProd.ok) {
-        const data = await resProd.json();
-        if (Array.isArray(data)) loadedProducts = data;
-      }
+      const [dataProd, dataMov, dataNFs, dataSales, dataUsers] = await Promise.all([
+        safeParseJson(resProd),
+        safeParseJson(resMov),
+        safeParseJson(resNFs),
+        safeParseJson(resSales),
+        safeParseJson(resUsers),
+      ]);
 
-      if (resMov && resMov.ok) {
-        const data = await resMov.json();
-        if (Array.isArray(data)) loadedMovements = data;
-      }
-
-      if (resNFs && resNFs.ok) {
-        const data = await resNFs.json();
-        if (Array.isArray(data)) loadedNFs = data;
-      }
-
-      if (resSales && resSales.ok) {
-        const data = await resSales.json();
-        if (Array.isArray(data)) loadedSales = data;
-      }
-
-      if (resUsers && resUsers.ok) {
-        const data = await resUsers.json();
-        if (Array.isArray(data)) loadedUsers = data;
-      }
+      if (Array.isArray(dataProd)) loadedProducts = dataProd;
+      if (Array.isArray(dataMov)) loadedMovements = dataMov;
+      if (Array.isArray(dataNFs)) loadedNFs = dataNFs;
+      if (Array.isArray(dataSales)) loadedSales = dataSales;
+      if (Array.isArray(dataUsers)) loadedUsers = dataUsers;
 
       // Merge aggregates from sales into products
       const salesAggregates = new Map<string, { totalQty: number; totalVal: number }>();
@@ -630,8 +613,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         totalRecords: loadedProducts.length + loadedNFs.length + loadedMovements.length,
         autoSyncEnabled: true,
       });
-    } catch (e) {
-      console.error('Falha ao sincronizar com o servidor:', e);
+    } catch (e: any) {
+      console.warn('Aviso ao sincronizar dados com o servidor:', e?.message || e);
       setCloudInfo((prev) => ({ ...prev, status: 'error' }));
     } finally {
       setIsLoadingServer(false);
@@ -1344,8 +1327,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || `Erro HTTP ${response.status} ao zerar dados do sistema.`);
+      const errData = await safeParseJson<{ error?: string }>(response);
+      throw new Error(errData?.error || `Erro HTTP ${response.status} ao zerar dados do sistema.`);
     }
 
     setAllProducts([]);

@@ -1,48 +1,34 @@
 import { auth } from '../lib/firebase';
 
 /**
- * Obtém o token de autorização JWT:
- * 1. Sessão ativa no Firebase Auth (JWT via getIdToken())
- * 2. Token de Sessão Local autenticada por PIN / Perfil no ERP
+ * Obtém o token de autorização JWT assinado da sessão ativa do Firebase Auth.
+ * Se não houver usuário logado no Firebase, retorna null.
  */
 export async function getAuthToken(): Promise<string | null> {
   try {
-    // 1. Verificar sessão ativa no Firebase Auth
-    if (auth.currentUser) {
+    if (auth && auth.currentUser) {
       const token = await auth.currentUser.getIdToken();
-      if (token) {
+      if (token && typeof token === 'string' && token.split('.').length === 3) {
         return token;
       }
     }
   } catch (err) {
-    console.warn('Aviso: Sessão Firebase não ativa:', err);
+    console.warn('Aviso: Erro ao obter token do Firebase Auth:', err);
   }
 
-  // 2. Fallback: Sessão local / usuário autenticado no ERP via PIN
-  try {
-    const currentUserId = localStorage.getItem('FINI_CURRENT_USER_ID_V2') || 'u0';
-    const email = 'dyones21@gmail.com';
-    const name = 'Super Admin';
-    const pin = '2101';
-
-    return `local-session:${currentUserId}:${email}:${encodeURIComponent(name)}:${pin}`;
-  } catch (e) {
-    console.warn('Erro ao obter token de sessão local:', e);
-  }
-
-  return 'local-session:u0:dyones21@gmail.com:Super%20Admin:2101';
+  return null;
 }
 
 /**
  * Wrapper de fetch que anexa automaticamente o cabeçalho Authorization: Bearer <token>
- * para todas as chamadas HTTP com o backend Express (/api/...).
+ * quando há usuário autenticado no Firebase.
  */
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const token = await getAuthToken();
 
   const headers = new Headers(init.headers || {});
 
-  if (token) {
+  if (token && typeof token === 'string' && token.split('.').length === 3) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
@@ -54,6 +40,32 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
     ...init,
     headers,
   });
+}
+
+/**
+ * Utilitário seguro para ler JSON de uma resposta HTTP.
+ * Evita erros de "Unexpected token '<', "<!doctype "... is not valid JSON"
+ * caso o proxy ou servidor retorne HTML em vez de JSON.
+ */
+export async function safeParseJson<T = any>(response: Response | null | undefined): Promise<T | null> {
+  if (!response || !response.ok) return null;
+
+  try {
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json') && !contentType.includes('+json')) {
+      return null;
+    }
+
+    const text = await response.text();
+    if (!text || text.trim().startsWith('<')) {
+      return null;
+    }
+
+    return JSON.parse(text) as T;
+  } catch (e) {
+    console.warn('Aviso: Resposta HTTP não contém JSON válido:', e);
+    return null;
+  }
 }
 
 /**
@@ -74,12 +86,14 @@ export async function syncUserWithPostgres(user: {
       }),
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      return data.user;
+    if (response && response.ok) {
+      const data = await safeParseJson<{ success: boolean; user: any }>(response);
+      return data?.user || null;
     } else {
-      const err = await response.json().catch(() => ({}));
-      console.warn('Falha na resposta ao sincronizar usuário:', err);
+      const err = await safeParseJson(response);
+      if (err) {
+        console.warn('Falha na resposta ao sincronizar usuário:', err);
+      }
     }
   } catch (error) {
     console.error('Erro ao sincronizar usuário via API:', error);
@@ -100,12 +114,12 @@ export async function updateUserRoleViaApi(targetUid: string, newRole: string) {
     if (response.status === 403) {
       throw new Error('Você não tem permissão para esta ação.');
     }
-    const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido ao alterar cargo' }));
-    throw new Error(errorData.error || `Erro HTTP ${response.status} ao alterar cargo`);
+    const errorData = await safeParseJson<{ error?: string }>(response);
+    throw new Error(errorData?.error || `Erro HTTP ${response.status} ao alterar cargo`);
   }
 
-  const data = await response.json();
-  return data.user;
+  const data = await safeParseJson<{ success: boolean; user: any }>(response);
+  return data?.user;
 }
 
 /**
@@ -124,12 +138,12 @@ export async function saveUserViaApi(userData: {
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Erro ao salvar usuário no servidor' }));
-    throw new Error(errorData.error || `Erro HTTP ${response.status} ao salvar usuário`);
+    const errorData = await safeParseJson<{ error?: string }>(response);
+    throw new Error(errorData?.error || `Erro HTTP ${response.status} ao salvar usuário`);
   }
 
-  const data = await response.json();
-  return data.user;
+  const data = await safeParseJson<{ success: boolean; user: any }>(response);
+  return data?.user;
 }
 
 /**
@@ -141,9 +155,9 @@ export async function deleteUserViaApi(targetIdentifier: string) {
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Erro ao excluir usuário no servidor' }));
-    throw new Error(errorData.error || `Erro HTTP ${response.status} ao excluir usuário`);
+    const errorData = await safeParseJson<{ error?: string }>(response);
+    throw new Error(errorData?.error || `Erro HTTP ${response.status} ao excluir usuário`);
   }
 
-  return await response.json();
+  return await safeParseJson(response);
 }

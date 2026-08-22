@@ -283,14 +283,6 @@ async function startServer() {
             u.pin.trim() !== '' &&
             u.pin.trim() === inputPin
         );
-
-        if (!isPinValid) {
-          // Permite PINs mestres de administradores do ERP se o banco estiver em estado inicial
-          const KNOWN_ADMIN_PINS = ['2101', '9420', '5555', '1234'];
-          if (KNOWN_ADMIN_PINS.includes(inputPin)) {
-            isPinValid = true;
-          }
-        }
       }
 
       if (!isPinValid) {
@@ -307,7 +299,7 @@ async function startServer() {
   });
 
   // 404 handler for unmatched /api routes so they NEVER fall through to Vite SPA index.html
-  app.all('/api/*', (req, res) => {
+  app.all(['/api', '/api/*'], (req, res) => {
     res.status(404).json({ error: `Endpoint da API não encontrado: ${req.method} ${req.originalUrl}` });
   });
 
