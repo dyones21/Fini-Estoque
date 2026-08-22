@@ -197,11 +197,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return allUsers[0] || INITIAL_USERS[0];
   });
 
-  // Multi-tenant product and data states (populated exclusively from server)
-  const [allProducts, setAllProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [allNfEntries, setAllNfEntries] = useState<NFEntry[]>(INITIAL_NF_ENTRIES);
-  const [allTransfers, setAllTransfers] = useState<StockTransfer[]>(INITIAL_TRANSFERS);
-  const [allMovements, setAllMovements] = useState<StockMovement[]>(INITIAL_MOVEMENTS);
+  // Multi-tenant product and data states (populated exclusively from PostgreSQL server)
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [allNfEntries, setAllNfEntries] = useState<NFEntry[]>([]);
+  const [allTransfers, setAllTransfers] = useState<StockTransfer[]>([]);
+  const [allMovements, setAllMovements] = useState<StockMovement[]>([]);
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -213,8 +213,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [cloudInfo, setCloudInfo] = useState<CloudBackupInfo>({
     lastSyncTime: new Date().toISOString(),
     status: 'synced',
-    backupSizeKB: 128,
-    totalRecords: INITIAL_PRODUCTS.length + INITIAL_NF_ENTRIES.length + INITIAL_MOVEMENTS.length,
+    backupSizeKB: 0,
+    totalRecords: 0,
     autoSyncEnabled: true,
   });
 
@@ -568,8 +568,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         }
       });
 
-      if (loadedProducts.length > 0) {
-        const hydratedProducts = loadedProducts.map((p) => {
+      if (Array.isArray(dataProd)) {
+        const hydratedProducts = dataProd.map((p) => {
           const agg = salesAggregates.get(p.id) || { totalQty: 0, totalVal: 0 };
           return {
             ...p,
@@ -580,16 +580,16 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setAllProducts(hydratedProducts);
       }
 
-      if (loadedMovements.length > 0) {
-        setAllMovements(loadedMovements);
+      if (Array.isArray(dataMov)) {
+        setAllMovements(dataMov);
       }
 
-      if (loadedNFs.length > 0) {
-        setAllNfEntries(loadedNFs);
+      if (Array.isArray(dataNFs)) {
+        setAllNfEntries(dataNFs);
       }
 
-      if (loadedUsers.length > 0) {
-        const mappedUsers: UserProfile[] = loadedUsers.map((u: any) => {
+      if (Array.isArray(dataUsers) && dataUsers.length > 0) {
+        const mappedUsers: UserProfile[] = dataUsers.map((u: any) => {
           const role = (u.role || 'Operador Depósito/Loja') as UserRole;
           return {
             id: u.uid || `usr-${u.id}`,
@@ -606,11 +606,15 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setAllUsers(mappedUsers);
       }
 
+      const totalItems = (Array.isArray(dataProd) ? dataProd.length : 0) +
+        (Array.isArray(dataNFs) ? dataNFs.length : 0) +
+        (Array.isArray(dataMov) ? dataMov.length : 0);
+
       setCloudInfo({
         lastSyncTime: new Date().toISOString(),
         status: 'synced',
-        backupSizeKB: 128,
-        totalRecords: loadedProducts.length + loadedNFs.length + loadedMovements.length,
+        backupSizeKB: totalItems > 0 ? Math.max(16, Math.round(totalItems * 1.5)) : 0,
+        totalRecords: totalItems,
         autoSyncEnabled: true,
       });
     } catch (e: any) {

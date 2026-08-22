@@ -360,8 +360,6 @@ async function startServer() {
     try {
       const { pin } = req.body || {};
       const dbUser = (req as any).dbUser;
-      const userEmail = (req.user?.email || '').toLowerCase();
-      const isSuper = isSuperAdminEmail(userEmail) || dbUser?.role === 'super_admin' || dbUser?.role === 'admin';
 
       if (!pin || typeof pin !== 'string') {
         return res.status(400).json({ error: 'PIN de administrador é obrigatório para confirmar a exclusão do sistema.' });
@@ -370,16 +368,12 @@ async function startServer() {
       const inputPin = pin.trim();
       const userPin = (dbUser?.pin || '').trim();
 
-      // Master admin PINs aceitos para super administradores
-      const masterPins = ['2101', '9420', '5555', '1234', '0000'];
-
       let isPinValid = false;
+      // 1. Verifica se o PIN digitado coincide exatamente com o PIN cadastrado do usuário logado
       if (userPin && inputPin === userPin) {
         isPinValid = true;
-      } else if (isSuper && masterPins.includes(inputPin)) {
-        isPinValid = true;
       } else {
-        // Verificar se coincide estritamente com o PIN configurado de algum outro super_admin / gerente
+        // 2. Se o usuário logado não tiver PIN definido ou digitou outro PIN de gestão, verifica se coincide com o PIN cadastrado de outro super_admin / admin / gerente
         const allDbUsers = await getAllUsersFromDb();
         isPinValid = allDbUsers.some(
           (u) =>
@@ -392,14 +386,19 @@ async function startServer() {
 
       if (!isPinValid) {
         console.warn(`[Segurança] Tentativa de wipe do sistema com PIN incorreto pelo usuário UID=${req.user?.uid} (${req.user?.email})`);
-        return res.status(403).json({ error: 'PIN de administrador incorreto (use o PIN 2101 ou seu PIN cadastrado). Operação cancelada.' });
+        return res.status(403).json({ error: 'PIN de administrador incorreto. Digite o PIN real cadastrado no seu perfil.' });
       }
 
       const result = await wipeAllStockData();
+
+      if (!result || !result.success) {
+        return res.status(500).json({ error: result?.message || 'Falha ao executar exclusão dos dados no banco de dados.' });
+      }
+
       res.json(result);
     } catch (error: any) {
       console.error('API Error DELETE /api/system/wipe:', error);
-      res.status(500).json({ error: error.message || 'Erro ao zerar dados do sistema no Supabase' });
+      res.status(500).json({ error: error.message || 'Erro ao zerar dados do sistema no banco PostgreSQL / Supabase' });
     }
   });
 
