@@ -25,7 +25,7 @@ import { useStock } from '../context/StockContext';
 import { UserProfile, UserRole, UserPermissions } from '../types';
 import { UserAvatar } from './UserAvatar';
 import { AvatarPickerModal } from './AvatarPickerModal';
-import { updateUserRoleViaApi } from '../utils/apiAuth';
+import { updateUserRoleViaApi, createUserWithPasswordViaApi, setUserPasswordViaApi } from '../utils/apiAuth';
 
 export const UserManagementView: React.FC = () => {
   const { users, currentUser, updateUser, addUser, deleteUser, checkPermission } = useStock();
@@ -67,11 +67,32 @@ export const UserManagementView: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [showModalPassword, setShowModalPassword] = useState(false);
   const [newUserRole, setNewUserRole] = useState<UserRole>('operador_deposito');
   const [newUserPin, setNewUserPin] = useState('');
   const [newUserAvatarUrl, setNewUserAvatarUrl] = useState('emoji:🍬');
   const [showModalPin, setShowModalPin] = useState(true);
   const [modalError, setModalError] = useState('');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+
+  // Modal State for setting/resetting password of existing user
+  const [isSetPasswordModalOpen, setIsSetPasswordModalOpen] = useState(false);
+  const [targetPasswordEmail, setTargetPasswordEmail] = useState('');
+  const [targetPasswordUserName, setTargetPasswordUserName] = useState('');
+  const [targetPasswordValue, setTargetPasswordValue] = useState('');
+  const [showTargetPassword, setShowTargetPassword] = useState(false);
+  const [isSettingPassword, setIsSettingPassword] = useState(false);
+  const [setPasswordError, setSetPasswordError] = useState('');
+
+  const generateTemporaryPassword = () => {
+    const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+    let pass = 'Fini@';
+    for (let i = 0; i < 4; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
+  };
 
   // Avatar Picker Modal state
   const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
@@ -157,6 +178,9 @@ export const UserManagementView: React.FC = () => {
   const handleOpenCreateModal = () => {
     setNewUserName('');
     setNewUserEmail('');
+    setNewUserPassword(generateTemporaryPassword());
+    setShowModalPassword(false);
+    setIsCreatingUser(false);
     setNewUserRole('operador_deposito');
     setNewUserPin(Math.floor(1000 + Math.random() * 9000).toString()); // auto-generate convenient 4-digit PIN
     setNewUserAvatarUrl('emoji:🍬');
@@ -234,11 +258,12 @@ export const UserManagementView: React.FC = () => {
     }
   };
 
-  const handleConfirmCreateUser = (e: React.FormEvent) => {
+  const handleConfirmCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError('');
 
-    if (!newUserName.trim()) {
+    const trimmedName = newUserName.trim();
+    if (!trimmedName) {
       setModalError('Informe o nome completo do novo colaborador.');
       return;
     }
@@ -248,22 +273,68 @@ export const UserManagementView: React.FC = () => {
       return;
     }
 
-    const createdUser: UserProfile = {
-      id: 'u-' + Date.now(),
-      name: newUserName.trim(),
-      email: newUserEmail.trim() || `${newUserName.trim().toLowerCase().replace(/\s+/g, '.')}@fininovafriburgo.com.br`,
-      role: newUserRole,
-      pin: newUserPin,
-      active: true,
-      avatarUrl: newUserAvatarUrl || 'emoji:🍬',
-      permissions: newUserPermissions,
-    };
+    const trimmedEmail = newUserEmail.trim();
+    const trimmedPassword = newUserPassword.trim();
 
-    addUser(createdUser);
-    setSelectedUser(createdUser);
-    setFormData(createdUser);
-    setIsCreateModalOpen(false);
-    showNotification(`Usuário "${createdUser.name}" cadastrado com sucesso! PIN de Acesso: ${createdUser.pin}`);
+    if (trimmedPassword && trimmedPassword.length < 6) {
+      setModalError('A senha provisória de acesso deve conter pelo menos 6 caracteres.');
+      return;
+    }
+
+    if (trimmedPassword && !trimmedEmail) {
+      setModalError('Informe o e-mail de acesso para criar a conta com senha provisória.');
+      return;
+    }
+
+    setIsCreatingUser(true);
+
+    try {
+      let createdUid = 'u-' + Date.now();
+
+      // Se informou senha, cria diretamente via Firebase Admin SDK no servidor
+      if (trimmedPassword && trimmedEmail) {
+        const serverUser = await createUserWithPasswordViaApi({
+          email: trimmedEmail,
+          password: trimmedPassword,
+          name: trimmedName,
+          role: newUserRole,
+          pin: newUserPin,
+        });
+
+        if (serverUser?.uid) {
+          createdUid = serverUser.uid;
+        }
+      }
+
+      const createdUser: UserProfile = {
+        id: createdUid,
+        name: trimmedName,
+        email: trimmedEmail || `${trimmedName.toLowerCase().replace(/\s+/g, '.')}@fininovafriburgo.com.br`,
+        role: newUserRole,
+        pin: newUserPin,
+        active: true,
+        avatarUrl: newUserAvatarUrl || 'emoji:🍬',
+        permissions: newUserPermissions,
+      };
+
+      await addUser(createdUser);
+      setSelectedUser(createdUser);
+      setFormData(createdUser);
+      setIsCreateModalOpen(false);
+
+      if (trimmedPassword) {
+        showNotification(
+          `Colaborador "${createdUser.name}" criado no Firebase! E-mail: ${createdUser.email} | Senha Provisória: ${trimmedPassword} | PIN: ${createdUser.pin}`
+        );
+      } else {
+        showNotification(`Usuário "${createdUser.name}" cadastrado com sucesso! PIN de Acesso: ${createdUser.pin}`);
+      }
+    } catch (err: any) {
+      console.error('Erro ao cadastrar usuário:', err);
+      setModalError(err.message || 'Erro ao criar usuário no servidor.');
+    } finally {
+      setIsCreatingUser(false);
+    }
   };
 
   const handleDeleteUser = async (u: UserProfile) => {
@@ -286,6 +357,37 @@ export const UserManagementView: React.FC = () => {
         console.error('Erro ao excluir usuário:', err);
         alert(err.message || 'Erro ao excluir usuário no banco de dados.');
       }
+    }
+  };
+
+  const handleOpenSetPasswordModal = (user: UserProfile) => {
+    setTargetPasswordEmail(user.email);
+    setTargetPasswordUserName(user.name);
+    setTargetPasswordValue(generateTemporaryPassword());
+    setShowTargetPassword(false);
+    setSetPasswordError('');
+    setIsSetPasswordModalOpen(true);
+  };
+
+  const handleConfirmSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSetPasswordError('');
+
+    if (!targetPasswordValue || targetPasswordValue.trim().length < 6) {
+      setSetPasswordError('A senha deve conter no mínimo 6 caracteres.');
+      return;
+    }
+
+    setIsSettingPassword(true);
+    try {
+      await setUserPasswordViaApi(targetPasswordEmail, targetPasswordValue.trim());
+      showNotification(`Senha do usuário "${targetPasswordUserName}" (${targetPasswordEmail}) atualizada no Firebase! Nova senha: ${targetPasswordValue.trim()}`);
+      setIsSetPasswordModalOpen(false);
+    } catch (err: any) {
+      console.error('Erro ao definir senha:', err);
+      setSetPasswordError(err.message || 'Erro ao atualizar senha no Firebase Auth.');
+    } finally {
+      setIsSettingPassword(false);
     }
   };
 
@@ -440,6 +542,16 @@ export const UserManagementView: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleOpenSetPasswordModal(selectedUser)}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition-all flex items-center gap-1.5 border border-slate-200 shadow-2xs"
+                title="Definir ou alterar a senha deste colaborador no Firebase Authentication"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-rose-600" />
+                <span>Definir Senha</span>
+              </button>
+
               {!isEditing ? (
                 <>
                   <button
@@ -928,6 +1040,51 @@ export const UserManagementView: React.FC = () => {
                   </select>
                 </div>
 
+                {/* Senha Provisória de Acesso (Firebase Auth) */}
+                <div className="sm:col-span-2 bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                      <Lock className="w-4 h-4 text-rose-600" />
+                      <span>Senha Provisória de Login (Firebase):</span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNewUserPassword(generateTemporaryPassword())}
+                        className="text-[11px] font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors"
+                        title="Gerar Nova Senha Provisória"
+                      >
+                        <Wand2 className="w-3 h-3 text-rose-600" />
+                        <span>Gerar Senha</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowModalPassword(!showModalPassword)}
+                        className="text-[11px] font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1"
+                      >
+                        {showModalPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        <span>{showModalPassword ? 'Ocultar' : 'Mostrar'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <input
+                    type={showModalPassword ? 'text' : 'password'}
+                    placeholder="Mínimo 6 caracteres (ex: Fini@2026!)"
+                    value={newUserPassword}
+                    onChange={(e) => {
+                      setNewUserPassword(e.target.value);
+                      if (modalError) setModalError('');
+                    }}
+                    className="w-full bg-white border border-slate-300 font-mono text-xs font-bold text-slate-900 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    O colaborador usará este e-mail e senha provisória para fazer login no ERP. Apenas administradores podem criar novas contas.
+                  </p>
+                </div>
+
                 {/* PIN de Acesso */}
                 <div className="sm:col-span-2 bg-rose-50/60 p-4 rounded-2xl border border-rose-200 space-y-2">
                   <div className="flex items-center justify-between">
@@ -1102,15 +1259,108 @@ export const UserManagementView: React.FC = () => {
 
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md shadow-rose-900/30 transition-all flex items-center gap-2"
+                  disabled={isCreatingUser}
+                  className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:bg-slate-400 text-white font-black text-xs shadow-md shadow-rose-900/30 transition-all flex items-center gap-2 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>Cadastrar Usuário</span>
+                  <span>{isCreatingUser ? 'Criando no Firebase...' : 'Cadastrar Usuário'}</span>
                 </button>
               </div>
 
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal Definir / Alterar Senha no Firebase */}
+      {isSetPasswordModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-fadeIn space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center font-bold">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Definir Senha de Acesso</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">{targetPasswordUserName} ({targetPasswordEmail})</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSetPasswordModalOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmSetPassword} className="space-y-4">
+              {setPasswordError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{setPasswordError}</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">Nova Senha (Firebase):</label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTargetPasswordValue(generateTemporaryPassword())}
+                      className="text-[11px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 px-2 py-0.5 rounded-lg flex items-center gap-1"
+                    >
+                      <Wand2 className="w-3 h-3" />
+                      <span>Gerar Senha</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowTargetPassword(!showTargetPassword)}
+                      className="text-[11px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                    >
+                      {showTargetPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      <span>{showTargetPassword ? 'Ocultar' : 'Mostrar'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <input
+                  type={showTargetPassword ? 'text' : 'password'}
+                  required
+                  value={targetPasswordValue}
+                  onChange={(e) => {
+                    setTargetPasswordValue(e.target.value);
+                    if (setPasswordError) setSetPasswordError('');
+                  }}
+                  className="w-full bg-slate-50 border border-slate-300 font-mono text-xs font-bold text-slate-900 rounded-xl px-3.5 py-2.5 focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                  placeholder="Mínimo 6 caracteres"
+                />
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Esta senha será atualizada no Firebase Authentication. O colaborador poderá entrar no sistema digitando seu e-mail corporativo e esta senha.
+                </p>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsSetPasswordModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSettingPassword}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:bg-slate-400 text-white text-xs font-bold transition-colors shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>{isSettingPassword ? 'Salvando...' : 'Salvar Nova Senha'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

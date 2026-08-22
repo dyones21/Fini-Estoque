@@ -1,7 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth.ts';
-import { getUserByUid, getOrCreateUser } from '../db/users.ts';
-import { getRolePermissions, hasPermission } from '../utils/permissionUtils.ts';
+import { getUserByUid, getOrCreateUser, isSuperAdminEmail } from '../db/users.ts';
+import { getRolePermissions } from '../utils/permissionUtils.ts';
 import { UserPermissions } from '../types.ts';
 
 export type PermissionCheck =
@@ -9,9 +9,8 @@ export type PermissionCheck =
   | ((perms: UserPermissions, req: AuthRequest) => boolean);
 
 /**
- * Middleware para autorização baseada em RBAC no Supabase.
+ * Middleware para autorização baseada em RBAC.
  * - Suporta chave direta (ex: 'canManageUsers') ou predicado dinâmico baseado no request.
- * - Busca o usuário no banco de dados do Supabase.
  * - Super admin ('dyones21@gmail.com' ou role 'super_admin' / 'admin') tem bypass total.
  */
 export const requirePermission = (permissionCheck: PermissionCheck) => {
@@ -22,30 +21,42 @@ export const requirePermission = (permissionCheck: PermissionCheck) => {
       }
 
       const uid = req.user.uid;
-      const email = req.user.email || '';
+      const email = (req.user.email || '').toLowerCase();
       const name = req.user.name || email.split('@')[0] || 'Usuário';
 
-      // 1. Busca perfil e cargo no banco Supabase
-      let dbUser = await getUserByUid(uid);
-
-      // 2. Se não existir ainda, provisiona automaticamente no Supabase
-      if (!dbUser) {
-        dbUser = await getOrCreateUser(uid, email, name);
+      // 1. Busca perfil e cargo no banco / armazenamento seguro
+      let dbUser: any = null;
+      try {
+        dbUser = await getUserByUid(uid);
+        if (!dbUser && email) {
+          dbUser = await getOrCreateUser(uid, email, name);
+        }
+      } catch (e) {
+        console.warn('⚠️ [requirePermission] Fallback para payload do token:', e);
       }
 
       if (!dbUser) {
-        return res.status(403).json({ error: 'Acesso negado: Perfil de usuário não encontrado no Supabase' });
+        dbUser = {
+          uid,
+          email,
+          name,
+          role: req.user.role || (isSuperAdminEmail(email) ? 'super_admin' : 'Operador Depósito/Loja'),
+        };
       }
 
       // Anexa o dbUser ao request para os handlers usarem
       (req as any).dbUser = dbUser;
 
       // Super Admin ou Admin têm acesso irrestrito
-      if (dbUser.role === 'super_admin' || dbUser.role === 'admin') {
+      if (
+        dbUser.role === 'super_admin' ||
+        dbUser.role === 'admin' ||
+        isSuperAdminEmail(email)
+      ) {
         return next();
       }
 
-      // 3. Validação de permissão RBAC
+      // 2. Validação de permissão RBAC
       const perms = getRolePermissions(dbUser.role);
       let allowed = false;
 
@@ -64,8 +75,8 @@ export const requirePermission = (permissionCheck: PermissionCheck) => {
         error: `Acesso negado: Permissão '${permName}' requerida. Cargo atual: ${dbUser.role}`,
       });
     } catch (err: any) {
-      console.error('Erro na validação de permissão RBAC Supabase:', err);
-      return res.status(500).json({ error: 'Erro interno ao validar permissões no Supabase' });
+      console.error('Erro na validação de permissão RBAC:', err);
+      return res.status(500).json({ error: 'Erro interno ao validar permissões de acesso' });
     }
   };
 };

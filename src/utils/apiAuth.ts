@@ -48,7 +48,7 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
  * caso o proxy ou servidor retorne HTML em vez de JSON.
  */
 export async function safeParseJson<T = any>(response: Response | null | undefined): Promise<T | null> {
-  if (!response || !response.ok) return null;
+  if (!response) return null;
 
   try {
     const contentType = response.headers.get('content-type') || '';
@@ -144,6 +144,52 @@ export async function saveUserViaApi(userData: {
 
   const data = await safeParseJson<{ success: boolean; user: any }>(response);
   return data?.user;
+}
+
+/**
+ * Cria um novo usuário no Firebase Auth (via Admin SDK) e no Postgres com senha temporária.
+ * Apenas usuários com permissão canManageUsers podem executar.
+ */
+export async function createUserWithPasswordViaApi(userData: {
+  email: string;
+  password: string;
+  name?: string;
+  role?: string;
+  pin?: string;
+}) {
+  const response = await authFetch('/api/users/create-with-password', {
+    method: 'POST',
+    body: JSON.stringify(userData),
+  });
+
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error('Acesso negado: Você não tem permissão para cadastrar novos usuários.');
+    }
+    const errorData = await safeParseJson<{ error?: string }>(response);
+    throw new Error(errorData?.error || `Erro HTTP ${response.status} ao cadastrar usuário.`);
+  }
+
+  const data = await safeParseJson<{ success: boolean; user: any; message?: string }>(response);
+  return data?.user;
+}
+
+export async function setUserPasswordViaApi(email: string, password: string) {
+  const response = await authFetch('/api/users/set-password', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error('Acesso negado: Você não tem permissão para alterar senhas de usuários.');
+    }
+    const errorData = await safeParseJson<{ error?: string }>(response);
+    throw new Error(errorData?.error || `Erro HTTP ${response.status} ao alterar senha.`);
+  }
+
+  const data = await safeParseJson<{ success: boolean; message?: string }>(response);
+  return data;
 }
 
 /**

@@ -10,7 +10,8 @@ if (apps.length === 0) {
     process.env.FIREBASE_PROJECT_ID ||
     process.env.VITE_FIREBASE_PROJECT_ID ||
     process.env.GOOGLE_CLOUD_PROJECT ||
-    process.env.GCLOUD_PROJECT;
+    process.env.GCLOUD_PROJECT ||
+    'gen-lang-client-0540125949';
 
   if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     try {
@@ -21,7 +22,7 @@ if (apps.length === 0) {
       });
     } catch (err) {
       console.warn('Falha ao processar FIREBASE_SERVICE_ACCOUNT_KEY, inicializando padrão:', err);
-      adminApp = initializeApp(projectId ? { projectId } : undefined);
+      adminApp = initializeApp({ projectId });
     }
   } else if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
     adminApp = initializeApp({
@@ -33,8 +34,8 @@ if (apps.length === 0) {
       projectId,
     });
   } else {
-    // Inicialização padrão com ADC / Project ID no Google Cloud / AI Studio
-    adminApp = initializeApp(projectId ? { projectId } : undefined);
+    // Inicialização padrão com ADC (Application Default Credentials) no Google Cloud / Cloud Run
+    adminApp = initializeApp({ projectId });
   }
 } else {
   adminApp = getApp();

@@ -3,24 +3,43 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail as fbSendPasswordResetEmail,
   signOut,
   onAuthStateChanged as fbOnAuthStateChanged,
   User as FirebaseUser,
   Auth,
 } from 'firebase/auth';
 
-const apiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
-const projectId = (import.meta.env.VITE_FIREBASE_PROJECT_ID || '').trim();
+const apiKey = (
+  import.meta.env.VITE_FIREBASE_API_KEY ||
+  'AIzaSyDiRMrXydHjiD_j3T4pq5l7jLOIA0l3bGo'
+).trim();
+
+const projectId = (
+  import.meta.env.VITE_FIREBASE_PROJECT_ID ||
+  'gen-lang-client-0540125949'
+).trim();
+
 const authDomain = (
   import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
-  (projectId ? `${projectId}.firebaseapp.com` : '')
+  'gen-lang-client-0540125949.firebaseapp.com'
 ).trim();
+
 const storageBucket = (
   import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
-  (projectId ? `${projectId}.appspot.com` : '')
+  'gen-lang-client-0540125949.firebasestorage.app'
 ).trim();
-const messagingSenderId = (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim();
-const appId = (import.meta.env.VITE_FIREBASE_APP_ID || '').trim();
+
+const messagingSenderId = (
+  import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ||
+  '573191501804'
+).trim();
+
+const appId = (
+  import.meta.env.VITE_FIREBASE_APP_ID ||
+  '1:573191501804:web:4761661ea1c3fe5b1432c9'
+).trim();
 
 export const isFirebaseConfigured = Boolean(
   apiKey &&
@@ -56,6 +75,9 @@ if (isFirebaseConfigured) {
 export const auth = authInstance;
 export const googleProvider = googleProviderInstance;
 
+/**
+ * Autenticação via Google Popup (OAuth)
+ */
 export async function signInWithGoogle(): Promise<FirebaseUser> {
   if (!isFirebaseConfigured || !auth || !googleProvider) {
     throw new Error(
@@ -66,12 +88,53 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
   return result.user;
 }
 
+/**
+ * Autenticação via E-mail e Senha (Client-side)
+ * Para usuários cadastrados previamente pelo administrador.
+ */
+export async function signInEmail(email: string, password: string): Promise<FirebaseUser> {
+  if (!isFirebaseConfigured || !auth) {
+    throw new Error(
+      'Configuração do Firebase não encontrada. Defina as variáveis VITE_FIREBASE_API_KEY e VITE_FIREBASE_PROJECT_ID no painel de ambiente do AI Studio.'
+    );
+  }
+  const cleanEmail = email.trim();
+  if (!cleanEmail) {
+    throw new Error('Por favor, informe seu e-mail de acesso.');
+  }
+  if (!password) {
+    throw new Error('Por favor, informe sua senha de acesso.');
+  }
+  const result = await signInWithEmailAndPassword(auth, cleanEmail, password);
+  return result.user;
+}
+
+/**
+ * Envia e-mail de redefinição de senha para o usuário
+ */
+export async function sendPasswordReset(email: string): Promise<void> {
+  if (!isFirebaseConfigured || !auth) {
+    throw new Error('Firebase não configurado.');
+  }
+  const cleanEmail = email.trim();
+  if (!cleanEmail) {
+    throw new Error('Por favor, informe o e-mail cadastrado.');
+  }
+  await fbSendPasswordResetEmail(auth, cleanEmail);
+}
+
+/**
+ * Encerra a sessão ativa no Firebase Auth
+ */
 export async function signOutFirebase(): Promise<void> {
   if (auth) {
     await signOut(auth);
   }
 }
 
+/**
+ * Observer do estado de autenticação do Firebase
+ */
 export function onAuthStateChanged(
   authObj: Auth | null | undefined,
   nextOrObserver: (user: FirebaseUser | null) => void,

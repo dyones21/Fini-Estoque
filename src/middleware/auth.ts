@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { adminAuth } from '../lib/firebase-admin.ts';
-import { getUserByUid, getOrCreateUser } from '../db/users.ts';
+import { getUserByUid, getOrCreateUser, isSuperAdminEmail } from '../db/users.ts';
 
 export interface AuthUserPayload {
   uid: string;
@@ -34,35 +34,44 @@ export const requireAuth = async (
     return res.status(401).json({ error: 'Não autorizado: Formato de token inválido' });
   }
 
+  let decodedToken: any;
   try {
     // Validação estrita e criptográfica da assinatura do token no Firebase
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    decodedToken = await adminAuth.verifyIdToken(token);
+  } catch (verifyErr: any) {
+    console.warn('[Segurança] Falha na validação de assinatura do token Firebase:', verifyErr?.message || verifyErr);
+    return res.status(401).json({ error: 'Não autorizado: Token inválido ou expirado' });
+  }
 
-    if (!decodedToken || !decodedToken.uid) {
-      return res.status(401).json({ error: 'Não autorizado: Token inválido' });
-    }
+  if (!decodedToken || !decodedToken.uid) {
+    return res.status(401).json({ error: 'Não autorizado: Token inválido' });
+  }
 
-    const uid = decodedToken.uid;
-    const email = (decodedToken.email || '').trim().toLowerCase();
-    const name = decodedToken.name || (email ? email.split('@')[0] : 'Usuário Fini');
+  const uid = decodedToken.uid;
+  const email = (decodedToken.email || '').trim().toLowerCase();
+  const name = decodedToken.name || (email ? email.split('@')[0] : 'Usuário Fini');
 
-    // Carrega ou registra o usuário sincronizado no PostgreSQL
-    let dbUser = await getUserByUid(uid);
+  // Carrega ou registra o usuário sincronizado no PostgreSQL / Repositório seguro
+  let dbUser = null;
+  try {
+    dbUser = await getUserByUid(uid);
     if (!dbUser && email) {
       dbUser = await getOrCreateUser(uid, email, name);
     }
-
-    req.user = {
-      uid,
-      email: dbUser?.email || email,
-      name: dbUser?.name || name,
-      role: dbUser?.role || 'Operador Depósito/Loja',
-      ...decodedToken,
-    };
-
-    return next();
-  } catch (err: any) {
-    console.warn('[Segurança] Falha na validação de assinatura do token Firebase:', err?.message || err);
-    return res.status(401).json({ error: 'Não autorizado: Token inválido ou expirado' });
+  } catch (dbErr: any) {
+    console.warn('⚠️ [Auth User Profile Warning] Falha ao sincronizar com banco:', dbErr?.message || dbErr);
   }
+
+  const isSuperAdmin = isSuperAdminEmail(email);
+  const assignedRole = dbUser?.role || (isSuperAdmin ? 'super_admin' : 'Operador Depósito/Loja');
+
+  req.user = {
+    uid,
+    email: dbUser?.email || email,
+    name: dbUser?.name || name,
+    role: assignedRole,
+    ...decodedToken,
+  };
+
+  return next();
 };

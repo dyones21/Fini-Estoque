@@ -10,20 +10,59 @@ declare global {
   var _postgresPool: pg.Pool | undefined;
 }
 
-function getValidPostgresConnectionString(): string {
+/**
+ * Monta e valida a string de conexão real do PostgreSQL / Supabase
+ */
+export function getValidPostgresConnectionString(): string {
+  // Lista de variáveis candidatas onde a URL de conexão pode estar configurada
   const candidates = [
+    process.env.SQL_SSL,
     process.env.POSTGRES_URL,
     process.env.SUPABASE_DATABASE_URL,
     process.env.DATABASE_URL,
+    process.env.POSTGRES_PRISMA_URL,
   ];
 
-  for (const uri of candidates) {
-    if (uri && (uri.startsWith('postgresql://') || uri.startsWith('postgres://'))) {
-      return uri;
+  for (const raw of candidates) {
+    if (!raw) continue;
+    let uri = raw.trim();
+
+    // Se estiver em formato postgresql:// ou postgres://
+    if (uri.startsWith('postgresql://') || uri.startsWith('postgres://')) {
+      if (
+        !uri.includes('seu_projeto') &&
+        !uri.includes('sua_senha_aqui') &&
+        !uri.includes('aws-0-regiao') &&
+        !uri.includes('localhost') &&
+        !uri.includes('127.0.0.1')
+      ) {
+        // Trata caracteres especiais na senha se necessário (ex: barra / ou arroba @)
+        try {
+          const parsed = new URL(uri);
+          if (parsed.password && (parsed.password.includes('/') || parsed.password.includes('@'))) {
+            parsed.password = encodeURIComponent(decodeURIComponent(parsed.password));
+            uri = parsed.toString();
+          }
+        } catch {
+          // Se falhar o parse URL padrão, usa regex para escapar
+          uri = uri.replace(/(postgresql:\/\/[^:]+:)([^@]+)(@.+)/, (_match, p1, p2, p3) => {
+            return `${p1}${encodeURIComponent(decodeURIComponent(p2))}${p3}`;
+          });
+        }
+        return uri;
+      }
     }
   }
 
-  if (process.env.SQL_HOST && process.env.SQL_USER) {
+  // Fallback para variáveis individuais SQL_*
+  if (
+    process.env.SQL_HOST &&
+    process.env.SQL_USER &&
+    !process.env.SQL_HOST.startsWith('/app/cloudsql') &&
+    !process.env.SQL_HOST.includes('localhost') &&
+    !process.env.SQL_HOST.includes('127.0.0.1') &&
+    !process.env.SQL_USER.includes('seu_projeto')
+  ) {
     const user = encodeURIComponent(process.env.SQL_USER);
     const pass = process.env.SQL_PASSWORD ? encodeURIComponent(process.env.SQL_PASSWORD) : '';
     const host = process.env.SQL_HOST;
@@ -35,18 +74,23 @@ function getValidPostgresConnectionString(): string {
   return '';
 }
 
-/**
- * Cria ou recupera a instância do Pool de Conexões PostgreSQL
- * Configurado com o Pooler Supabase IPv4 e reconexão automática resiliente.
- */
-export const createPool = () => {
-  if (!global._postgresPool) {
-    const connectionString = getValidPostgresConnectionString();
+export const validConnectionString = getValidPostgresConnectionString();
+export const isPostgresConfigured = Boolean(validConnectionString && validConnectionString.length > 10);
 
+/**
+ * Cria ou recupera a instância do Pool de Conexões PostgreSQL.
+ * Retorna null se não houver banco de dados remoto configurado, evitando conexões cegas ao localhost.
+ */
+export const createPool = (): pg.Pool | null => {
+  if (!isPostgresConfigured) {
+    return null;
+  }
+
+  if (!global._postgresPool) {
     const config: PoolConfig = {
-      connectionString,
-      max: parseInt(process.env.SQL_MAX_POOL || '8', 10),
-      idleTimeoutMillis: 20000,
+      connectionString: validConnectionString,
+      max: parseInt(process.env.SQL_MAX_POOL || '10', 10),
+      idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 3000,
@@ -63,12 +107,12 @@ export const createPool = () => {
 };
 
 export const pool = createPool();
-export const db = drizzle(pool, { schema });
+export const db = pool ? drizzle(pool, { schema }) : (null as any);
 
 /**
  * Utilitário de retry para consultas do banco com proteção contra quedas transitórias de rede.
  */
-export async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 300): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2, delayMs = 200): Promise<T> {
   let lastError: any;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -80,6 +124,7 @@ export async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delayMs
         err?.message?.includes('timeout') ||
         err?.message?.includes('closed') ||
         err?.code === 'ECONNRESET' ||
+        err?.code === 'ECONNREFUSED' ||
         err?.code === '57P01';
 
       if (attempt < maxRetries && isConnectionError) {

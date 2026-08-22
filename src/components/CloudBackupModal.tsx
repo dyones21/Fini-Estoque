@@ -335,15 +335,20 @@ export const CloudBackupModal: React.FC = () => {
 
               {/* PIN Input */}
               <div className="space-y-2 pt-1">
-                <label className="block text-xs font-extrabold text-slate-800">
-                  Digite o PIN de Administrador para autorizar:
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-extrabold text-slate-800">
+                    Digite o PIN de Administrador:
+                  </label>
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                    PIN Padrão: 2101
+                  </span>
+                </div>
                 <div className="relative">
                   <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                   <input
                     type="password"
                     maxLength={6}
-                    placeholder="••••"
+                    placeholder="2101"
                     value={adminPin}
                     onChange={(e) => {
                       setAdminPin(e.target.value);

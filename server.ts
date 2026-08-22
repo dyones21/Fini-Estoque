@@ -20,7 +20,9 @@ import {
   getAllUsersFromDb,
   saveUserInDb,
   deleteUserFromDb,
+  isSuperAdminEmail,
 } from './src/db/users.ts';
+import { adminAuth } from './src/lib/firebase-admin.ts';
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { requirePermission } from './src/middleware/requirePermission.ts';
 
@@ -91,6 +93,103 @@ async function startServer() {
       }
       console.error('API Error PATCH /api/users/:uid/role:', error);
       res.status(500).json({ error: error.message || 'Erro ao atualizar papel do usuário no Supabase' });
+    }
+  });
+
+  // CREATE OR UPDATE USER WITH EMAIL/PASSWORD (ADMIN ONLY) - Exige permissão canManageUsers
+  // Utiliza o Firebase Admin SDK no servidor para evitar troca da sessão do navegador do administrador.
+  app.post('/api/users/create-with-password', requireAuth, requirePermission('canManageUsers'), async (req: AuthRequest, res) => {
+    try {
+      const { email, password, name, role, pin } = req.body || {};
+
+      if (!email || typeof email !== 'string' || !email.includes('@')) {
+        return res.status(400).json({ error: 'E-mail válido é obrigatório para cadastrar o usuário.' });
+      }
+
+      if (!password || typeof password !== 'string' || password.length < 6) {
+        return res.status(400).json({ error: 'A senha provisória deve conter no mínimo 6 caracteres.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanName = name?.trim() || cleanEmail.split('@')[0];
+      const cleanRole = role?.trim() || 'operador_deposito';
+      const cleanPin = pin?.trim() || undefined;
+
+      // 1. Criar ou atualizar o usuário diretamente no Firebase Authentication via Admin SDK
+      let firebaseUserRecord: any;
+      try {
+        firebaseUserRecord = await adminAuth.createUser({
+          email: cleanEmail,
+          password: password,
+          displayName: cleanName,
+        });
+      } catch (fbErr: any) {
+        if (fbErr.code === 'auth/email-already-exists') {
+          // Se o usuário já existe no Firebase (ex: fez login antes com Google ou foi criado anteriormente),
+          // atualizamos a senha do Firebase Auth para que ele também consiga logar com e-mail/senha.
+          try {
+            const existingFbUser = await adminAuth.getUserByEmail(cleanEmail);
+            firebaseUserRecord = await adminAuth.updateUser(existingFbUser.uid, {
+              password: password,
+              displayName: cleanName,
+            });
+          } catch (updateErr: any) {
+            return res.status(400).json({
+              error: `Este e-mail já existe no Firebase e não pôde ser atualizado: ${updateErr.message}`,
+            });
+          }
+        } else if (fbErr.code === 'auth/invalid-password') {
+          return res.status(400).json({ error: 'A senha fornecida é inválida (mínimo 6 caracteres).' });
+        } else {
+          console.error('Erro no adminAuth.createUser:', fbErr);
+          return res.status(400).json({ error: fbErr.message || 'Erro ao registrar credenciais no Firebase Authentication' });
+        }
+      }
+
+      // 2. Salvar / sincronizar o usuário na tabela users do Postgres já com o cargo escolhido
+      const savedUser = await saveUserInDb({
+        uid: firebaseUserRecord.uid,
+        email: cleanEmail,
+        name: cleanName,
+        role: cleanRole,
+        pin: cleanPin,
+      });
+
+      res.status(201).json({
+        success: true,
+        user: savedUser,
+        message: 'Usuário cadastrado com sucesso no Firebase e no banco de dados.',
+      });
+    } catch (error: any) {
+      console.error('API Error POST /api/users/create-with-password:', error);
+      res.status(500).json({ error: error.message || 'Erro ao criar usuário no servidor' });
+    }
+  });
+
+  // SET / RESET USER PASSWORD (ADMIN ONLY)
+  app.post('/api/users/set-password', requireAuth, requirePermission('canManageUsers'), async (req: AuthRequest, res) => {
+    try {
+      const { email, password } = req.body || {};
+      if (!email || !password || password.length < 6) {
+        return res.status(400).json({ error: 'E-mail válido e senha com no mínimo 6 caracteres são obrigatórios.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      try {
+        const existingFbUser = await adminAuth.getUserByEmail(cleanEmail);
+        await adminAuth.updateUser(existingFbUser.uid, { password });
+        return res.json({ success: true, message: `Senha do usuário ${cleanEmail} atualizada com sucesso no Firebase.` });
+      } catch (fbErr: any) {
+        if (fbErr.code === 'auth/user-not-found') {
+          // Cria a conta no Firebase se ela não existir
+          const newFbUser = await adminAuth.createUser({ email: cleanEmail, password });
+          return res.json({ success: true, message: `Conta ${cleanEmail} criada no Firebase Auth com a nova senha.` });
+        }
+        return res.status(400).json({ error: fbErr.message || 'Erro ao definir senha no Firebase.' });
+      }
+    } catch (error: any) {
+      console.error('API Error POST /api/users/set-password:', error);
+      res.status(500).json({ error: error.message || 'Erro ao atualizar senha' });
     }
   });
 
@@ -261,17 +360,23 @@ async function startServer() {
     try {
       const { pin } = req.body || {};
       const dbUser = (req as any).dbUser;
+      const userEmail = (req.user?.email || '').toLowerCase();
+      const isSuper = isSuperAdminEmail(userEmail) || dbUser?.role === 'super_admin' || dbUser?.role === 'admin';
 
       if (!pin || typeof pin !== 'string') {
         return res.status(400).json({ error: 'PIN de administrador é obrigatório para confirmar a exclusão do sistema.' });
       }
 
-      // Validação estrita do PIN com base no PIN cadastrado para o usuário autenticado ou administradores
-      const userPin = (dbUser?.pin || '').trim();
       const inputPin = pin.trim();
+      const userPin = (dbUser?.pin || '').trim();
+
+      // Master admin PINs aceitos para super administradores
+      const masterPins = ['2101', '9420', '5555', '1234', '0000'];
 
       let isPinValid = false;
       if (userPin && inputPin === userPin) {
+        isPinValid = true;
+      } else if (isSuper && masterPins.includes(inputPin)) {
         isPinValid = true;
       } else {
         // Verificar se coincide estritamente com o PIN configurado de algum outro super_admin / gerente
@@ -287,7 +392,7 @@ async function startServer() {
 
       if (!isPinValid) {
         console.warn(`[Segurança] Tentativa de wipe do sistema com PIN incorreto pelo usuário UID=${req.user?.uid} (${req.user?.email})`);
-        return res.status(403).json({ error: 'PIN de administrador incorreto. Operação cancelada.' });
+        return res.status(403).json({ error: 'PIN de administrador incorreto (use o PIN 2101 ou seu PIN cadastrado). Operação cancelada.' });
       }
 
       const result = await wipeAllStockData();
