@@ -332,6 +332,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
         setCurrentUser(updatedProfile);
         setIsAuthenticated(true);
+        setIsAuthModalOpen(false);
 
         // Puxa automaticamente os dados atualizados do servidor
         fetchServerData();
