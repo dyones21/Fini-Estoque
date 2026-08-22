@@ -27,7 +27,6 @@ import {
   Send,
   LogOut,
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 import { useStock } from '../context/StockContext';
 import { LocationType, UserRole } from '../types';
 import { formatDateTime } from '../utils/inventoryUtils';
@@ -502,12 +501,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <button
                       onClick={async () => {
                         setShowUserMenu(false);
-                        try {
-                          await supabase.auth.signOut();
-                        } catch (e) {
-                          console.warn('Erro signOut Supabase:', e);
-                        }
-                        openSwitchUserModal();
+                        logoutAndLock();
                       }}
                       className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold text-red-600 hover:bg-red-50 transition-colors text-left border-t border-slate-100 mt-1 cursor-pointer"
                     >

@@ -10,16 +10,11 @@ declare global {
   var _postgresPool: pg.Pool | undefined;
 }
 
-// Supabase PostgreSQL Pooler oficial (IPv4 Dual-Stack, Session Mode na Porta 5432)
-const DEFAULT_SUPABASE_POOLER_URL =
-  'postgresql://postgres.erewcnfavhtexmitrtce:Schumacker21%2F1%2F9*@aws-0-us-west-2.pooler.supabase.com:5432/postgres';
-
 function getValidPostgresConnectionString(): string {
   const candidates = [
     process.env.POSTGRES_URL,
     process.env.SUPABASE_DATABASE_URL,
     process.env.DATABASE_URL,
-    DEFAULT_SUPABASE_POOLER_URL,
   ];
 
   for (const uri of candidates) {
@@ -28,7 +23,16 @@ function getValidPostgresConnectionString(): string {
     }
   }
 
-  return DEFAULT_SUPABASE_POOLER_URL;
+  if (process.env.SQL_HOST && process.env.SQL_USER) {
+    const user = encodeURIComponent(process.env.SQL_USER);
+    const pass = process.env.SQL_PASSWORD ? encodeURIComponent(process.env.SQL_PASSWORD) : '';
+    const host = process.env.SQL_HOST;
+    const port = process.env.SQL_PORT || '5432';
+    const dbName = process.env.SQL_DB_NAME || 'postgres';
+    return `postgresql://${user}:${pass}@${host}:${port}/${dbName}`;
+  }
+
+  return '';
 }
 
 /**

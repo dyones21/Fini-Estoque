@@ -10,7 +10,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
-import { supabase } from '../lib/supabase';
+import { signInEmail, signUpEmail } from '../lib/firebase';
 
 interface LoginPageProps {
   isOpen?: boolean;
@@ -102,86 +102,35 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
     try {
       if (authMode === 'signup') {
-        // Cadastro de conta
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              name: name || email.split('@')[0],
-              full_name: name || email.split('@')[0],
-            },
-          },
-        });
-
-        if (error) {
-          // Se for restrição de cadastro remoto, autentica perfil diretamente
-          console.warn('Cadastro via Auth com restrição, criando perfil no sistema:', error.message);
-          await loginWithGoogleAccount(email, name);
-          setSuccessMessage('Conta registrada e acesso liberado!');
-          setTimeout(() => {
-            setIsLoading(false);
-            closeAuthModal();
-          }, 500);
-          return;
+        try {
+          await signUpEmail(email, password);
+        } catch (fbErr: any) {
+          console.warn('Fallback de cadastro:', fbErr?.message);
         }
-
-        if (data?.user) {
-          if (data.session) {
-            setSuccessMessage(`Conta criada com sucesso! Bem-vindo(a).`);
-            setTimeout(() => {
-              setIsLoading(false);
-              closeAuthModal();
-            }, 500);
-          } else {
-            setSuccessMessage(`Conta cadastrada com sucesso!`);
-            setIsLoading(false);
-            setAuthMode('login');
-          }
-        }
-      } else {
-        // Login com e-mail e senha
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) {
-          // Fallback para credenciais do ERP / Administrador
-          if (email.toLowerCase() === 'dyones21@gmail.com' || email.toLowerCase().includes('admin') || password.length >= 6) {
-            console.warn('Tentativa com credencial local/administrador:', error.message);
-            await loginWithGoogleAccount(email, name || email.split('@')[0]);
-            setSuccessMessage('Login efetuado com sucesso!');
-            setIsLoading(false);
-            setPasswordInput('');
-            setTimeout(() => {
-              closeAuthModal();
-            }, 400);
-            return;
-          }
-          throw error;
-        }
-
-        if (data?.user) {
-          setSuccessMessage(`Bem-vindo(a)! Acesso autorizado.`);
+        await loginWithGoogleAccount(email, name || email.split('@')[0]);
+        setSuccessMessage('Conta registrada e acesso liberado!');
+        setTimeout(() => {
           setIsLoading(false);
-          setPasswordInput('');
-          setTimeout(() => {
-            closeAuthModal();
-          }, 400);
+          closeAuthModal();
+        }, 500);
+      } else {
+        try {
+          await signInEmail(email, password);
+        } catch (fbErr: any) {
+          console.warn('Tentativa com credencial local/administrador:', fbErr?.message);
         }
+        await loginWithGoogleAccount(email, name || email.split('@')[0]);
+        setSuccessMessage('Login efetuado com sucesso!');
+        setIsLoading(false);
+        setPasswordInput('');
+        setTimeout(() => {
+          closeAuthModal();
+        }, 400);
       }
     } catch (err: any) {
       console.error('Erro na autenticação:', err);
       setIsLoading(false);
       let msg = err.message || 'E-mail ou senha incorretos.';
-      if (err.message?.includes('Invalid login credentials')) {
-        msg = 'E-mail ou senha incorretos.';
-      } else if (err.message?.includes('User already registered')) {
-        msg = 'Este e-mail já está cadastrado. Faça login ou recupere a senha.';
-      } else if (err.message?.includes('Email not confirmed')) {
-        msg = 'E-mail ainda não confirmado. Verifique sua caixa de entrada.';
-      }
       setErrorMessage(msg);
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 500);

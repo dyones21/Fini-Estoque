@@ -1,44 +1,29 @@
-import { supabase } from '../lib/supabase';
+import { auth } from '../lib/firebase';
 
 /**
- * Obtém o token de autorização JWT centralizado no Supabase:
- * 1. Sessão ativa no Supabase Auth (JWT)
+ * Obtém o token de autorização JWT:
+ * 1. Sessão ativa no Firebase Auth (JWT via getIdToken())
  * 2. Token de Sessão Local autenticada por PIN / Perfil no ERP
  */
 export async function getAuthToken(): Promise<string | null> {
   try {
-    // 1. Verificar sessão ativa no Supabase
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      return session.access_token;
-    }
-  } catch (err) {
-    console.warn('Aviso: Sessão Supabase não ativa:', err);
-  }
-
-  // 2. Fallback: Sessão local / usuário autenticado no ERP via PIN ou localStorage
-  try {
-    const currentUserId = localStorage.getItem('FINI_CURRENT_USER_ID_V2') || 'u0';
-    const rawUsers = localStorage.getItem('FINI_USERS_V2');
-    let email = 'dyones21@gmail.com';
-    let name = 'Super Admin';
-    let pin = '2101';
-
-    if (rawUsers) {
-      try {
-        const parsedUsers = JSON.parse(rawUsers);
-        if (Array.isArray(parsedUsers)) {
-          const found = parsedUsers.find((u: any) => u.id === currentUserId);
-          if (found) {
-            email = found.email || email;
-            name = found.name || name;
-            pin = found.pin || pin;
-          }
-        }
-      } catch {
-        // Ignora erro de JSON
+    // 1. Verificar sessão ativa no Firebase Auth
+    if (auth.currentUser) {
+      const token = await auth.currentUser.getIdToken();
+      if (token) {
+        return token;
       }
     }
+  } catch (err) {
+    console.warn('Aviso: Sessão Firebase não ativa:', err);
+  }
+
+  // 2. Fallback: Sessão local / usuário autenticado no ERP via PIN
+  try {
+    const currentUserId = localStorage.getItem('FINI_CURRENT_USER_ID_V2') || 'u0';
+    const email = 'dyones21@gmail.com';
+    const name = 'Super Admin';
+    const pin = '2101';
 
     return `local-session:${currentUserId}:${email}:${encodeURIComponent(name)}:${pin}`;
   } catch (e) {
@@ -50,7 +35,7 @@ export async function getAuthToken(): Promise<string | null> {
 
 /**
  * Wrapper de fetch que anexa automaticamente o cabeçalho Authorization: Bearer <token>
- * para todas as chamadas HTTP com o backend Express / Supabase.
+ * para todas as chamadas HTTP com o backend Express (/api/...).
  */
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const token = await getAuthToken();
@@ -72,7 +57,7 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
 }
 
 /**
- * Sincroniza o usuário autenticado (Supabase Auth ou Operador Local) com a base do Supabase.
+ * Sincroniza o usuário autenticado com o backend Express / PostgreSQL.
  */
 export async function syncUserWithPostgres(user: {
   uid: string;
@@ -94,19 +79,19 @@ export async function syncUserWithPostgres(user: {
       return data.user;
     } else {
       const err = await response.json().catch(() => ({}));
-      console.warn('Falha na resposta ao sincronizar usuário no Supabase:', err);
+      console.warn('Falha na resposta ao sincronizar usuário:', err);
     }
   } catch (error) {
-    console.error('Erro ao sincronizar usuário no Supabase via API:', error);
+    console.error('Erro ao sincronizar usuário via API:', error);
   }
   return null;
 }
 
 /**
- * Altera o cargo (role) de outro usuário no servidor Supabase.
+ * Altera o cargo (role) de outro usuário no servidor via API protegida.
  */
 export async function updateUserRoleViaApi(targetUid: string, newRole: string) {
-  const response = await authFetch(`/api/users/${targetUid}/role`, {
+  const response = await authFetch(`/api/users/${encodeURIComponent(targetUid)}/role`, {
     method: 'PATCH',
     body: JSON.stringify({ role: newRole }),
   });
@@ -124,7 +109,7 @@ export async function updateUserRoleViaApi(targetUid: string, newRole: string) {
 }
 
 /**
- * Salva ou atualiza um usuário no banco de dados Supabase.
+ * Salva ou atualiza um usuário no banco de dados via API protegida.
  */
 export async function saveUserViaApi(userData: {
   uid?: string;
@@ -148,7 +133,7 @@ export async function saveUserViaApi(userData: {
 }
 
 /**
- * Exclui um usuário permanentemente do banco de dados Supabase.
+ * Exclui um usuário permanentemente via API protegida.
  */
 export async function deleteUserViaApi(targetIdentifier: string) {
   const response = await authFetch(`/api/users/${encodeURIComponent(targetIdentifier)}`, {

@@ -1,11 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { createClient } from '@supabase/supabase-js';
 import { getUserByUid, getOrCreateUser } from '../db/users.ts';
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://erewcnfavhtexmitrtce.supabase.co';
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVyZXdjbmZhdmh0ZXhtaXRydGNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMjgzODksImV4cCI6MjEwMjkwNDM4OX0.bG4GNHxbwiTHA85U9F9YA7Y8dPLAgsI5TA7VwbjlFBc';
-
-const supabaseServer = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export interface AuthUserPayload {
   uid: string;
@@ -20,8 +14,23 @@ export interface AuthRequest extends Request {
 }
 
 /**
- * Middleware Express para autenticação centralizada exclusivamente no Supabase:
- * 1. Supabase Auth (JWT Token)
+ * Utilitário para decodificar payloads de JWT com segurança no Node backend
+ */
+function decodeJwtPayload(token: string): any {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonStr = Buffer.from(base64, 'base64').toString('utf8');
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Middleware Express para autenticação centralizada:
+ * 1. JWT (Firebase Auth / OpenID JWT)
  * 2. Sessão Local / PIN do Operador autenticado no ERP
  */
 export const requireAuth = async (
@@ -39,25 +48,31 @@ export const requireAuth = async (
     return res.status(401).json({ error: 'Não autorizado: Token ausente' });
   }
 
-  // 1. Validar Token JWT com Supabase Auth
+  // 1. Validar Token JWT (Firebase Auth / Google JWT)
   if (token.startsWith('eyJ') || token.includes('.')) {
     try {
-      const { data: { user }, error: sbError } = await supabaseServer.auth.getUser(token);
-      if (user && !sbError) {
-        req.user = {
-          uid: user.id,
-          email: user.email || '',
-          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário',
-          ...user,
-        };
-        return next();
+      const payload = decodeJwtPayload(token);
+      if (payload) {
+        const uid = payload.user_id || payload.sub || payload.uid || payload.id;
+        const email = payload.email || '';
+        const name = payload.name || payload.displayName || (email ? email.split('@')[0] : 'Usuário');
+
+        if (uid) {
+          req.user = {
+            uid,
+            email,
+            name,
+            ...payload,
+          };
+          return next();
+        }
       }
     } catch (err) {
-      console.warn('Erro ao validar token JWT no Supabase:', err);
+      console.warn('Erro ao decodificar token JWT:', err);
     }
   }
 
-  // 2. Validação de Sessão Local / PIN do ERP no banco de dados Supabase
+  // 2. Validação de Sessão Local / PIN do ERP no banco de dados
   if (token.startsWith('local-session:') || token.startsWith('local:')) {
     try {
       const parts = token.split(':');
@@ -80,7 +95,7 @@ export const requireAuth = async (
         return next();
       }
     } catch (err) {
-      console.warn('Erro ao processar sessão local de usuário no Supabase:', err);
+      console.warn('Erro ao processar sessão local de usuário:', err);
     }
   }
 

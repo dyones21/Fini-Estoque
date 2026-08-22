@@ -22,9 +22,20 @@ import {
 import { INITIAL_TENANTS } from '../data/initialTenants';
 import { getStarterProductsForTenant } from '../utils/tenantUtils';
 import { isLowStock, getDaysToExpiration } from '../utils/inventoryUtils';
-import { supabase } from '../lib/supabase';
 import { getRolePermissions } from '../utils/permissionUtils';
 import { notifyLowStock, notifyNewNFEntry } from '../utils/notificationService';
+import {
+  authFetch,
+  syncUserWithPostgres,
+  saveUserViaApi,
+  deleteUserViaApi,
+} from '../utils/apiAuth';
+import {
+  auth,
+  signInWithGoogle,
+  signOutFirebase,
+  onAuthStateChanged,
+} from '../lib/firebase';
 
 interface StockContextType {
   // State
@@ -118,40 +129,23 @@ const USERS_STORAGE_KEY = 'FINI_USERS_V2';
 const CURRENT_USER_KEY = 'FINI_CURRENT_USER_ID_V2';
 const CATEGORIES_STORAGE_KEY = 'FINI_CATEGORIES_V1';
 const TENANTS_STORAGE_KEY = 'FINI_TENANTS_V1';
-const CURRENT_TENANT_STORAGE_KEY = 'FINI_CURRENT_TENANT_ID_V1';
 
 export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // TENANTS STATE
+  // Multi-tenant State
   const [tenants, setTenants] = useState<Tenant[]>(() => {
     try {
       const saved = localStorage.getItem(TENANTS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const existingIds = new Set(parsed.map((t: Tenant) => t.id));
-          const missing = INITIAL_TENANTS.filter((it) => !existingIds.has(it.id));
-          const combined = [...parsed, ...missing];
-          const seen = new Set<string>();
-          return combined.filter((t) => {
-            if (!t || !t.id || seen.has(t.id)) return false;
-            seen.add(t.id);
-            return true;
-          });
-        }
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (e) {
-      console.error('Error loading tenants from localStorage:', e);
+      console.error('Error loading tenants from storage:', e);
     }
     return INITIAL_TENANTS;
   });
 
-  const [currentTenantId, setCurrentTenantIdState] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(CURRENT_TENANT_STORAGE_KEY);
-      if (saved) return saved;
-    } catch (e) {
-      console.error('Error reading current tenant:', e);
-    }
+  const [currentTenantId, setCurrentTenantId] = useState<string>(() => {
     return INITIAL_TENANTS[0].id;
   });
 
@@ -161,176 +155,34 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return tenants.find((t) => t.id === currentTenantId) || tenants[0] || INITIAL_TENANTS[0];
   }, [tenants, currentTenantId]);
 
-  const setCurrentTenantId = (tenantId: string) => {
-    setCurrentTenantIdState(tenantId);
-    try {
-      localStorage.setItem(CURRENT_TENANT_STORAGE_KEY, tenantId);
-    } catch (e) {
-      console.error('Error saving current tenant ID:', e);
-    }
-  };
-
-  const addTenant = async (newTenantData: Omit<Tenant, 'id' | 'createdAt'>): Promise<Tenant> => {
-    const newId = `tenant-${Date.now()}`;
-    const created: Tenant = {
-      ...newTenantData,
-      id: newId,
-      createdAt: new Date().toISOString(),
-    };
-    setTenants((prev) => {
-      const updated = [...prev, created];
-      try {
-        localStorage.setItem(TENANTS_STORAGE_KEY, JSON.stringify(updated));
-      } catch (e) {
-        console.error('Error saving tenants:', e);
-      }
-      return updated;
-    });
-    setCurrentTenantId(newId);
-
-    return created;
-  };
-
-  const updateTenant = async (updatedTenant: Tenant) => {
-    setTenants((prev) => {
-      const updated = prev.map((t) => (t.id === updatedTenant.id ? updatedTenant : t));
-      try {
-        localStorage.setItem(TENANTS_STORAGE_KEY, JSON.stringify(updated));
-      } catch (e) {
-        console.error('Error updating tenant:', e);
-      }
-      return updated;
-    });
-  };
-
-  const deleteTenant = async (tenantId: string) => {
-    setTenants((prev) => {
-      const updated = prev.filter((t) => t.id !== tenantId);
-      try {
-        localStorage.setItem(TENANTS_STORAGE_KEY, JSON.stringify(updated));
-      } catch (e) {
-        console.error('Error deleting tenant:', e);
-      }
-      return updated;
-    });
-    if (currentTenantId === tenantId) {
-      setCurrentTenantId(INITIAL_TENANTS[0].id);
-    }
-  };
-
-  const openTenantModal = () => setIsTenantModalOpen(true);
-  const closeTenantModal = () => setIsTenantModalOpen(false);
-
-  // RAW DATA STATES
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [allNfEntries, setAllNfEntries] = useState<NFEntry[]>([]);
-  const [allTransfers, setAllTransfers] = useState<StockTransfer[]>(INITIAL_TRANSFERS);
-  const [allMovements, setAllMovements] = useState<StockMovement[]>([]);
-
-  // TENANT SCOPED DATA MEMOS
-  const products = useMemo(() => {
-    const scoped = allProducts.filter((p) => {
-      if (!p.tenantId) return currentTenant.id === 'tenant-friburgo';
-      return p.tenantId === currentTenant.id;
-    });
-
-    const uniqueMap = new Map<string, Product>();
-    scoped.forEach((p) => {
-      if (!uniqueMap.has(p.id)) {
-        uniqueMap.set(p.id, p);
-      }
-    });
-    return Array.from(uniqueMap.values());
-  }, [allProducts, currentTenant.id]);
-
-  const nfEntries = useMemo(() => {
-    return allNfEntries.filter((nf) => {
-      if (!nf.tenantId) return currentTenant.id === 'tenant-friburgo';
-      return nf.tenantId === currentTenant.id;
-    });
-  }, [allNfEntries, currentTenant.id]);
-
-  const transfers = useMemo(() => {
-    return allTransfers.filter((tr) => {
-      if (!tr.tenantId) return currentTenant.id === 'tenant-friburgo';
-      return tr.tenantId === currentTenant.id;
-    });
-  }, [allTransfers, currentTenant.id]);
-
-  const movements = useMemo(() => {
-    return allMovements.filter((m) => {
-      if (!m.tenantId) return currentTenant.id === 'tenant-friburgo';
-      return m.tenantId === currentTenant.id;
-    });
-  }, [allMovements, currentTenant.id]);
-
-  const [customCategories, setCustomCategories] = useState<string[]>(() => {
+  // Categories State
+  const [categories, setCategories] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(CATEGORIES_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (e) {
-      console.error('Error loading custom categories:', e);
+      console.error('Error loading categories from storage:', e);
     }
-    return [];
+    return DEFAULT_CATEGORIES;
   });
 
-  const categories = useMemo(() => {
-    const set = new Set<string>([...DEFAULT_CATEGORIES, ...customCategories]);
-    products.forEach((p) => {
-      if (p.category) set.add(p.category);
-    });
-    return Array.from(set);
-  }, [customCategories, products]);
-
-  const addCategory = (newCategoryName: string): boolean => {
-    const trimmed = newCategoryName.trim();
-    if (!trimmed) return false;
-    const exists = categories.some((c) => c.toLowerCase() === trimmed.toLowerCase());
-    if (!exists) {
-      setCustomCategories((prev) => {
-        const next = [...prev, trimmed];
-        try {
-          localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(next));
-        } catch (e) {
-          console.error('Error saving custom categories:', e);
-        }
-        return next;
-      });
-    }
-    return true;
-  };
-
-  const [isLoadingCloudSql, setIsLoadingCloudSql] = useState<boolean>(true);
-
-  // Users State with LocalStorage persistence & tenant filtering
+  // Users State
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => {
     try {
       const saved = localStorage.getItem(USERS_STORAGE_KEY);
-      if (saved !== null) {
+      if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (e) {
-      console.error('Error loading users from localStorage:', e);
+      console.error('Error loading users from storage:', e);
     }
     return INITIAL_USERS;
   });
 
-  const users = useMemo(() => {
-    return allUsers.filter((u) => {
-      if (!u.tenantIds || u.tenantIds.length === 0 || u.tenantIds.includes('all')) return true;
-      return u.tenantIds.includes(currentTenant.id);
-    });
-  }, [allUsers, currentTenant.id]);
-
-  const [activeLocation, setActiveLocation] = useState<LocationType>('geral');
-
-  // Current User & Auth State
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     try {
       const savedId = localStorage.getItem(CURRENT_USER_KEY);
@@ -339,35 +191,100 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (found) return found;
       }
     } catch (e) {
-      console.error('Error reading currentUser:', e);
+      console.error('Error loading current user from storage:', e);
     }
     return allUsers[0] || INITIAL_USERS[0];
   });
 
-  // PIN Authentication modal is open by default on start
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(true);
+  // Multi-tenant product and data states (populated exclusively from server)
+  const [allProducts, setAllProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [allNfEntries, setAllNfEntries] = useState<NFEntry[]>(INITIAL_NF_ENTRIES);
+  const [allTransfers, setAllTransfers] = useState<StockTransfer[]>(INITIAL_TRANSFERS);
+  const [allMovements, setAllMovements] = useState<StockMovement[]>(INITIAL_MOVEMENTS);
 
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [activeLocation, setActiveLocation] = useState<LocationType>('deposito');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [isLoadingSupabase, setIsLoadingSupabase] = useState<boolean>(false);
+  const [isLoadingServer, setIsLoadingServer] = useState<boolean>(false);
+
+  // Cloud Backup Info
   const [cloudInfo, setCloudInfo] = useState<CloudBackupInfo>({
     lastSyncTime: new Date().toISOString(),
     status: 'synced',
+    backupSizeKB: 128,
+    totalRecords: INITIAL_PRODUCTS.length + INITIAL_NF_ENTRIES.length + INITIAL_MOVEMENTS.length,
     autoSyncEnabled: true,
-    totalRecords: 0,
-    backupSizeKB: 14.2,
   });
 
-  // Save users to localStorage whenever users list changes
+  const notifiedLowStockRef = useRef<Set<string>>(new Set());
+
+  // Filtered views by Tenant
+  const products = useMemo(() => {
+    return allProducts.filter((p) => !p.tenantId || p.tenantId === currentTenant.id);
+  }, [allProducts, currentTenant.id]);
+
+  const nfEntries = useMemo(() => {
+    return allNfEntries.filter((n) => !n.tenantId || n.tenantId === currentTenant.id);
+  }, [allNfEntries, currentTenant.id]);
+
+  const transfers = useMemo(() => {
+    return allTransfers.filter((t) => !t.tenantId || t.tenantId === currentTenant.id);
+  }, [allTransfers, currentTenant.id]);
+
+  const movements = useMemo(() => {
+    return allMovements.filter((m) => !m.tenantId || m.tenantId === currentTenant.id);
+  }, [allMovements, currentTenant.id]);
+
+  const users = useMemo(() => {
+    return allUsers.filter((u) => !u.tenantIds || u.tenantIds.includes(currentTenant.id));
+  }, [allUsers, currentTenant.id]);
+
+  // Persist Tenant / Categories / Users meta locally
+  useEffect(() => {
+    try {
+      localStorage.setItem(TENANTS_STORAGE_KEY, JSON.stringify(tenants));
+    } catch (e) {
+      console.error('Error saving tenants to storage:', e);
+    }
+  }, [tenants]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories));
+    } catch (e) {
+      console.error('Error saving categories to storage:', e);
+    }
+  }, [categories]);
+
   useEffect(() => {
     try {
       localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(allUsers));
     } catch (e) {
-      console.error('Error saving users to localStorage:', e);
+      console.error('Error saving users to storage:', e);
     }
   }, [allUsers]);
 
-  // Sincronização e perfil de usuário autenticado (Google Auth & Supabase Auth)
+  // Helper de notificação amigável para acessos bloqueados por falta de permissão (HTTP 403)
+  const handle403PermissionDenied = (actionName?: string) => {
+    const errorText = 'Você não tem permissão para esta ação.';
+    console.warn(`[Segurança 403] Bloqueio de autorização no servidor: ${actionName || 'Ação restrita'}`);
+
+    setNotifications((prev) => [
+      {
+        id: `perm-error-${Date.now()}`,
+        title: 'Acesso Restrito (Permissão 403)',
+        message: actionName ? `${errorText} (${actionName})` : errorText,
+        type: 'system',
+        severity: 'high',
+        timestamp: new Date().toISOString(),
+        read: false,
+      },
+      ...prev,
+    ]);
+  };
+
+  // Sincronização e perfil de usuário autenticado (Firebase Auth)
   const handleUserAuthenticated = async (userPayload: { uid: string; email?: string | null; displayName?: string | null }) => {
     const email = (userPayload.email || '').trim().toLowerCase();
     const localUser = allUsers.find(
@@ -376,161 +293,103 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         u.id === userPayload.uid
     );
     const name = localUser?.name || userPayload.displayName || email.split('@')[0] || 'Usuário Fini';
-    const isMasterAdmin = email === 'dyones21@gmail.com' || email.includes('dyones') || localUser?.role === 'super_admin';
 
     try {
-      const { data: dbUser, error: upsertErr } = await supabase
-        .from('users')
-        .upsert(
-          {
-            uid: userPayload.uid,
-            email: email,
-            name: name,
-            role: isMasterAdmin ? 'super_admin' : localUser?.role || 'Operador Depósito/Loja',
-          },
-          { onConflict: 'uid' }
-        )
-        .select('*')
-        .single();
-
-      if (upsertErr) {
-        console.warn('Aviso ao sincronizar perfil do usuário:', upsertErr.message);
-      }
-
-      const role = isMasterAdmin
-        ? 'super_admin'
-        : ((dbUser?.role || localUser?.role || 'Operador Depósito/Loja') as UserRole);
-
-      const updatedProfile: UserProfile = {
-        id: dbUser?.uid || userPayload.uid,
-        name: dbUser?.name || name,
+      const syncedUser = await syncUserWithPostgres({
+        uid: userPayload.uid,
         email: email,
-        role: role,
-        pin: dbUser?.pin || localUser?.pin || '',
-        active: true,
-        tenantIds: ['tenant-friburgo'],
-        avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
-        permissions: getRolePermissions(role),
-      };
+        displayName: name,
+      });
 
-      setAllUsers((prev) => {
-        const exists = prev.some(
-          (u) => u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
-        );
-        if (exists) {
-          return prev.map((u) =>
-            u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
-              ? { ...u, ...updatedProfile }
-              : u
+      if (syncedUser) {
+        const role = (syncedUser.role || 'Operador Depósito/Loja') as UserRole;
+        const updatedProfile: UserProfile = {
+          id: syncedUser.uid,
+          name: syncedUser.name || name,
+          email: syncedUser.email || email,
+          role: role,
+          pin: localUser?.pin || '',
+          active: true,
+          tenantIds: ['tenant-friburgo'],
+          avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+          permissions: getRolePermissions(role),
+        };
+
+        setAllUsers((prev) => {
+          const exists = prev.some(
+            (u) => u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
           );
-        }
-        return [...prev, updatedProfile];
-      });
+          if (exists) {
+            return prev.map((u) =>
+              u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
+                ? { ...u, ...updatedProfile }
+                : u
+            );
+          }
+          return [...prev, updatedProfile];
+        });
 
-      setCurrentUser(updatedProfile);
-      setIsAuthenticated(true);
+        setCurrentUser(updatedProfile);
+        setIsAuthenticated(true);
 
-      // Puxa automaticamente os dados atualizados do banco de dados
-      fetchSupabaseData();
-    } catch (error) {
-      console.error('Erro na sincronização do usuário:', error);
-      // Fallback local garantido para não travar o usuário
-      const fallbackRole: UserRole = isMasterAdmin ? 'super_admin' : 'Operador Depósito/Loja';
-      const fallbackProfile: UserProfile = {
-        id: userPayload.uid,
-        name: name,
-        email: email,
-        role: fallbackRole,
-        pin: '',
-        active: true,
-        tenantIds: ['tenant-friburgo'],
-        avatarUrl: fallbackRole === 'super_admin' ? 'emoji:👑' : 'emoji:🍬',
-        permissions: getRolePermissions(fallbackRole),
-      };
-      setCurrentUser(fallbackProfile);
-      setIsAuthenticated(true);
-    }
-  };
-
-  // Login com Conta Google resiliente (tenta OAuth com fallback instantâneo)
-  const loginWithGoogleAccount = async (customEmail?: string, customName?: string): Promise<{ success: boolean; redirected?: boolean }> => {
-    const email = (customEmail || 'dyones21@gmail.com').trim().toLowerCase();
-    const name = customName || (email === 'dyones21@gmail.com' ? 'Dyones Silva' : email.split('@')[0]);
-    const uid = `google-${email.replace(/[^a-zA-Z0-9]/g, '_')}`;
-
-    try {
-      // 1. Tenta inicializar fluxo OAuth oficial se o provider estiver configurado
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-        },
-      });
-
-      if (!error && data?.url) {
-        return { success: true, redirected: true };
+        // Puxa automaticamente os dados atualizados do servidor
+        fetchServerData();
       }
-    } catch (oauthErr: any) {
-      console.warn('OAuth em nuvem não configurado no painel, autenticando perfil Google diretamente:', oauthErr?.message);
+    } catch (error) {
+      console.error('Erro na sincronização do usuário via API:', error);
     }
-
-    // 2. Autenticação direta e sincronização segura com o banco de dados
-    await handleUserAuthenticated({
-      uid,
-      email,
-      displayName: name,
-    });
-
-    return { success: true, redirected: false };
   };
 
-  // Listener centralizado exclusivamente para o Supabase Auth
+  // Login com Conta Google via Firebase
+  const loginWithGoogleAccount = async (customEmail?: string, customName?: string): Promise<{ success: boolean; redirected?: boolean }> => {
+    try {
+      const user = await signInWithGoogle();
+      if (user) {
+        await handleUserAuthenticated({
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+        });
+        return { success: true, redirected: false };
+      }
+    } catch (err: any) {
+      console.warn('Fluxo de popup Firebase interceptado, sincronizando usuário:', err?.message);
+      const email = (customEmail || 'dyones21@gmail.com').trim().toLowerCase();
+      const name = customName || (email === 'dyones21@gmail.com' ? 'Dyones Silva' : email.split('@')[0]);
+      await handleUserAuthenticated({
+        uid: `usr-${email.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        email,
+        displayName: name,
+      });
+      return { success: true, redirected: false };
+    }
+    return { success: false, redirected: false };
+  };
+
+  // Listener para Firebase Auth
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
         handleUserAuthenticated({
-          uid: session.user.id,
-          email: session.user.email,
-          displayName: session.user.user_metadata?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName,
         });
       }
     });
 
     return () => {
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, []);
 
-  // Escuta em Tempo Real (Supabase Real-Time Subscriptions) para sincronizar dados automaticamente
-  useEffect(() => {
-    const channel = supabase
-      .channel('supabase-realtime-erp')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-        fetchSupabaseData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, () => {
-        fetchSupabaseData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'store_sales' }, () => {
-        fetchSupabaseData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'nf_entries' }, () => {
-        fetchSupabaseData();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  // Sincronização periódica transparente em segundo plano (a cada 20 segundos quando logado)
+  // Sincronização periódica em segundo plano com o servidor Express (a cada 25s)
   useEffect(() => {
     const interval = setInterval(() => {
       if (isAuthenticated) {
-        fetchSupabaseData();
+        fetchServerData();
       }
-    }, 20000);
+    }, 25000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
@@ -551,7 +410,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return false;
   };
 
-  const logoutAndLock = () => {
+  const logoutAndLock = async () => {
+    try {
+      await signOutFirebase();
+    } catch (e) {
+      console.warn('Erro ao deslogar do Firebase:', e);
+    }
     setIsAuthenticated(false);
     setIsAuthModalOpen(true);
   };
@@ -571,33 +435,23 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       ...updatedUser,
       permissions: updatedUser.permissions || getRolePermissions(updatedUser.role),
     };
+
     setAllUsers((prev) => {
       const next = prev.map((u) => (u.id === userToSave.id ? userToSave : u));
-      try {
-        localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(next));
-      } catch (e) {
-        console.error('Error saving updated users:', e);
-      }
       return next;
     });
     setCurrentUser((prev) => (prev && prev.id === userToSave.id ? userToSave : prev));
 
     try {
-      const { error } = await supabase.from('users').upsert(
-        {
-          uid: userToSave.id,
-          email: userToSave.email,
-          name: userToSave.name,
-          role: userToSave.role,
-          pin: userToSave.pin || null,
-        },
-        { onConflict: 'uid' }
-      );
-      if (error) {
-        console.warn('Aviso Supabase ao atualizar usuário:', error.message);
-      }
+      await saveUserViaApi({
+        uid: userToSave.id,
+        email: userToSave.email,
+        name: userToSave.name,
+        role: userToSave.role,
+        pin: userToSave.pin || undefined,
+      });
     } catch (e) {
-      console.warn('Falha ao sincronizar atualização do usuário no Supabase:', e);
+      console.warn('Falha ao sincronizar atualização do usuário no servidor:', e);
     }
   };
 
@@ -607,35 +461,24 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       tenantIds: newUser.tenantIds || [currentTenant.id],
       permissions: newUser.permissions || getRolePermissions(newUser.role),
     };
+
     setAllUsers((prev) => {
       const exists = prev.some((u) => u.id === userWithTenant.id || u.email?.toLowerCase() === userWithTenant.email?.toLowerCase());
-      const next = exists
+      return exists
         ? prev.map((u) => (u.id === userWithTenant.id || u.email?.toLowerCase() === userWithTenant.email?.toLowerCase() ? userWithTenant : u))
         : [...prev, userWithTenant];
-      try {
-        localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(next));
-      } catch (e) {
-        console.error('Error saving new user:', e);
-      }
-      return next;
     });
 
     try {
-      const { error } = await supabase.from('users').upsert(
-        {
-          uid: userWithTenant.id,
-          email: userWithTenant.email,
-          name: userWithTenant.name,
-          role: userWithTenant.role,
-          pin: userWithTenant.pin || null,
-        },
-        { onConflict: 'uid' }
-      );
-      if (error) {
-        console.warn('Aviso Supabase ao adicionar usuário:', error.message);
-      }
+      await saveUserViaApi({
+        uid: userWithTenant.id,
+        email: userWithTenant.email,
+        name: userWithTenant.name,
+        role: userWithTenant.role,
+        pin: userWithTenant.pin || undefined,
+      });
     } catch (e) {
-      console.warn('Falha ao persistir novo usuário no Supabase:', e);
+      console.warn('Falha ao persistir novo usuário no servidor:', e);
     }
   };
 
@@ -643,20 +486,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const targetUser = allUsers.find((u) => u.id === userId || u.email?.toLowerCase() === userId.toLowerCase());
     const targetIdentifier = targetUser?.id || targetUser?.email || userId;
 
-    // 1. Remove do estado local e localStorage
     setAllUsers((prev) => {
-      const next = prev.filter(
+      return prev.filter(
         (u) => u.id !== userId && u.id !== targetIdentifier && u.email?.toLowerCase() !== targetIdentifier.toLowerCase()
       );
-      try {
-        localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(next));
-      } catch (e) {
-        console.error('Error deleting user from localStorage:', e);
-      }
-      return next;
     });
 
-    // Handle fallback if currently logged in user is deleted
     setCurrentUser((prev) => {
       if (
         prev &&
@@ -671,274 +506,193 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             u.email?.toLowerCase() !== targetIdentifier.toLowerCase()
         );
         const fallback = remaining[0] || INITIAL_USERS[0];
-        try {
-          localStorage.setItem(CURRENT_USER_KEY, fallback.id);
-        } catch (e) {
-          console.error('Error saving fallback current user:', e);
-        }
         return fallback;
       }
       return prev;
     });
 
-    // 2. Apaga diretamente na tabela de usuários do Supabase
     try {
-      const { error } = await supabase
-        .from('users')
-        .delete()
-        .or(`uid.eq.${targetIdentifier},email.eq.${targetIdentifier}`);
-      if (error) {
-        console.warn('Aviso Supabase ao excluir usuário:', error.message);
-      }
+      await deleteUserViaApi(targetIdentifier);
     } catch (error) {
-      console.error('Erro ao excluir usuário no Supabase:', error);
+      console.error('Erro ao excluir usuário no servidor:', error);
       throw error;
     }
   };
 
   const checkPermission = (permissionKey: keyof UserPermissions): boolean => {
     if (!currentUser || !currentUser.permissions) return false;
-    if (currentUser.role === 'admin') return true;
+    if (currentUser.role === 'admin' || currentUser.role === 'super_admin') return true;
     return Boolean(currentUser.permissions[permissionKey]);
   };
 
-  // Fetch initial data directly from Supabase tables
-  const fetchSupabaseData = async () => {
-    setIsLoadingSupabase(true);
+  // Fetch initial data exclusively through Express Server API routes (/api/...)
+  const fetchServerData = async () => {
+    setIsLoadingServer(true);
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
 
-      // Consultas diretas utilizando o cliente Supabase nas tabelas
-      const [
-        { data: dbProducts, error: errProd },
-        { data: dbMovements, error: errMov },
-        { data: dbNFs, error: errNFs },
-        { data: dbNFItems },
-        { data: dbUsers },
-        { data: dbSales },
-      ] = await Promise.all([
-        supabase.from('products').select('*').order('updated_at', { ascending: false }),
-        supabase.from('stock_movements').select('*').order('timestamp', { ascending: false }),
-        supabase.from('nf_entries').select('*').order('created_at', { ascending: false }),
-        supabase.from('nf_items').select('*'),
-        supabase.from('users').select('*'),
-        supabase.from('store_sales').select('*').order('timestamp', { ascending: false }),
+      const [resProd, resMov, resNFs, resSales, resUsers] = await Promise.all([
+        authFetch('/api/products').catch(() => null),
+        authFetch('/api/movements').catch(() => null),
+        authFetch('/api/nf-entries').catch(() => null),
+        authFetch('/api/sales').catch(() => null),
+        authFetch('/api/users').catch(() => null),
       ]);
-
-      if (errProd) console.warn('Aviso Supabase ao carregar produtos:', errProd.message);
-      if (errMov) console.warn('Aviso Supabase ao carregar movimentações:', errMov.message);
-      if (errNFs) console.warn('Aviso Supabase ao carregar NFs:', errNFs.message);
 
       let loadedProducts: Product[] = [];
       let loadedMovements: StockMovement[] = [];
       let loadedNFs: NFEntry[] = [];
-      let loadedUsers: any[] = dbUsers || [];
-      let loadedSales: any[] = dbSales || [];
+      let loadedUsers: any[] = [];
+      let loadedSales: any[] = [];
 
-      // Mapeamento dos produtos do Supabase
-      if (dbProducts && Array.isArray(dbProducts)) {
-        loadedProducts = dbProducts.map((r: any) => ({
-          id: r.id,
-          sku: r.sku,
-          ean: r.ean || r.code_ean || '',
-          codeEAN: r.ean || r.code_ean || '',
-          name: r.name,
-          category: r.category,
-          unit: r.unit,
-          stockDeposito: Number(r.stock_deposito ?? r.stockDeposito ?? 0),
-          stockLoja: Number(r.stock_loja ?? r.stockLoja ?? 0),
-          minStockDeposito: Number(r.min_stock_deposito ?? r.minStockDeposito ?? 10),
-          minStockLoja: Number(r.min_stock_loja ?? r.minStockLoja ?? 5),
-          costPrice: Number(r.cost_price ?? r.costPrice ?? 0),
-          sellPrice: Number(r.sell_price ?? r.sellPrice ?? 0),
-          expirationDate: r.expiration_date ?? r.expirationDate ?? '',
-          batchNumber: r.batch_number ?? r.batchNumber ?? '',
-          tenantId: 'tenant-friburgo',
-          lastUpdated: r.updated_at ?? r.updatedAt ?? new Date().toISOString(),
-          totalSalesQuantity: 0,
-          totalSalesValue: 0,
-        }));
+      if (resProd && resProd.ok) {
+        const data = await resProd.json();
+        if (Array.isArray(data)) loadedProducts = data;
       }
 
-      // Mapeamento das movimentações do Supabase
-      if (dbMovements && Array.isArray(dbMovements)) {
-        loadedMovements = dbMovements.map((r: any) => ({
-          id: r.id,
-          tenantId: 'tenant-friburgo',
-          date: r.timestamp || new Date().toISOString(),
-          productId: r.product_id ?? r.productId,
-          productName: r.product_name ?? r.productName,
-          type: r.type,
-          quantity: Number(r.quantity || 0),
-          location: (r.destination === 'Loja Nova Friburgo' || r.origin === 'Loja Nova Friburgo' ? 'loja' : 'deposito') as any,
-          reason: r.reason || '',
-          userName: r.created_by ?? r.createdBy ?? 'Sistema',
-        }));
+      if (resMov && resMov.ok) {
+        const data = await resMov.json();
+        if (Array.isArray(data)) loadedMovements = data;
       }
 
-      // Mapeamento de Notas Fiscais e Itens do Supabase
-      if (dbNFs && Array.isArray(dbNFs)) {
-        const allItems = dbNFItems || [];
-        loadedNFs = dbNFs.map((e: any) => {
-          const entryItems = allItems
-            .filter((i: any) => (i.nf_id ?? i.nfId) === e.id)
-            .map((i: any) => ({
-              productId: i.product_id ?? i.productId,
-              productName: i.product_name ?? i.productName,
-              quantity: Number(i.quantity || 0),
-              costPrice: Number(i.cost_price ?? i.costPrice ?? 0),
-              totalCost: Number(i.total_cost ?? i.totalCost ?? 0),
-              batchNumber: i.batch_number ?? i.batchNumber ?? '',
-              expirationDate: i.expiration_date ?? i.expirationDate ?? '',
-            }));
+      if (resNFs && resNFs.ok) {
+        const data = await resNFs.json();
+        if (Array.isArray(data)) loadedNFs = data;
+      }
 
+      if (resSales && resSales.ok) {
+        const data = await resSales.json();
+        if (Array.isArray(data)) loadedSales = data;
+      }
+
+      if (resUsers && resUsers.ok) {
+        const data = await resUsers.json();
+        if (Array.isArray(data)) loadedUsers = data;
+      }
+
+      // Merge aggregates from sales into products
+      const salesAggregates = new Map<string, { totalQty: number; totalVal: number }>();
+      loadedSales.forEach((s: any) => {
+        const pId = s.productId || s.product_id;
+        const qty = Number(s.quantity) || 0;
+        const val = Number(s.totalAmount ?? s.total_amount) || 0;
+        if (pId) {
+          const current = salesAggregates.get(pId) || { totalQty: 0, totalVal: 0 };
+          salesAggregates.set(pId, {
+            totalQty: current.totalQty + qty,
+            totalVal: current.totalVal + val,
+          });
+        }
+      });
+
+      if (loadedProducts.length > 0) {
+        const hydratedProducts = loadedProducts.map((p) => {
+          const agg = salesAggregates.get(p.id) || { totalQty: 0, totalVal: 0 };
           return {
-            id: e.id,
-            tenantId: 'tenant-friburgo',
-            numberNF: e.number_nf ?? e.numberNF,
-            accessKey: e.access_key ?? e.accessKey ?? undefined,
-            supplier: e.supplier,
-            cnpjSupplier: e.cnpj_supplier ?? e.cnpjSupplier,
-            issueDate: e.issue_date ?? e.issueDate,
-            receiveDate: (e.created_at ?? e.createdAt ?? new Date().toISOString()).slice(0, 10),
-            totalValue: Number(e.total_value ?? e.totalValue ?? 0),
-            notes: e.notes || undefined,
-            createdBy: e.created_by ?? e.createdBy ?? 'Operador',
-            items: entryItems,
+            ...p,
+            totalSalesQuantity: agg.totalQty,
+            totalSalesValue: agg.totalVal,
           };
         });
+        setAllProducts(hydratedProducts);
+      }
+
+      if (loadedMovements.length > 0) {
+        setAllMovements(loadedMovements);
+      }
+
+      if (loadedNFs.length > 0) {
+        setAllNfEntries(loadedNFs);
       }
 
       if (loadedUsers.length > 0) {
-        setAllUsers((prev) => {
-          const dbUids = new Set(loadedUsers.map((u: any) => u.uid).filter(Boolean));
-          const dbEmails = new Set(loadedUsers.map((u: any) => u.email?.toLowerCase()).filter(Boolean));
-          const updated: UserProfile[] = [];
-
-          for (const dbUser of loadedUsers) {
-            const localMatch = prev.find(
-              (u) => u.id === dbUser.uid || u.email?.toLowerCase() === dbUser.email?.toLowerCase()
-            );
-            const role = (dbUser.role || 'Operador Depósito/Loja') as UserRole;
-            const mappedUser: UserProfile = {
-              id: dbUser.uid || `usr-${dbUser.id}`,
-              name: dbUser.name || 'Usuário Fini',
-              email: dbUser.email,
-              role: role,
-              pin: dbUser.pin || localMatch?.pin || '',
-              active: true,
-              tenantIds: ['tenant-friburgo'],
-              avatarUrl: localMatch?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
-              permissions: getRolePermissions(role),
-            };
-            updated.push(mappedUser);
-          }
-
-          // Mantém usuários locais estáticos que não colidem com os do banco
-          for (const localUser of prev) {
-            const isFromDb =
-              dbUids.has(localUser.id) ||
-              (localUser.email && dbEmails.has(localUser.email.toLowerCase()));
-            if (!isFromDb) {
-              if (
-                !updated.some(
-                  (u) =>
-                    u.id === localUser.id ||
-                    (localUser.email && u.email?.toLowerCase() === localUser.email.toLowerCase())
-                )
-              ) {
-                updated.push(localUser);
-              }
-            }
-          }
-
-          return updated;
+        const mappedUsers: UserProfile[] = loadedUsers.map((u: any) => {
+          const role = (u.role || 'Operador Depósito/Loja') as UserRole;
+          return {
+            id: u.uid || `usr-${u.id}`,
+            name: u.name || 'Usuário Fini',
+            email: u.email,
+            role,
+            pin: u.pin || '',
+            active: u.active ?? true,
+            tenantIds: ['tenant-friburgo'],
+            avatarUrl: role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬',
+            permissions: getRolePermissions(role),
+          };
         });
+        setAllUsers(mappedUsers);
       }
 
-      // Tag loaded records with default tenant if missing
-      loadedProducts = loadedProducts.map((p) => ({ ...p, tenantId: p.tenantId || 'tenant-friburgo' }));
-      loadedMovements = loadedMovements.map((m) => ({ ...m, tenantId: m.tenantId || 'tenant-friburgo' }));
-      loadedNFs = loadedNFs.map((nf) => ({ ...nf, tenantId: nf.tenantId || 'tenant-friburgo' }));
-
-      // Compute sales aggregates per product from real Supabase sales
-      if (loadedSales.length > 0) {
-        const salesByProd: Record<string, { qty: number; val: number }> = {};
-        for (const s of loadedSales) {
-          const pId = s.product_id ?? s.productId;
-          if (!salesByProd[pId]) {
-            salesByProd[pId] = { qty: 0, val: 0 };
-          }
-          salesByProd[pId].qty += Number(s.quantity || 0);
-          salesByProd[pId].val += Number(s.total_amount ?? s.totalAmount ?? 0);
-        }
-
-        loadedProducts = loadedProducts.map((p) => {
-          const saleAgg = salesByProd[p.id];
-          if (saleAgg) {
-            return {
-              ...p,
-              totalSalesQuantity: saleAgg.qty,
-              totalSalesValue: saleAgg.val,
-            };
-          }
-          return p;
-        });
-      }
-
-      // Se a lista de produtos retornada estiver vazia (ex: banco inicial novo), usa os dados iniciais
-      if (loadedProducts.length === 0) {
-        loadedProducts = INITIAL_PRODUCTS.map((p) => ({ ...p, tenantId: 'tenant-friburgo' }));
-      }
-
-      setAllProducts(loadedProducts);
-      setAllMovements(loadedMovements);
-      setAllNfEntries(loadedNFs);
-
-      const totalCount = loadedProducts.length + loadedNFs.length + loadedMovements.length + loadedSales.length;
       setCloudInfo({
         lastSyncTime: new Date().toISOString(),
         status: 'synced',
+        backupSizeKB: 128,
+        totalRecords: loadedProducts.length + loadedNFs.length + loadedMovements.length,
         autoSyncEnabled: true,
-        totalRecords: totalCount,
-        backupSizeKB: Math.round((totalCount * 0.45 + 15) * 10) / 10,
       });
     } catch (e) {
-      console.error('Falha na comunicação com Supabase:', e);
+      console.error('Falha ao sincronizar com o servidor:', e);
       setCloudInfo((prev) => ({ ...prev, status: 'error' }));
     } finally {
-      setIsLoadingSupabase(false);
+      setIsLoadingServer(false);
     }
   };
 
   useEffect(() => {
-    fetchSupabaseData();
+    fetchServerData();
   }, []);
 
-  // Ensure active tenant has starter products if empty in allProducts
-  useEffect(() => {
-    if (!isLoadingSupabase) {
-      setAllProducts((prev) => {
-        const hasForCurrentTenant = prev.some((p) => {
-          if (!p.tenantId) return currentTenant.id === 'tenant-friburgo';
-          return p.tenantId === currentTenant.id;
-        });
-        if (!hasForCurrentTenant) {
-          const starters = getStarterProductsForTenant(currentTenant);
-          const newStarters = starters.filter((s) => !prev.some((p) => p.id === s.id));
-          if (newStarters.length > 0) {
-            return [...newStarters, ...prev];
-          }
-        }
-        return prev;
-      });
+  // Tenant Operations
+  const setCurrentTenant = (tenantId: string) => {
+    setCurrentTenantId(tenantId);
+  };
+
+  const addTenant = (tenantData: Omit<Tenant, 'id' | 'createdAt'>): Tenant => {
+    const newTenant: Tenant = {
+      ...tenantData,
+      id: `tenant-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    setTenants((prev) => [...prev, newTenant]);
+
+    const starterProducts = getStarterProductsForTenant(newTenant);
+    setAllProducts((prev) => [...starterProducts, ...prev]);
+
+    return newTenant;
+  };
+
+  const updateTenant = (updatedTenant: Tenant) => {
+    setTenants((prev) => prev.map((t) => (t.id === updatedTenant.id ? updatedTenant : t)));
+  };
+
+  const deleteTenant = (tenantId: string) => {
+    if (tenants.length <= 1) return;
+    setTenants((prev) => prev.filter((t) => t.id !== tenantId));
+    setAllProducts((prev) => prev.filter((p) => p.tenantId !== tenantId));
+    setAllNfEntries((prev) => prev.filter((n) => n.tenantId !== tenantId));
+    setAllTransfers((prev) => prev.filter((t) => t.tenantId !== tenantId));
+    setAllMovements((prev) => prev.filter((m) => m.tenantId !== tenantId));
+
+    if (currentTenantId === tenantId) {
+      const remaining = tenants.filter((t) => t.id !== tenantId);
+      setCurrentTenantId(remaining[0].id);
     }
-  }, [currentTenant.id, isLoadingSupabase]);
+  };
 
-  // Track notified low stock product locations to avoid repeating push notifications on every render
-  const notifiedLowStockRef = useRef<Set<string>>(new Set());
+  const openTenantModal = () => setIsTenantModalOpen(true);
+  const closeTenantModal = () => setIsTenantModalOpen(false);
 
-  // Compute automatic notifications & trigger SW Push Notifications whenever products change
+  // Category Operations
+  const addCategory = (newCategoryName: string): boolean => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return false;
+    const exists = categories.some((c) => c.toLowerCase() === trimmed.toLowerCase());
+    if (exists) return false;
+    setCategories((prev) => [...prev, trimmed]);
+    return true;
+  };
+
+  // Low stock & Expiration Monitoring
   useEffect(() => {
     const newAlerts: AppNotification[] = [];
     const currentLowStockKeys = new Set<string>();
@@ -1015,7 +769,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     });
 
-    // Update notified set
     notifiedLowStockRef.current = currentLowStockKeys;
     setNotifications(newAlerts);
   }, [products]);
@@ -1030,26 +783,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (found) setCurrentUser(found);
   };
 
-  // Helper de notificação amigável para acessos bloqueados por falta de permissão (HTTP 403)
-  const handle403PermissionDenied = (actionName?: string) => {
-    const errorText = 'Você não tem permissão para esta ação.';
-    console.warn(`[Segurança 403] Bloqueio de autorização no servidor: ${actionName || 'Ação restrita'}`);
-
-    setNotifications((prev) => [
-      {
-        id: `perm-error-${Date.now()}`,
-        title: 'Acesso Restrito (Permissão 403)',
-        message: actionName ? `${errorText} (${actionName})` : errorText,
-        type: 'system',
-        severity: 'high',
-        timestamp: new Date().toISOString(),
-        read: false,
-      },
-      ...prev,
-    ]);
-  };
-
-  // Add Product with Supabase direct mutation
+  // Add Product with server Express API
   const addProduct = async (
     newP: Partial<Product> & Omit<Product, 'lastUpdated' | 'totalSalesQuantity' | 'totalSalesValue'> & { id?: string }
   ): Promise<Product> => {
@@ -1082,42 +816,32 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setAllProducts((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
 
     try {
-      const payload = {
-        id: created.id,
-        sku: created.sku,
-        ean: created.ean,
-        name: created.name,
-        category: created.category,
-        unit: created.unit,
-        stock_deposito: created.stockDeposito,
-        stock_loja: created.stockLoja,
-        min_stock_deposito: created.minStockDeposito,
-        min_stock_loja: created.minStockLoja,
-        cost_price: created.costPrice,
-        sell_price: created.sellPrice,
-        expiration_date: created.expirationDate,
-        batch_number: created.batchNumber,
-        updated_at: new Date().toISOString(),
-      };
+      const response = await authFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(created),
+      });
 
-      const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
-
-      if (error) {
-        console.warn('Aviso Supabase ao salvar produto:', error.message);
+      if (response.status === 403) {
+        handle403PermissionDenied('cadastrar produto');
+        setAllProducts((prev) => prev.filter((p) => p.id !== created.id));
+        throw new Error('Você não tem permissão para esta ação.');
       }
     } catch (e: any) {
-      console.error('Erro ao salvar produto no Supabase:', e);
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao salvar produto via API:', e);
+      }
     }
 
     return created;
   };
 
-  // Update Product with Supabase direct mutation
+  // Update Product with server Express API
   const updateProduct = async (id: string, updated: Partial<Product>) => {
-    // Search strictly within current tenant's products first to enforce tenant security
     const targetProduct = products.find((p) => p.id === id) || allProducts.find((p) => p.id === id);
     if (!targetProduct) return;
 
+    const previousProduct = { ...targetProduct };
     const newProd = {
       ...targetProduct,
       ...updated,
@@ -1134,36 +858,25 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
 
     try {
-      const payload: any = {
-        updated_at: new Date().toISOString(),
-      };
-      if (newProd.sku !== undefined) payload.sku = newProd.sku;
-      if (newProd.ean !== undefined || (newProd as any).codeEAN !== undefined) {
-        payload.ean = newProd.ean || (newProd as any).codeEAN || '';
-      }
-      if (newProd.name !== undefined) payload.name = newProd.name;
-      if (newProd.category !== undefined) payload.category = newProd.category;
-      if (newProd.unit !== undefined) payload.unit = newProd.unit;
-      if (newProd.stockDeposito !== undefined) payload.stock_deposito = newProd.stockDeposito;
-      if (newProd.stockLoja !== undefined) payload.stock_loja = newProd.stockLoja;
-      if (newProd.minStockDeposito !== undefined) payload.min_stock_deposito = newProd.minStockDeposito;
-      if (newProd.minStockLoja !== undefined) payload.min_stock_loja = newProd.minStockLoja;
-      if (newProd.costPrice !== undefined) payload.cost_price = newProd.costPrice;
-      if (newProd.sellPrice !== undefined) payload.sell_price = newProd.sellPrice;
-      if (newProd.expirationDate !== undefined) payload.expiration_date = newProd.expirationDate;
-      if (newProd.batchNumber !== undefined) payload.batch_number = newProd.batchNumber;
+      const response = await authFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProd),
+      });
 
-      const { error } = await supabase.from('products').update(payload).eq('id', id);
-
-      if (error) {
-        console.warn('Aviso Supabase ao atualizar produto:', error.message);
+      if (response.status === 403) {
+        handle403PermissionDenied('editar produto');
+        setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct : p)));
+        throw new Error('Você não tem permissão para esta ação.');
       }
     } catch (e: any) {
-      console.error('Erro ao atualizar produto no Supabase:', e);
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao atualizar produto via API:', e);
+      }
     }
   };
 
-  // Delete Product with Supabase direct mutation
+  // Delete Product with server Express API
   const deleteProduct = async (id: string) => {
     const isTenantProduct = products.some((p) => p.id === id);
     if (!isTenantProduct) {
@@ -1171,20 +884,25 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return;
     }
 
+    const previousProducts = [...allProducts];
     setAllProducts((prev) => prev.filter((p) => p.id !== id));
 
     try {
-      const { error } = await supabase.from('products').delete().eq('id', id);
+      const response = await authFetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-      if (error) {
-        console.warn('Aviso Supabase ao excluir produto:', error.message);
+      if (response.status === 403) {
+        handle403PermissionDenied('excluir produto');
+        setAllProducts(previousProducts);
+        throw new Error('Você não tem permissão para esta ação.');
       }
     } catch (e: any) {
-      console.error('Erro ao deletar produto do Supabase:', e);
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao deletar produto via API:', e);
+      }
     }
   };
 
-  // Add NF Entry with Supabase direct mutation
+  // Add NF Entry with server Express API
   const addNFEntry = async (nfData: Omit<NFEntry, 'id' | 'receiveDate'>) => {
     const nowISO = new Date().toISOString();
     const newNF: NFEntry = {
@@ -1232,7 +950,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return p;
       });
 
-      // Handle missing products that weren't in prevProducts yet
       const missingItems = nfData.items.filter(
         (i) =>
           !matchedItemIds.has(i.productId) &&
@@ -1273,7 +990,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return nextProducts;
     });
 
-    // Register movement log for each item
     const newMovements: StockMovement[] = nfData.items.map((item) => ({
       id: `mov-${Date.now()}-${item.productId}`,
       tenantId: currentTenant.id,
@@ -1291,7 +1007,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     setAllMovements((prev) => [...newMovements, ...prev]);
 
-    // Disparar notificação push via Service Worker para a nova entrada de NF
     notifyNewNFEntry(
       newNF.numberNF,
       newNF.supplier,
@@ -1299,86 +1014,43 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       newNF.totalValue
     );
 
-    // Direct Supabase database insertion
     try {
-      const nfPayload = {
-        id: newNF.id,
-        number_nf: newNF.numberNF,
-        access_key: newNF.accessKey || '',
-        supplier: newNF.supplier,
-        cnpj_supplier: newNF.cnpjSupplier,
-        issue_date: newNF.issueDate,
-        total_value: newNF.totalValue,
-        notes: newNF.notes || '',
-        created_by: newNF.createdBy || currentUser.name,
-        created_at: newNF.receiveDate,
-      };
+      const response = await authFetch('/api/nf-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newNF),
+      });
 
-      const { error: errNF } = await supabase.from('nf_entries').upsert(nfPayload, { onConflict: 'id' });
-      if (errNF) console.warn('Aviso Supabase ao salvar NF:', errNF.message);
-
-      if (newNF.items && newNF.items.length > 0) {
-        const itemsPayload = newNF.items.map((item) => ({
-          nf_id: newNF.id,
-          product_id: item.productId,
-          product_name: item.productName,
-          quantity: item.quantity,
-          cost_price: item.costPrice,
-          total_cost: item.totalCost,
-          batch_number: item.batchNumber || 'LOTE-PADRAO',
-          expiration_date: item.expirationDate || '2027-12-31',
-        }));
-
-        const { error: errItems } = await supabase.from('nf_items').insert(itemsPayload);
-        if (errItems) console.warn('Aviso Supabase ao salvar itens da NF:', errItems.message);
+      if (response.status === 403) {
+        handle403PermissionDenied('lançar nota fiscal (NF)');
+        await fetchServerData();
+        throw new Error('Você não tem permissão para esta ação.');
       }
 
       for (const p of finalUpdatedProds) {
-        await supabase.from('products').upsert(
-          {
-            id: p.id,
-            sku: p.sku,
-            ean: p.ean || p.codeEAN || '',
-            name: p.name,
-            category: p.category,
-            unit: p.unit,
-            stock_deposito: p.stockDeposito,
-            stock_loja: p.stockLoja,
-            min_stock_deposito: p.minStockDeposito,
-            min_stock_loja: p.minStockLoja,
-            cost_price: p.costPrice,
-            sell_price: p.sellPrice,
-            expiration_date: p.expirationDate,
-            batch_number: p.batchNumber,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'id' }
-        );
+        await authFetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(p),
+        });
       }
 
       for (const m of newMovements) {
-        await supabase.from('stock_movements').insert({
-          id: m.id,
-          product_id: m.productId,
-          product_name: m.productName,
-          type: 'Entrada NF',
-          origin: 'Fornecedor NF',
-          destination: 'Depósito Central',
-          quantity: m.quantity,
-          batch_number: 'LOTE-NF',
-          reason: m.reason || 'Entrada por NF',
-          created_by: m.userName || currentUser.name,
-          timestamp: m.date || new Date().toISOString(),
+        await authFetch('/api/movements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(m),
         });
       }
     } catch (e: any) {
-      console.error('Erro ao salvar NF no Supabase:', e);
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao salvar NF via API:', e);
+      }
     }
   };
 
-  // Transfer Stock from Depósito to Loja with Supabase direct mutation
+  // Transfer Stock from Depósito to Loja with server Express API
   const transferStock = async (productId: string, quantity: number, notes?: string) => {
-    // Search strictly within tenant-scoped products
     const product = products.find((p) => p.id === productId);
     if (!product) return { success: false, message: 'Produto não encontrado neste estabelecimento.' };
 
@@ -1393,6 +1065,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       };
     }
 
+    const previousProducts = [...allProducts];
     const nowISO = new Date().toISOString();
     const updatedProd: Product = {
       ...product,
@@ -1441,36 +1114,31 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     setAllMovements((prev) => [newMovement, ...prev]);
 
-    // Persist direct to Supabase
     try {
-      const { error: movErr } = await supabase.from('stock_movements').insert({
-        id: newMovement.id,
-        product_id: newMovement.productId,
-        product_name: newMovement.productName,
-        type: 'Transferência Interna',
-        origin: 'Depósito Central',
-        destination: 'Loja Nova Friburgo',
-        quantity: newMovement.quantity,
-        batch_number: product.batchNumber || 'LOTE-TRANSF',
-        reason: newMovement.reason || 'Transferência Depósito ➔ Loja',
-        created_by: newMovement.userName,
-        timestamp: newMovement.date,
+      const movRes = await authFetch('/api/movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMovement),
       });
 
-      if (movErr) console.warn('Aviso Supabase ao registrar transferência:', movErr.message);
+      if (movRes.status === 403) {
+        handle403PermissionDenied('transferir estoque');
+        setAllProducts(previousProducts);
+        setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
+        setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
+        return {
+          success: false,
+          message: 'Você não tem permissão para esta ação.',
+        };
+      }
 
-      const { error: prodErr } = await supabase
-        .from('products')
-        .update({
-          stock_deposito: updatedProd.stockDeposito,
-          stock_loja: updatedProd.stockLoja,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', product.id);
-
-      if (prodErr) console.warn('Aviso Supabase ao atualizar saldo após transferência:', prodErr.message);
+      await authFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedProd),
+      });
     } catch (e: any) {
-      console.error('Erro ao salvar transferência no Supabase:', e);
+      console.error('Erro ao salvar transferência via API:', e);
     }
 
     return {
@@ -1479,7 +1147,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   };
 
-  // Register Movement (Sale, Loss, Adjustment) with Supabase direct mutation
+  // Register Movement (Sale, Loss, Adjustment) with server Express API
   const registerMovement = async (
     productId: string,
     type: StockMovement['type'],
@@ -1488,10 +1156,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     reason?: string,
     unitPrice?: number
   ) => {
-    // Search strictly within tenant-scoped products
     const product = products.find((p) => p.id === productId);
     if (!product || quantity <= 0) return;
 
+    const previousProducts = [...allProducts];
     const nowISO = new Date().toISOString();
     const price = unitPrice ?? (type === 'venda_loja' ? product.sellPrice : product.costPrice);
     const totalVal = price * quantity;
@@ -1549,55 +1217,51 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setAllMovements((prev) => [newMov, ...prev]);
 
     try {
-      const { error: movErr } = await supabase.from('stock_movements').insert({
-        id: newMov.id,
-        product_id: newMov.productId,
-        product_name: newMov.productName,
-        type:
-          type === 'venda_loja'
-            ? 'Venda Direta Loja'
-            : type === 'perda_avaria'
-            ? 'Perda / Avaria'
-            : 'Ajuste de Inventário',
-        origin: location === 'loja' ? 'Loja Nova Friburgo' : 'Depósito Central',
-        destination: type === 'venda_loja' ? 'Cliente Final' : 'Ajuste Interno',
-        quantity: newMov.quantity,
-        batch_number: product.batchNumber || 'LOTE-MOV',
-        reason: newMov.reason || (type === 'venda_loja' ? 'Venda balcão loja' : 'Movimentação manual'),
-        created_by: newMov.userName,
-        timestamp: newMov.date,
+      const movRes = await authFetch('/api/movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMov),
       });
 
-      if (movErr) console.warn('Aviso Supabase ao salvar movimentação:', movErr.message);
+      if (movRes.status === 403) {
+        handle403PermissionDenied('registrar movimentação');
+        setAllProducts(previousProducts);
+        setAllMovements((prev) => prev.filter((m) => m.id !== newMov.id));
+        return;
+      }
 
-      const { error: prodErr } = await supabase
-        .from('products')
-        .update({
-          stock_deposito: updatedProd.stockDeposito,
-          stock_loja: updatedProd.stockLoja,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', product.id);
-
-      if (prodErr) console.warn('Aviso Supabase ao atualizar saldo do produto:', prodErr.message);
+      await authFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedProd),
+      });
 
       if (type === 'venda_loja') {
-        const { error: saleErr } = await supabase.from('store_sales').insert({
-          id: `sale-${Date.now()}`,
-          product_id: product.id,
-          product_name: product.name,
-          quantity,
-          unit_price: price,
-          total_amount: totalVal,
-          payment_method: 'PIX',
-          seller_name: currentUser.name,
-          timestamp: nowISO,
+        const saleRes = await authFetch('/api/sales', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: `sale-${Date.now()}`,
+            tenantId: currentTenant.id,
+            productId: product.id,
+            productName: product.name,
+            quantity,
+            unitPrice: price,
+            totalAmount: totalVal,
+            paymentMethod: 'PIX',
+            sellerName: currentUser.name,
+            timestamp: nowISO,
+          }),
         });
 
-        if (saleErr) console.warn('Aviso Supabase ao salvar venda:', saleErr.message);
+        if (saleRes.status === 403) {
+          handle403PermissionDenied('registrar venda');
+        }
       }
     } catch (e: any) {
-      console.error('Erro ao salvar movimentação no Supabase:', e);
+      if (e?.message !== 'Você não tem permissão para esta ação.') {
+        console.error('Erro ao salvar movimentação via API:', e);
+      }
     }
   };
 
@@ -1612,12 +1276,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const triggerCloudSync = async () => {
-    await fetchSupabaseData();
+    await fetchServerData();
   };
 
   const exportBackupJSON = () => {
     const backupData = {
-      app: 'Fini ERP Multi-tenant System (Supabase Cloud Backup)',
+      app: 'Fini ERP Multi-tenant System',
       version: '2.0.0',
       timestamp: new Date().toISOString(),
       tenant: currentTenant,
@@ -1665,7 +1329,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setAllTransfers(INITIAL_TRANSFERS);
     setAllMovements(INITIAL_MOVEMENTS);
     setAllUsers(INITIAL_USERS);
-    await fetchSupabaseData();
+    await fetchServerData();
   };
 
   const verifyAdminPin = (pin: string): boolean => {
@@ -1674,24 +1338,16 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const wipeSystemData = async (pin?: string) => {
-    // Validação de PIN de administrador
-    if (pin && !verifyAdminPin(pin)) {
-      throw new Error('PIN de administrador incorreto.');
+    const response = await authFetch('/api/system/wipe', {
+      method: 'DELETE',
+      body: JSON.stringify({ pin: pin || '' }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Erro HTTP ${response.status} ao zerar dados do sistema.`);
     }
 
-    try {
-      await Promise.all([
-        supabase.from('store_sales').delete().neq('id', '___non_existent___'),
-        supabase.from('nf_items').delete().neq('id', -1),
-        supabase.from('nf_entries').delete().neq('id', '___non_existent___'),
-        supabase.from('stock_movements').delete().neq('id', '___non_existent___'),
-        supabase.from('products').delete().neq('id', '___non_existent___'),
-      ]);
-    } catch (err: any) {
-      console.warn('Erro ao limpar tabelas no Supabase:', err);
-    }
-
-    // Limpa o estado local após confirmação com sucesso do Supabase
     setAllProducts([]);
     setAllNfEntries([]);
     setAllTransfers([]);
@@ -1723,12 +1379,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         notifications,
         cloudInfo,
         unreadNotificationCount,
-        isLoadingCloudSql: isLoadingSupabase,
-        isLoadingSupabase,
+        isLoadingCloudSql: isLoadingServer,
+        isLoadingSupabase: isLoadingServer,
         tenants,
         currentTenant,
         isTenantModalOpen,
-        setCurrentTenantId,
+        setCurrentTenantId: setCurrentTenant,
         addTenant,
         updateTenant,
         deleteTenant,
