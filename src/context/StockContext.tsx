@@ -220,26 +220,26 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const notifiedLowStockRef = useRef<Set<string>>(new Set());
 
-  // Filtered views by Tenant
+  // Filtered views without tenant restrictions (Single Enterprise ERP)
   const products = useMemo(() => {
-    return allProducts.filter((p) => !p.tenantId || p.tenantId === currentTenant.id);
-  }, [allProducts, currentTenant.id]);
+    return allProducts;
+  }, [allProducts]);
 
   const nfEntries = useMemo(() => {
-    return allNfEntries.filter((n) => !n.tenantId || n.tenantId === currentTenant.id);
-  }, [allNfEntries, currentTenant.id]);
+    return allNfEntries;
+  }, [allNfEntries]);
 
   const transfers = useMemo(() => {
-    return allTransfers.filter((t) => !t.tenantId || t.tenantId === currentTenant.id);
-  }, [allTransfers, currentTenant.id]);
+    return allTransfers;
+  }, [allTransfers]);
 
   const movements = useMemo(() => {
-    return allMovements.filter((m) => !m.tenantId || m.tenantId === currentTenant.id);
-  }, [allMovements, currentTenant.id]);
+    return allMovements;
+  }, [allMovements]);
 
   const users = useMemo(() => {
-    return allUsers.filter((u) => !u.tenantIds || u.tenantIds.includes(currentTenant.id));
-  }, [allUsers, currentTenant.id]);
+    return allUsers;
+  }, [allUsers]);
 
   // Persist Tenant / Categories / Users meta locally
   useEffect(() => {
@@ -311,7 +311,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           role: role,
           pin: localUser?.pin || '',
           active: true,
-          tenantIds: ['tenant-friburgo'],
           avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
           permissions: getRolePermissions(role),
         };
@@ -451,26 +450,25 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const addUser = async (newUser: UserProfile) => {
-    const userWithTenant: UserProfile = {
+    const userToSave: UserProfile = {
       ...newUser,
-      tenantIds: newUser.tenantIds || [currentTenant.id],
       permissions: newUser.permissions || getRolePermissions(newUser.role),
     };
 
     setAllUsers((prev) => {
-      const exists = prev.some((u) => u.id === userWithTenant.id || u.email?.toLowerCase() === userWithTenant.email?.toLowerCase());
+      const exists = prev.some((u) => u.id === userToSave.id || u.email?.toLowerCase() === userToSave.email?.toLowerCase());
       return exists
-        ? prev.map((u) => (u.id === userWithTenant.id || u.email?.toLowerCase() === userWithTenant.email?.toLowerCase() ? userWithTenant : u))
-        : [...prev, userWithTenant];
+        ? prev.map((u) => (u.id === userToSave.id || u.email?.toLowerCase() === userToSave.email?.toLowerCase() ? userToSave : u))
+        : [...prev, userToSave];
     });
 
     try {
       await saveUserViaApi({
-        uid: userWithTenant.id,
-        email: userWithTenant.email,
-        name: userWithTenant.name,
-        role: userWithTenant.role,
-        pin: userWithTenant.pin || undefined,
+        uid: userToSave.id,
+        email: userToSave.email,
+        name: userToSave.name,
+        role: userToSave.role,
+        pin: userToSave.pin || undefined,
       });
     } catch (e) {
       console.warn('Falha ao persistir novo usuário no servidor:', e);
@@ -599,7 +597,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             role,
             pin: u.pin || '',
             active: u.active ?? true,
-            tenantIds: ['tenant-friburgo'],
             avatarUrl: role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬',
             permissions: getRolePermissions(role),
           };
@@ -785,7 +782,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       ean: eanVal,
       codeEAN: eanVal,
       name: newP.name || 'Novo Produto',
-      category: newP.category || 'Bala de Gelatina',
+      category: newP.category || 'Balas de Gelatina',
       unit: newP.unit || 'Pacote 500g',
       stockDeposito: Number(newP.stockDeposito) || 0,
       stockLoja: Number(newP.stockLoja) || 0,
@@ -795,7 +792,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       sellPrice: Number(newP.sellPrice) || 20,
       expirationDate: newP.expirationDate || '2027-12-31',
       batchNumber: newP.batchNumber || `LOTE-${new Date().getFullYear()}`,
-      tenantId: currentTenant.id,
       lastUpdated: new Date().toISOString(),
       totalSalesQuantity: 0,
       totalSalesValue: 0,
@@ -826,14 +822,13 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Update Product with server Express API
   const updateProduct = async (id: string, updated: Partial<Product>) => {
-    const targetProduct = products.find((p) => p.id === id) || allProducts.find((p) => p.id === id);
+    const targetProduct = allProducts.find((p) => p.id === id);
     if (!targetProduct) return;
 
     const previousProduct = { ...targetProduct };
     const newProd = {
       ...targetProduct,
       ...updated,
-      tenantId: targetProduct.tenantId || currentTenant.id,
       lastUpdated: new Date().toISOString(),
     };
 
@@ -866,12 +861,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Delete Product with server Express API
   const deleteProduct = async (id: string) => {
-    const isTenantProduct = products.some((p) => p.id === id);
-    if (!isTenantProduct) {
-      console.warn('Tentativa de excluir produto de outro tenant bloqueada por segurança.');
-      return;
-    }
-
     const previousProducts = [...allProducts];
     setAllProducts((prev) => prev.filter((p) => p.id !== id));
 
@@ -896,7 +885,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const newNF: NFEntry = {
       ...nfData,
       id: `nf-${Date.now()}`,
-      tenantId: currentTenant.id,
       receiveDate: nowISO.slice(0, 10),
     };
 
@@ -909,9 +897,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const matchedItemIds = new Set<string>();
 
       const nextProducts = prevProducts.map((p) => {
-        const matchesTenant = !p.tenantId || p.tenantId === currentTenant.id;
-        if (!matchesTenant) return p;
-
         const pEan = p.ean || p.codeEAN || '';
         const item = nfData.items.find(
           (i) =>
@@ -954,7 +939,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             ean: '',
             codeEAN: '',
             name: i.productName || 'Produto Importado por NF',
-            category: 'Bala de Gelatina',
+            category: 'Balas de Gelatina',
             unit: 'Pacote 500g',
             stockDeposito: Number(i.quantity) || 0,
             stockLoja: 0,
@@ -964,7 +949,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             sellPrice: (Number(i.costPrice) || 10) * 1.8,
             expirationDate: i.expirationDate || '2027-12-31',
             batchNumber: i.batchNumber || `LOTE-${new Date().getFullYear()}`,
-            tenantId: currentTenant.id,
             lastUpdated: nowISO,
             totalSalesQuantity: 0,
             totalSalesValue: 0,
@@ -980,7 +964,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const newMovements: StockMovement[] = nfData.items.map((item) => ({
       id: `mov-${Date.now()}-${item.productId}`,
-      tenantId: currentTenant.id,
       date: nowISO,
       productId: item.productId,
       productName: item.productName,
@@ -1039,7 +1022,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Transfer Stock from Depósito to Loja with server Express API
   const transferStock = async (productId: string, quantity: number, notes?: string) => {
-    const product = products.find((p) => p.id === productId);
+    const product = allProducts.find((p) => p.id === productId);
     if (!product) return { success: false, message: 'Produto não encontrado neste estabelecimento.' };
 
     if (quantity <= 0) {
@@ -1057,7 +1040,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const nowISO = new Date().toISOString();
     const updatedProd: Product = {
       ...product,
-      tenantId: product.tenantId || currentTenant.id,
       stockDeposito: product.stockDeposito - quantity,
       stockLoja: product.stockLoja + quantity,
       lastUpdated: nowISO,
@@ -1073,7 +1055,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const newTransfer: StockTransfer = {
       id: `trf-${Date.now()}`,
-      tenantId: currentTenant.id,
       date: nowISO,
       productId: product.id,
       productName: product.name,
@@ -1089,7 +1070,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const newMovement: StockMovement = {
       id: `mov-${Date.now()}`,
-      tenantId: currentTenant.id,
       date: nowISO,
       productId: product.id,
       productName: product.name,
@@ -1144,7 +1124,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     reason?: string,
     unitPrice?: number
   ) => {
-    const product = products.find((p) => p.id === productId);
+    const product = allProducts.find((p) => p.id === productId);
     if (!product || quantity <= 0) return;
 
     const previousProducts = [...allProducts];
@@ -1171,7 +1151,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const updatedProd: Product = {
       ...product,
-      tenantId: product.tenantId || currentTenant.id,
       stockDeposito: newStockDep,
       stockLoja: newStockLoj,
       totalSalesQuantity: newSalesQty,
@@ -1189,7 +1168,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const newMov: StockMovement = {
       id: `mov-${Date.now()}`,
-      tenantId: currentTenant.id,
       date: nowISO,
       productId: product.id,
       productName: product.name,
@@ -1230,7 +1208,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: `sale-${Date.now()}`,
-            tenantId: currentTenant.id,
             productId: product.id,
             productName: product.name,
             quantity,
@@ -1297,10 +1274,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       const parsed = JSON.parse(jsonData);
       if (parsed.products && Array.isArray(parsed.products)) {
-        setAllProducts(parsed.products.map((p: any) => ({ ...p, tenantId: currentTenant.id })));
-        if (parsed.nfEntries) setAllNfEntries(parsed.nfEntries.map((n: any) => ({ ...n, tenantId: currentTenant.id })));
-        if (parsed.transfers) setAllTransfers(parsed.transfers.map((tr: any) => ({ ...tr, tenantId: currentTenant.id })));
-        if (parsed.movements) setAllMovements(parsed.movements.map((m: any) => ({ ...m, tenantId: currentTenant.id })));
+        setAllProducts(parsed.products);
+        if (parsed.nfEntries) setAllNfEntries(parsed.nfEntries);
+        if (parsed.transfers) setAllTransfers(parsed.transfers);
+        if (parsed.movements) setAllMovements(parsed.movements);
         triggerCloudSync();
         return true;
       }
