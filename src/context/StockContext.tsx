@@ -488,6 +488,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const updateUser = async (updatedUser: UserProfile) => {
+    const previousUsers = [...allUsers];
+    const previousCurrentUser = currentUser;
+
     const userToSave: UserProfile = {
       ...updatedUser,
       permissions: updatedUser.permissions || getRolePermissions(updatedUser.role),
@@ -507,12 +510,17 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         role: userToSave.role,
         pin: userToSave.pin || undefined,
       });
-    } catch (e) {
-      console.warn('Falha ao sincronizar atualização do usuário no servidor:', e);
+    } catch (e: any) {
+      // Reverte em caso de erro
+      setAllUsers(previousUsers);
+      setCurrentUser(previousCurrentUser);
+      console.error('Falha ao sincronizar atualização do usuário no servidor:', e);
+      throw e;
     }
   };
 
   const addUser = async (newUser: UserProfile) => {
+    const previousUsers = [...allUsers];
     const userToSave: UserProfile = {
       ...newUser,
       permissions: newUser.permissions || getRolePermissions(newUser.role),
@@ -533,12 +541,17 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         role: userToSave.role,
         pin: userToSave.pin || undefined,
       });
-    } catch (e) {
-      console.warn('Falha ao persistir novo usuário no servidor:', e);
+    } catch (e: any) {
+      // Reverte em caso de erro
+      setAllUsers(previousUsers);
+      console.error('Falha ao persistir novo usuário no servidor:', e);
+      throw e;
     }
   };
 
   const deleteUser = async (userId: string) => {
+    const previousUsers = [...allUsers];
+    const previousCurrentUser = currentUser;
     const targetUser = allUsers.find((u) => u.id === userId || u.email?.toLowerCase() === userId.toLowerCase());
     const targetIdentifier = targetUser?.id || targetUser?.email || userId;
 
@@ -570,6 +583,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       await deleteUserViaApi(targetIdentifier);
     } catch (error) {
+      setAllUsers(previousUsers);
+      setCurrentUser(previousCurrentUser);
       console.error('Erro ao excluir usuário no servidor:', error);
       throw error;
     }
@@ -869,15 +884,29 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         body: JSON.stringify(created),
       });
 
-      if (response.status === 403) {
-        handle403PermissionDenied('cadastrar produto');
+      if (!response.ok) {
+        let errorMessage = `Erro ao salvar produto no servidor (HTTP ${response.status}).`;
+        try {
+          const errData = await response.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await response.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        if (response.status === 403) {
+          handle403PermissionDenied('cadastrar produto');
+        }
+
         setAllProducts((prev) => prev.filter((p) => p.id !== created.id));
-        throw new Error('Você não tem permissão para esta ação.');
+        throw new Error(errorMessage);
       }
     } catch (e: any) {
-      if (e?.message !== 'Você não tem permissão para esta ação.') {
-        console.error('Erro ao salvar produto via API:', e);
-      }
+      setAllProducts((prev) => prev.filter((p) => p.id !== created.id));
+      console.error('Erro ao salvar produto via API:', e);
+      throw e;
     }
 
     return created;
@@ -910,15 +939,29 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         body: JSON.stringify(newProd),
       });
 
-      if (response.status === 403) {
-        handle403PermissionDenied('editar produto');
+      if (!response.ok) {
+        let errorMessage = `Erro ao atualizar produto no servidor (HTTP ${response.status}).`;
+        try {
+          const errData = await response.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await response.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        if (response.status === 403) {
+          handle403PermissionDenied('editar produto');
+        }
+
         setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct : p)));
-        throw new Error('Você não tem permissão para esta ação.');
+        throw new Error(errorMessage);
       }
     } catch (e: any) {
-      if (e?.message !== 'Você não tem permissão para esta ação.') {
-        console.error('Erro ao atualizar produto via API:', e);
-      }
+      setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct : p)));
+      console.error('Erro ao atualizar produto via API:', e);
+      throw e;
     }
   };
 
@@ -930,20 +973,38 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       const response = await authFetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-      if (response.status === 403) {
-        handle403PermissionDenied('excluir produto');
+      if (!response.ok) {
+        let errorMessage = `Erro ao excluir produto no servidor (HTTP ${response.status}).`;
+        try {
+          const errData = await response.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await response.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        if (response.status === 403) {
+          handle403PermissionDenied('excluir produto');
+        }
+
         setAllProducts(previousProducts);
-        throw new Error('Você não tem permissão para esta ação.');
+        throw new Error(errorMessage);
       }
     } catch (e: any) {
-      if (e?.message !== 'Você não tem permissão para esta ação.') {
-        console.error('Erro ao deletar produto via API:', e);
-      }
+      setAllProducts(previousProducts);
+      console.error('Erro ao deletar produto via API:', e);
+      throw e;
     }
   };
 
   // Add NF Entry with server Express API
   const addNFEntry = async (nfData: Omit<NFEntry, 'id' | 'receiveDate'>) => {
+    const previousNFs = [...allNfEntries];
+    const previousProducts = [...allProducts];
+    const previousMovements = [...allMovements];
+
     const nowISO = new Date().toISOString();
     const newNF: NFEntry = {
       ...nfData,
@@ -1055,10 +1116,26 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         body: JSON.stringify(newNF),
       });
 
-      if (response.status === 403) {
-        handle403PermissionDenied('lançar nota fiscal (NF)');
-        await fetchServerData();
-        throw new Error('Você não tem permissão para esta ação.');
+      if (!response.ok) {
+        let errorMessage = `Erro ao salvar NF no servidor (HTTP ${response.status}).`;
+        try {
+          const errData = await response.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await response.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        if (response.status === 403) {
+          handle403PermissionDenied('lançar nota fiscal (NF)');
+        }
+
+        setAllNfEntries(previousNFs);
+        setAllProducts(previousProducts);
+        setAllMovements(previousMovements);
+        throw new Error(errorMessage);
       }
 
       for (const p of finalUpdatedProds) {
@@ -1077,9 +1154,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         });
       }
     } catch (e: any) {
-      if (e?.message !== 'Você não tem permissão para esta ação.') {
-        console.error('Erro ao salvar NF via API:', e);
-      }
+      setAllNfEntries(previousNFs);
+      setAllProducts(previousProducts);
+      setAllMovements(previousMovements);
+      console.error('Erro ao salvar NF via API:', e);
+      throw e;
     }
   };
 
@@ -1152,24 +1231,66 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         body: JSON.stringify(newMovement),
       });
 
-      if (movRes.status === 403) {
-        handle403PermissionDenied('transferir estoque');
+      if (!movRes.ok) {
+        let errorMessage = `Erro ao salvar transferência no servidor (HTTP ${movRes.status}).`;
+        try {
+          const errData = await movRes.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await movRes.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        if (movRes.status === 403) {
+          handle403PermissionDenied('transferir estoque');
+        }
+
         setAllProducts(previousProducts);
         setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
         setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
         return {
           success: false,
-          message: 'Você não tem permissão para esta ação.',
+          message: errorMessage,
         };
       }
 
-      await authFetch('/api/products', {
+      const prodRes = await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedProd),
       });
+
+      if (!prodRes.ok) {
+        let errorMessage = `Erro ao atualizar estoque na transferência (HTTP ${prodRes.status}).`;
+        try {
+          const errData = await prodRes.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await prodRes.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        setAllProducts(previousProducts);
+        setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
+        setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
+        return {
+          success: false,
+          message: errorMessage,
+        };
+      }
     } catch (e: any) {
+      setAllProducts(previousProducts);
+      setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
+      setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
       console.error('Erro ao salvar transferência via API:', e);
+      return {
+        success: false,
+        message: e?.message || 'Erro ao comunicar com o servidor.',
+      };
     }
 
     return {
@@ -1191,6 +1312,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (!product || quantity <= 0) return;
 
     const previousProducts = [...allProducts];
+    const previousMovements = [...allMovements];
     const nowISO = new Date().toISOString();
     const price = unitPrice ?? (type === 'venda_loja' ? product.sellPrice : product.costPrice);
     const totalVal = price * quantity;
@@ -1252,18 +1374,49 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         body: JSON.stringify(newMov),
       });
 
-      if (movRes.status === 403) {
-        handle403PermissionDenied('registrar movimentação');
+      if (!movRes.ok) {
+        let errorMessage = `Erro ao salvar movimentação no servidor (HTTP ${movRes.status}).`;
+        try {
+          const errData = await movRes.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await movRes.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        if (movRes.status === 403) {
+          handle403PermissionDenied('registrar movimentação');
+        }
+
         setAllProducts(previousProducts);
-        setAllMovements((prev) => prev.filter((m) => m.id !== newMov.id));
-        return;
+        setAllMovements(previousMovements);
+        throw new Error(errorMessage);
       }
 
-      await authFetch('/api/products', {
+      const prodRes = await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedProd),
       });
+
+      if (!prodRes.ok) {
+        let errorMessage = `Erro ao atualizar estoque da movimentação (HTTP ${prodRes.status}).`;
+        try {
+          const errData = await prodRes.json();
+          if (errData?.error) errorMessage = errData.error;
+        } catch {
+          try {
+            const errText = await prodRes.text();
+            if (errText) errorMessage = errText;
+          } catch {}
+        }
+
+        setAllProducts(previousProducts);
+        setAllMovements(previousMovements);
+        throw new Error(errorMessage);
+      }
 
       if (type === 'venda_loja') {
         const saleRes = await authFetch('/api/sales', {
@@ -1282,14 +1435,24 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           }),
         });
 
-        if (saleRes.status === 403) {
-          handle403PermissionDenied('registrar venda');
+        if (!saleRes.ok) {
+          let errorMessage = `Erro ao registrar venda (HTTP ${saleRes.status}).`;
+          try {
+            const errData = await saleRes.json();
+            if (errData?.error) errorMessage = errData.error;
+          } catch {}
+
+          if (saleRes.status === 403) {
+            handle403PermissionDenied('registrar venda');
+          }
+          console.warn('Aviso ao registrar venda detalhada:', errorMessage);
         }
       }
     } catch (e: any) {
-      if (e?.message !== 'Você não tem permissão para esta ação.') {
-        console.error('Erro ao salvar movimentação via API:', e);
-      }
+      setAllProducts(previousProducts);
+      setAllMovements(previousMovements);
+      console.error('Erro ao salvar movimentação via API:', e);
+      throw e;
     }
   };
 

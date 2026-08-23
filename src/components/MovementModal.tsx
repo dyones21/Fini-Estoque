@@ -58,22 +58,26 @@ export const MovementModal: React.FC<MovementModalProps> = ({
 
   const currentProduct = products.find((p) => p.id === selectedProductId);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const qty = parseNumber(quantity, 1);
     if (!selectedProductId || !currentProduct || qty <= 0) return;
 
-    registerMovement(
-      selectedProductId,
-      type,
-      qty,
-      location,
-      reason || (type === 'venda_loja' ? 'Venda PDV Loja' : 'Baixa registrada'),
-      type === 'venda_loja' ? currentProduct.sellPrice : currentProduct.costPrice
-    );
+    try {
+      await registerMovement(
+        selectedProductId,
+        type,
+        qty,
+        location,
+        reason || (type === 'venda_loja' ? 'Venda PDV Loja' : 'Baixa registrada'),
+        type === 'venda_loja' ? currentProduct.sellPrice : currentProduct.costPrice
+      );
 
-    alert(`Movimentação registrada com sucesso para "${currentProduct.name}"!`);
-    onClose();
+      alert(`Movimentação registrada com sucesso para "${currentProduct.name}"!`);
+      onClose();
+    } catch (err: any) {
+      alert(`Falha ao registrar movimentação no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+    }
   };
 
   return (

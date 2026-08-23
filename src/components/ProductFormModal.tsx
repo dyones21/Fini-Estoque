@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, Save, FolderPlus, Check, Plus } from 'lucide-react';
+import { X, Package, Save, FolderPlus, Check, Plus, AlertCircle, Loader2 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory } from '../types';
 import { parseNumber } from '../utils/inventoryUtils';
@@ -31,6 +31,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [expirationDate, setExpirationDate] = useState('2027-06-30');
   const [batchNumber, setBatchNumber] = useState('LOTE-2026-F1');
 
+  // Loading & Error states
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
   // Quick category creation local state
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
@@ -45,6 +49,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   };
 
   useEffect(() => {
+    setFormError(null);
+    setIsSubmitting(false);
     if (editingProduct) {
       setSku(editingProduct.sku);
       setEan(editingProduct.ean);
@@ -100,50 +106,62 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
+
     if (!name.trim()) {
-      alert('Informe o Nome do Produto Fini.');
+      setFormError('Informe o Nome do Produto Fini.');
       return;
     }
 
-    if (editingProduct) {
-      updateProduct(editingProduct.id, {
-        sku,
-        ean,
-        name,
-        category,
-        unit,
-        stockDeposito: parseNumber(stockDeposito),
-        stockLoja: parseNumber(stockLoja),
-        minStockDeposito: parseNumber(minStockDeposito),
-        minStockLoja: parseNumber(minStockLoja),
-        costPrice: parseNumber(costPrice),
-        sellPrice: parseNumber(sellPrice),
-        expirationDate,
-        batchNumber,
-      });
-      alert(`Produto "${name}" atualizado com sucesso!`);
-    } else {
-      addProduct({
-        sku,
-        ean,
-        name,
-        category,
-        unit,
-        stockDeposito: parseNumber(stockDeposito),
-        stockLoja: parseNumber(stockLoja),
-        minStockDeposito: parseNumber(minStockDeposito),
-        minStockLoja: parseNumber(minStockLoja),
-        costPrice: parseNumber(costPrice),
-        sellPrice: parseNumber(sellPrice),
-        expirationDate,
-        batchNumber,
-      });
-      alert(`Novo produto "${name}" cadastrado com sucesso!`);
-    }
+    setIsSubmitting(true);
 
-    onClose();
+    try {
+      if (editingProduct) {
+        await updateProduct(editingProduct.id, {
+          sku,
+          ean,
+          name,
+          category,
+          unit,
+          stockDeposito: parseNumber(stockDeposito),
+          stockLoja: parseNumber(stockLoja),
+          minStockDeposito: parseNumber(minStockDeposito),
+          minStockLoja: parseNumber(minStockLoja),
+          costPrice: parseNumber(costPrice),
+          sellPrice: parseNumber(sellPrice),
+          expirationDate,
+          batchNumber,
+        });
+        alert(`Produto "${name}" atualizado com sucesso no banco de dados!`);
+      } else {
+        await addProduct({
+          sku,
+          ean,
+          name,
+          category,
+          unit,
+          stockDeposito: parseNumber(stockDeposito),
+          stockLoja: parseNumber(stockLoja),
+          minStockDeposito: parseNumber(minStockDeposito),
+          minStockLoja: parseNumber(minStockLoja),
+          costPrice: parseNumber(costPrice),
+          sellPrice: parseNumber(sellPrice),
+          expirationDate,
+          batchNumber,
+        });
+        alert(`Novo produto "${name}" cadastrado e salvo com sucesso no banco de dados!`);
+      }
+      onClose();
+    } catch (err: any) {
+      console.error('Falha ao salvar produto:', err);
+      const msg = err?.message || 'Erro inesperado ao salvar produto no banco de dados.';
+      setFormError(msg);
+      alert(`Falha ao salvar produto:\n\n${msg}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -175,6 +193,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+          {formError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-xs animate-in fade-in">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-bold">Erro ao salvar no banco de dados:</span>
+                <p className="mt-0.5 break-words">{formError}</p>
+              </div>
+            </div>
+          )}
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -427,10 +454,20 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
             <button
               type="submit"
-              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md"
+              disabled={isSubmitting}
+              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md transition-colors"
             >
-              <Save className="w-4 h-4" />
-              <span>{editingProduct ? 'Salvar Alterações' : 'Cadastrar Produto'}</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Salvando no banco...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>{editingProduct ? 'Salvar Alterações' : 'Cadastrar Produto'}</span>
+                </>
+              )}
             </button>
           </div>
 

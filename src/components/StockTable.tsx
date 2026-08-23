@@ -595,13 +595,18 @@ export const StockTable: React.FC<StockTableProps> = ({
                                   </button>
 
                                   <button
-                                    onClick={() => {
+                                    onClick={async () => {
                                       if (
                                         confirm(
                                           `Tem certeza que deseja excluir "${product.name}" do sistema?`
                                         )
                                       ) {
-                                        deleteProduct(product.id);
+                                        try {
+                                          await deleteProduct(product.id);
+                                          alert(`Produto "${product.name}" excluído com sucesso do banco de dados!`);
+                                        } catch (err: any) {
+                                          alert(`Falha ao excluir produto no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+                                        }
                                       }
                                     }}
                                     title="Excluir Produto"
@@ -776,13 +781,18 @@ export const StockTable: React.FC<StockTableProps> = ({
                             </button>
 
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 if (
                                   confirm(
                                     `Tem certeza que deseja excluir "${product.name}"?`
                                   )
                                 ) {
-                                  deleteProduct(product.id);
+                                  try {
+                                    await deleteProduct(product.id);
+                                    alert(`Produto "${product.name}" excluído com sucesso!`);
+                                  } catch (err: any) {
+                                    alert(`Falha ao excluir produto no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+                                  }
                                 }
                               }}
                               className="py-2 px-2 rounded-lg bg-rose-100 text-rose-700 font-bold text-[11px] flex items-center justify-center gap-1 text-left"

@@ -422,30 +422,34 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     }
 
     // Save NF Entry
-    addNFEntry({
-      numberNF: receitaHeader.numberNF,
-      accessKey: receitaHeader.accessKey,
-      supplier: receitaHeader.supplier,
-      cnpjSupplier: receitaHeader.cnpjSupplier,
-      issueDate: receitaHeader.issueDate,
-      items: finalNFItems,
-      totalValue: receitaTotalValue,
-      notes: `${receitaHeader.notes} (${newProductsCreatedCount} novos produtos cadastrados auto)`,
-      createdBy: currentUser.name,
-    });
+    try {
+      await addNFEntry({
+        numberNF: receitaHeader.numberNF,
+        accessKey: receitaHeader.accessKey,
+        supplier: receitaHeader.supplier,
+        cnpjSupplier: receitaHeader.cnpjSupplier,
+        issueDate: receitaHeader.issueDate,
+        items: finalNFItems,
+        totalValue: receitaTotalValue,
+        notes: `${receitaHeader.notes} (${newProductsCreatedCount} novos produtos cadastrados auto)`,
+        createdBy: currentUser.name,
+      });
 
-    const successMsg = `Entrada por Nota Fiscal Receita Federal #${receitaHeader.numberNF} CONCLUÍDA! ${finalNFItems.length} itens lançados no DEPÓSITO CENTRAL. ${
-      newProductsCreatedCount > 0
-        ? `${newProductsCreatedCount} novo(s) produto(s) cadastrado(s) automaticamente no sistema.`
-        : ''
-    }`;
+      const successMsg = `Entrada por Nota Fiscal Receita Federal #${receitaHeader.numberNF} CONCLUÍDA! ${finalNFItems.length} itens lançados no DEPÓSITO CENTRAL. ${
+        newProductsCreatedCount > 0
+          ? `${newProductsCreatedCount} novo(s) produto(s) cadastrado(s) automaticamente no sistema.`
+          : ''
+      }`;
 
-    setReceitaSuccessMessage(successMsg);
+      setReceitaSuccessMessage(successMsg);
 
-    setTimeout(() => {
-      setReceitaSuccessMessage('');
-      onClose();
-    }, 2000);
+      setTimeout(() => {
+        setReceitaSuccessMessage('');
+        onClose();
+      }, 2000);
+    } catch (err: any) {
+      alert(`Falha ao salvar Nota Fiscal no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+    }
   };
 
   // MANUAL MODE FUNCTIONS
@@ -486,7 +490,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
 
   const manualTotalValue = manualItems.reduce((acc, i) => acc + i.totalCost, 0);
 
-  const handleSubmitManual = (e: React.FormEvent) => {
+  const handleSubmitManual = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualNumberNF.trim()) {
       alert('Informe o Número da Nota Fiscal.');
@@ -497,22 +501,26 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
       return;
     }
 
-    addNFEntry({
-      numberNF: manualNumberNF,
-      accessKey: manualAccessKey,
-      supplier: manualSupplier,
-      cnpjSupplier: manualCnpj,
-      issueDate: manualIssueDate,
-      items: manualItems,
-      totalValue: manualTotalValue,
-      notes: manualNotes,
-      createdBy: currentUser.name,
-    });
+    try {
+      await addNFEntry({
+        numberNF: manualNumberNF,
+        accessKey: manualAccessKey,
+        supplier: manualSupplier,
+        cnpjSupplier: manualCnpj,
+        issueDate: manualIssueDate,
+        items: manualItems,
+        totalValue: manualTotalValue,
+        notes: manualNotes,
+        createdBy: currentUser.name,
+      });
 
-    alert(
-      `Entrada de Nota Fiscal #${manualNumberNF} realizada com SUCESSO! O estoque do DEPÓSITO CENTRAL foi atualizado.`
-    );
-    onClose();
+      alert(
+        `Entrada de Nota Fiscal #${manualNumberNF} realizada com SUCESSO! O estoque do DEPÓSITO CENTRAL foi atualizado.`
+      );
+      onClose();
+    } catch (err: any) {
+      alert(`Falha ao salvar Nota Fiscal no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+    }
   };
 
   return (

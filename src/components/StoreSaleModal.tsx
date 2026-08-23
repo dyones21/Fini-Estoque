@@ -62,7 +62,7 @@ export const StoreSaleModal: React.FC<StoreSaleModalProps> = ({
     setQuantity(Math.max(1, currentQty + amount));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const qty = parseNumber(quantity, 1);
     if (!selectedProductId || !currentProduct) return;
@@ -79,22 +79,26 @@ export const StoreSaleModal: React.FC<StoreSaleModalProps> = ({
       if (!confirmProceed) return;
     }
 
-    registerMovement(
-      selectedProductId,
-      'venda_loja',
-      qty,
-      'loja',
-      reason || 'Baixa para Baleiro / Pacote Aberto',
-      currentProduct.sellPrice
-    );
+    try {
+      await registerMovement(
+        selectedProductId,
+        'venda_loja',
+        qty,
+        'loja',
+        reason || 'Baixa para Baleiro / Pacote Aberto',
+        currentProduct.sellPrice
+      );
 
-    const msg = `Baixa de ${qty}x "${currentProduct.name}" efetuada para o Baleiro (Pacote Aberto) com sucesso! Item removido do estoque fechado.`;
-    setSuccessMessage(msg);
+      const msg = `Baixa de ${qty}x "${currentProduct.name}" efetuada para o Baleiro (Pacote Aberto) com sucesso! Item removido do estoque fechado.`;
+      setSuccessMessage(msg);
 
-    setTimeout(() => {
-      setSuccessMessage('');
-      onClose();
-    }, 1400);
+      setTimeout(() => {
+        setSuccessMessage('');
+        onClose();
+      }, 1400);
+    } catch (err: any) {
+      alert(`Falha ao registrar baixa para o baleiro no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+    }
   };
 
   const qtyNumber = parseNumber(quantity, 1);

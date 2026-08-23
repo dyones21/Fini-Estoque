@@ -51,48 +51,67 @@ export async function getAllProducts(): Promise<Product[]> {
 export async function saveProduct(p: Product): Promise<Product> {
   checkDbConnection();
 
+  const eanVal = p.ean || (p as any).codeEAN || '';
+  const skuVal = p.sku || `SKU-${Date.now().toString().slice(-6)}`;
+  const batchVal = p.batchNumber || `LOTE-${new Date().getFullYear()}`;
+  const expVal = p.expirationDate || '2027-12-31';
+  const depStock = Math.round(Number(p.stockDeposito) || 0);
+  const lojStock = Math.round(Number(p.stockLoja) || 0);
+  const minDep = Math.round(Number(p.minStockDeposito) || 10);
+  const minLoj = Math.round(Number(p.minStockLoja) || 5);
+  const cost = Number(p.costPrice) || 0;
+  const sell = Number(p.sellPrice) || 0;
+
   await withRetry(async () => {
     await db
       .insert(products)
       .values({
         id: p.id,
-        sku: p.sku,
-        ean: p.ean,
-        name: p.name,
-        category: p.category,
-        unit: p.unit,
-        stockDeposito: p.stockDeposito,
-        stockLoja: p.stockLoja,
-        minStockDeposito: p.minStockDeposito,
-        minStockLoja: p.minStockLoja,
-        costPrice: p.costPrice,
-        sellPrice: p.sellPrice,
-        expirationDate: p.expirationDate,
-        batchNumber: p.batchNumber,
+        sku: skuVal,
+        ean: eanVal,
+        name: p.name || 'Produto Fini',
+        category: p.category || 'Balas de Gelatina',
+        unit: p.unit || 'Pacote 500g',
+        stockDeposito: depStock,
+        stockLoja: lojStock,
+        minStockDeposito: minDep,
+        minStockLoja: minLoj,
+        costPrice: cost,
+        sellPrice: sell,
+        expirationDate: expVal,
+        batchNumber: batchVal,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: products.id,
         set: {
-          sku: p.sku,
-          ean: p.ean,
-          name: p.name,
-          category: p.category,
-          unit: p.unit,
-          stockDeposito: p.stockDeposito,
-          stockLoja: p.stockLoja,
-          minStockDeposito: p.minStockDeposito,
-          minStockLoja: p.minStockLoja,
-          costPrice: p.costPrice,
-          sellPrice: p.sellPrice,
-          expirationDate: p.expirationDate,
-          batchNumber: p.batchNumber,
+          sku: skuVal,
+          ean: eanVal,
+          name: p.name || 'Produto Fini',
+          category: p.category || 'Balas de Gelatina',
+          unit: p.unit || 'Pacote 500g',
+          stockDeposito: depStock,
+          stockLoja: lojStock,
+          minStockDeposito: minDep,
+          minStockLoja: minLoj,
+          costPrice: cost,
+          sellPrice: sell,
+          expirationDate: expVal,
+          batchNumber: batchVal,
           updatedAt: new Date(),
         },
       });
   });
 
-  return p;
+  return {
+    ...p,
+    sku: skuVal,
+    ean: eanVal,
+    stockDeposito: depStock,
+    stockLoja: lojStock,
+    costPrice: cost,
+    sellPrice: sell,
+  };
 }
 
 /**
