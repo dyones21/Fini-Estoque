@@ -304,43 +304,56 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         displayName: name,
       });
 
-      if (syncedUser) {
-        const role = (syncedUser.role || 'Operador Depósito/Loja') as UserRole;
-        const updatedProfile: UserProfile = {
-          id: syncedUser.uid,
-          name: syncedUser.name || name,
-          email: syncedUser.email || email,
-          role: role,
-          pin: localUser?.pin || '',
-          active: true,
-          avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
-          permissions: getRolePermissions(role),
-        };
+      const role = ((syncedUser && syncedUser.role) || localUser?.role || (email.toLowerCase().includes('admin') || email.toLowerCase() === 'dyones21@gmail.com' ? 'super_admin' : 'gerente_loja')) as UserRole;
+      const updatedProfile: UserProfile = {
+        id: (syncedUser && syncedUser.uid) || userPayload.uid,
+        name: (syncedUser && syncedUser.name) || name,
+        email: (syncedUser && syncedUser.email) || email,
+        role: role,
+        pin: localUser?.pin || '',
+        active: true,
+        avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+        permissions: getRolePermissions(role),
+      };
 
-        setAllUsers((prev) => {
-          const exists = prev.some(
-            (u) => u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
+      setAllUsers((prev) => {
+        const exists = prev.some(
+          (u) => u.id === updatedProfile.id || (u.email && updatedProfile.email && u.email.toLowerCase() === updatedProfile.email.toLowerCase())
+        );
+        if (exists) {
+          return prev.map((u) =>
+            u.id === updatedProfile.id || (u.email && updatedProfile.email && u.email.toLowerCase() === updatedProfile.email.toLowerCase())
+              ? { ...u, ...updatedProfile }
+              : u
           );
-          if (exists) {
-            return prev.map((u) =>
-              u.id === updatedProfile.id || u.email?.toLowerCase() === updatedProfile.email.toLowerCase()
-                ? { ...u, ...updatedProfile }
-                : u
-            );
-          }
-          return [...prev, updatedProfile];
-        });
+        }
+        return [...prev, updatedProfile];
+      });
 
-        setCurrentUser(updatedProfile);
-        setIsAuthenticated(true);
-        setIsAuthModalOpen(false);
-        setIsAuthChecking(false);
+      setCurrentUser(updatedProfile);
+      setIsAuthenticated(true);
+      setIsAuthModalOpen(false);
+      setIsAuthChecking(false);
 
-        // Puxa automaticamente os dados atualizados do servidor
-        fetchServerData();
-      }
+      // Puxa automaticamente os dados atualizados do servidor
+      fetchServerData();
     } catch (error) {
-      console.error('Erro na sincronização do usuário via API:', error);
+      console.warn('Aviso: Falha ao sincronizar usuário via API, usando perfil local:', error);
+      const fallbackRole: UserRole = (localUser?.role || (email.toLowerCase().includes('admin') || email.toLowerCase() === 'dyones21@gmail.com' ? 'super_admin' : 'gerente_loja')) as UserRole;
+      const fallbackProfile: UserProfile = {
+        id: userPayload.uid,
+        name: name,
+        email: email,
+        role: fallbackRole,
+        pin: localUser?.pin || '',
+        active: true,
+        avatarUrl: localUser?.avatarUrl || (fallbackRole === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+        permissions: getRolePermissions(fallbackRole),
+      };
+      setCurrentUser(fallbackProfile);
+      setIsAuthenticated(true);
+      setIsAuthModalOpen(false);
+      setIsAuthChecking(false);
     } finally {
       setIsAuthChecking(false);
     }
