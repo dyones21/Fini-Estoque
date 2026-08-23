@@ -50,6 +50,7 @@ interface StockContextType {
   currentUser: UserProfile;
   isAuthenticated: boolean;
   isAuthModalOpen: boolean;
+  isAuthChecking: boolean;
   activeLocation: LocationType;
   notifications: AppNotification[];
   cloudInfo: CloudBackupInfo;
@@ -203,8 +204,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [allTransfers, setAllTransfers] = useState<StockTransfer[]>([]);
   const [allMovements, setAllMovements] = useState<StockMovement[]>([]);
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(true);
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [activeLocation, setActiveLocation] = useState<LocationType>('deposito');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isLoadingServer, setIsLoadingServer] = useState<boolean>(false);
@@ -332,12 +334,15 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setCurrentUser(updatedProfile);
         setIsAuthenticated(true);
         setIsAuthModalOpen(false);
+        setIsAuthChecking(false);
 
         // Puxa automaticamente os dados atualizados do servidor
         fetchServerData();
       }
     } catch (error) {
       console.error('Erro na sincronização do usuário via API:', error);
+    } finally {
+      setIsAuthChecking(false);
     }
   };
 
@@ -369,6 +374,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           email: firebaseUser.email,
           displayName: firebaseUser.displayName,
         });
+      } else {
+        setIsAuthenticated(false);
+        setIsAuthModalOpen(true);
+        setIsAuthChecking(false);
       }
     });
 
@@ -1340,6 +1349,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         currentUser,
         isAuthenticated,
         isAuthModalOpen,
+        isAuthChecking,
         activeLocation,
         notifications,
         cloudInfo,

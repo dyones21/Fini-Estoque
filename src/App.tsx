@@ -44,12 +44,30 @@ const MainApp: React.FC = () => {
     currentUser,
     isAuthenticated,
     isAuthModalOpen,
+    isAuthChecking,
     checkPermission,
     isTenantModalOpen,
     closeTenantModal,
   } = useStock();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Enquanto o Firebase verifica se há sessão ativa salva, exibe tela de carregamento suave
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="text-center space-y-4 animate-fadeIn">
+          <div className="w-16 h-16 rounded-3xl bg-linear-to-tr from-rose-600 to-pink-500 flex items-center justify-center mx-auto shadow-xl shadow-rose-900/30">
+            <span className="text-2xl font-black text-white tracking-tighter">FINI</span>
+          </div>
+          <div className="flex items-center justify-center gap-3">
+            <div className="w-5 h-5 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm font-semibold text-slate-300">Carregando sistema...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   
   /**
    * MULTI-TENANT ARCHITECTURAL NOTE:
