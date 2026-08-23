@@ -268,6 +268,47 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [allUsers]);
 
+  // Observa mudanças em allUsers (sincronização periódica com o banco de dados) e atualiza o currentUser se houver alteração de role, permissões, nome ou status ativo
+  useEffect(() => {
+    if (!currentUser || (!currentUser.id && !currentUser.email)) return;
+
+    const matchingUser = allUsers.find(
+      (u) =>
+        (currentUser.id && u.id === currentUser.id) ||
+        (currentUser.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
+    );
+
+    if (!matchingUser) return;
+
+    const roleChanged = matchingUser.role !== currentUser.role;
+    const nameChanged = Boolean(matchingUser.name && matchingUser.name !== currentUser.name);
+    const activeChanged = matchingUser.active !== undefined && matchingUser.active !== currentUser.active;
+
+    // Compara as permissões atuais com as novas permissões do perfil atualizado
+    const newPermissions = matchingUser.permissions || getRolePermissions(matchingUser.role);
+    const currentPermissions = currentUser.permissions || getRolePermissions(currentUser.role);
+    const permissionsChanged = JSON.stringify(newPermissions) !== JSON.stringify(currentPermissions);
+
+    if (roleChanged || nameChanged || activeChanged || permissionsChanged) {
+      const newRole = matchingUser.role;
+      const updatedUser: UserProfile = {
+        ...currentUser,
+        ...matchingUser,
+        role: newRole,
+        permissions: newPermissions,
+        pin: matchingUser.pin || currentUser.pin || '',
+        avatarUrl: matchingUser.avatarUrl || currentUser.avatarUrl || (newRole === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+      };
+
+      setCurrentUser(updatedUser);
+      try {
+        localStorage.setItem(CURRENT_USER_KEY, updatedUser.id);
+      } catch (e) {
+        console.error('Error updating saved current user:', e);
+      }
+    }
+  }, [allUsers, currentUser?.id, currentUser?.email, currentUser?.role, currentUser?.name, currentUser?.active, currentUser?.permissions]);
+
   // Helper de notificação amigável para acessos bloqueados por falta de permissão (HTTP 403)
   const handle403PermissionDenied = (actionName?: string) => {
     const errorText = 'Você não tem permissão para esta ação.';
