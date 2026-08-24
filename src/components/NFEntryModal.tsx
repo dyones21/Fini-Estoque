@@ -7,8 +7,6 @@ import {
   Warehouse,
   CheckCircle2,
   Building,
-  Search,
-  Sparkles,
   Upload,
   Link,
   PlusCircle,
@@ -18,20 +16,25 @@ import {
   FileText,
   ShieldCheck,
   Check,
+  FileCode,
+  ArrowRight,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { NFItem, Product, ProductCategory } from '../types';
 import { formatCurrency, parseNumber } from '../utils/inventoryUtils';
+import { authFetch } from '../utils/apiAuth';
+import { ParsedNFData, ParsedNFItem } from '../utils/nfeXmlParser';
 
 interface NFEntryModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-// Interface for items imported from Receita Federal / XML
+// Interface for items imported from XML
 interface ImportedNFItem {
   id: string;
   codeEAN: string;
+  cProd: string;
   description: string;
   quantity: number;
   costPrice: number;
@@ -41,7 +44,7 @@ interface ImportedNFItem {
   category: ProductCategory;
   // Link status
   linkType: 'existing' | 'new';
-  matchedProductId: string; // If existing
+  matchedProductId: string;
   // New product form data if linkType === 'new'
   newProductData: {
     sku: string;
@@ -54,118 +57,37 @@ interface ImportedNFItem {
   };
 }
 
-// Sample Receita Federal Invoices to test / simulate live Receita WS fetch
-const MOCK_RECEITA_INVOICES = [
-  {
-    id: 'nf-receita-001',
-    numberNF: '001.095.420',
-    accessKey: '3526070240882100014455001001095420184139ef12',
-    supplier: 'Fini Comercializadora de Alimentos S/A',
-    cnpjSupplier: '02.408.821/0001-44',
-    issueDate: '2026-07-28',
-    notes: 'Importação automática via Webservice Receita Federal / SEFAZ-SP (Chave 352607...)',
-    items: [
-      {
-        id: 'item-rec-1',
-        codeEAN: '7898591450011',
-        description: 'Fini Minhocas Azedinhas 90g',
-        quantity: 120,
-        costPrice: 3.80,
-        batchNumber: 'LOTE-FINI-2026-A',
-        expirationDate: '2027-08-30',
-        unit: 'Pacote 100g' as const,
-        category: 'Balas Azedas' as const,
-      },
-      {
-        id: 'item-rec-2',
-        codeEAN: '7898591450028',
-        description: 'Fini Tubes Morango Citrico 80g',
-        quantity: 150,
-        costPrice: 3.60,
-        batchNumber: 'LOTE-FINI-2026-B',
-        expirationDate: '2027-09-15',
-        unit: 'Pacote 100g' as const,
-        category: 'Regaliz & Tubes' as const,
-      },
-      {
-        id: 'item-rec-3',
-        codeEAN: '7898591450035',
-        description: 'Fini Marshmallow Torção Recheado 250g',
-        quantity: 80,
-        costPrice: 8.20,
-        batchNumber: 'LOTE-MARSH-2026',
-        expirationDate: '2027-06-20',
-        unit: 'Pacote 500g' as const,
-        category: 'Marshmallows' as const,
-      },
-      // Item that DOES NOT exist in default stock -> Tests "Cadastrar Novo Produto Auto"
-      {
-        id: 'item-rec-4',
-        codeEAN: '7898591450999',
-        description: 'Fini Amoras Silvestres Premium 100g',
-        quantity: 100,
-        costPrice: 4.10,
-        batchNumber: 'LOTE-AMORA-2026',
-        expirationDate: '2027-10-31',
-        unit: 'Pacote 100g' as const,
-        category: 'Balas de Gelatina' as const,
-      },
-    ],
-  },
-  {
-    id: 'nf-receita-002',
-    numberNF: '002.884.102',
-    accessKey: '3326071234567800019955002002884102184139ef33',
-    supplier: 'Distribuidora Candy Friburgo Ltda',
-    cnpjSupplier: '12.345.678/0001-99',
-    issueDate: '2026-07-29',
-    notes: 'Nota Fiscal Eletrônica emitida em Friburgo - Carga de Gelatinas',
-    items: [
-      {
-        id: 'item-rec-5',
-        codeEAN: '7898591450042',
-        description: 'Fini Bananas Gelatina 90g',
-        quantity: 200,
-        costPrice: 3.50,
-        batchNumber: 'LOTE-BANANA-2026',
-        expirationDate: '2027-12-01',
-        unit: 'Pacote 100g' as const,
-        category: 'Balas de Gelatina' as const,
-      },
-      {
-        id: 'item-rec-6',
-        codeEAN: '7898591450888',
-        description: 'Fini Ovos Fritos Gelatina 250g',
-        quantity: 90,
-        costPrice: 7.90,
-        batchNumber: 'LOTE-OVOS-2026',
-        expirationDate: '2027-11-20',
-        unit: 'Pacote 500g' as const,
-        category: 'Balas de Gelatina' as const,
-      },
-    ],
-  },
-];
-
 export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) => {
-  const { products, addProduct, addNFEntry, currentUser, checkPermission } = useStock();
+  const { products, addProduct, addNFEntry, currentUser, currentTenant, checkPermission } = useStock();
 
-  // Mode tab: 'receita' (Direct Receita Import) vs 'manual' (Manual Form)
-  const [activeTabMode, setActiveTabMode] = useState<'receita' | 'manual'>('receita');
+  // Mode tab: 'xml' (XML File Import) vs 'manual' (Manual Form)
+  const [activeTabMode, setActiveTabMode] = useState<'xml' | 'manual'>('xml');
 
-  // Receita query parameters
-  const [accessKeyInput, setAccessKeyInput] = useState('');
-  const [isQueryingReceita, setIsQueryingReceita] = useState(false);
-  const [receitaSuccessMessage, setReceitaSuccessMessage] = useState('');
+  // XML Import State
+  const [isProcessingXml, setIsProcessingXml] = useState(false);
+  const [xmlError, setXmlError] = useState<string | null>(null);
+  const [xmlSuccessMessage, setXmlSuccessMessage] = useState('');
+  const [importedFileName, setImportedFileName] = useState<string | null>(null);
 
-  // Receita Imported Data
-  const [receitaHeader, setReceitaHeader] = useState({
+  // XML Header Data
+  const [xmlHeader, setXmlHeader] = useState<{
+    numberNF: string;
+    accessKey: string;
+    supplier: string;
+    cnpjSupplier: string;
+    recipientCnpj: string;
+    recipientName: string;
+    issueDate: string;
+    notes: string;
+  }>({
     numberNF: '',
     accessKey: '',
-    supplier: 'Fini Comercializadora de Alimentos S/A',
-    cnpjSupplier: '02.408.821/0001-44',
+    supplier: '',
+    cnpjSupplier: '',
+    recipientCnpj: '',
+    recipientName: '',
     issueDate: new Date().toISOString().slice(0, 10),
-    notes: 'Importação automática Receita Federal / SEFAZ',
+    notes: '',
   });
 
   const [importedItems, setImportedItems] = useState<ImportedNFItem[]>([]);
@@ -212,65 +134,129 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
 
   // Helper to match an item to existing products in stock
   const findMatchingProduct = (description: string, codeEAN: string): Product | undefined => {
-    const descLower = description.toLowerCase();
-    return products.find(
-      (p) =>
-        (codeEAN && p.ean === codeEAN) ||
-        p.name.toLowerCase() === descLower ||
-        descLower.includes(p.name.toLowerCase()) ||
-        p.name.toLowerCase().includes(descLower)
-    );
+    const cleanEan = (codeEAN || '').trim();
+    if (cleanEan && cleanEan !== 'SEM GTIN' && cleanEan !== 'SEMGTIN') {
+      const matchByEan = products.find((p) => (p.ean && p.ean === cleanEan) || (p.codeEAN && p.codeEAN === cleanEan));
+      if (matchByEan) return matchByEan;
+    }
+
+    const descLower = description.toLowerCase().trim();
+    return products.find((p) => {
+      const pNameLower = p.name.toLowerCase().trim();
+      return pNameLower === descLower || descLower.includes(pNameLower) || pNameLower.includes(descLower);
+    });
   };
 
-  // Trigger Receita Import from preset or Access Key query
-  const handleConsultReceita = (presetInvoiceId?: string) => {
-    setIsQueryingReceita(true);
-    setReceitaSuccessMessage('');
+  // Helper to map XML unit string to standard product unit
+  const mapUnitToStandard = (rawUnit: string): Product['unit'] => {
+    const u = (rawUnit || '').toUpperCase().trim();
+    if (u.includes('500G') || u.includes('500 G')) return 'Pacote 500g';
+    if (u.includes('100G') || u.includes('90G') || u.includes('80G') || u.includes('PCT')) return 'Pacote 100g';
+    if (u.includes('1KG') || u.includes('1 KG') || u.includes('CX') || u.includes('CAIXA')) return 'Caixa 1kg';
+    if (u.includes('DISP') || u.includes('12UN') || u.includes('DP')) return 'Display 12un';
+    return 'Pacote 100g';
+  };
 
-    setTimeout(() => {
-      let targetNF = MOCK_RECEITA_INVOICES[0];
-      if (presetInvoiceId) {
-        const found = MOCK_RECEITA_INVOICES.find((i) => i.id === presetInvoiceId);
-        if (found) targetNF = found;
-      } else if (accessKeyInput.trim()) {
-        targetNF = {
-          ...MOCK_RECEITA_INVOICES[0],
-          accessKey: accessKeyInput.trim(),
-          numberNF: `NF-${Math.floor(100000 + Math.random() * 900000)}`,
-        };
+  // Helper to detect default Fini category
+  const detectCategory = (description: string): ProductCategory => {
+    const d = description.toLowerCase();
+    if (d.includes('azed') || d.includes('citric') || d.includes('ácid')) return 'Balas Azedas';
+    if (d.includes('tube') || d.includes('regaliz') || d.includes('tijolinho')) return 'Regaliz & Tubes';
+    if (d.includes('marsh') || d.includes('torção') || d.includes('vulcano')) return 'Marshmallows';
+    if (d.includes('chicle') || d.includes('goma') || d.includes('ovo de dinossauro')) return 'Chicletes';
+    if (d.includes('display') || d.includes('caixa')) return 'Caixas & Displays';
+    return 'Balas de Gelatina';
+  };
+
+  // Handler for XML file selection & upload to server
+  const handleXmlFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input value so user can re-upload the same file if needed
+    e.target.value = '';
+
+    setXmlError(null);
+    setXmlSuccessMessage('');
+
+    // Validar tipo do arquivo
+    if (!file.name.toLowerCase().endsWith('.xml')) {
+      setXmlError('Por favor, selecione um arquivo válido com extensão .xml.');
+      return;
+    }
+
+    // Validar tamanho máximo do arquivo (5MB)
+    const MAX_SIZE_BYTES = 5 * 1024 * 1024;
+    if (file.size > MAX_SIZE_BYTES) {
+      setXmlError(`O arquivo selecionado (${(file.size / (1024 * 1024)).toFixed(2)} MB) excede o limite máximo permitido de 5MB.`);
+      return;
+    }
+
+    setIsProcessingXml(true);
+    setImportedFileName(file.name);
+
+    try {
+      const xmlText = await file.text();
+
+      if (!xmlText || xmlText.trim().length === 0) {
+        throw new Error('O arquivo XML selecionado está vazio.');
       }
 
-      setReceitaHeader({
-        numberNF: targetNF.numberNF,
-        accessKey: targetNF.accessKey,
-        supplier: targetNF.supplier,
-        cnpjSupplier: targetNF.cnpjSupplier,
-        issueDate: targetNF.issueDate,
-        notes: targetNF.notes,
+      // Envia o XML para validação e parse no servidor
+      const response = await authFetch('/api/nfe/import-xml', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xml: xmlText,
+          companyCnpj: currentTenant?.cnpj || '',
+        }),
       });
 
-      // Map imported items with auto-link logic
-      const mapped: ImportedNFItem[] = targetNF.items.map((raw) => {
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result?.error || `Falha ao processar o arquivo XML no servidor (HTTP ${response.status}).`);
+      }
+
+      const parsedData: ParsedNFData = result.data;
+
+      // Popula os dados do cabeçalho da NF
+      setXmlHeader({
+        numberNF: parsedData.numberNF,
+        accessKey: parsedData.accessKey,
+        supplier: parsedData.supplier,
+        cnpjSupplier: parsedData.cnpjSupplier,
+        recipientCnpj: parsedData.recipientCnpj,
+        recipientName: parsedData.recipientName,
+        issueDate: parsedData.issueDate,
+        notes: parsedData.notes,
+      });
+
+      // Mapeia os itens do XML com verificação de vínculo a produtos existentes
+      const mapped: ImportedNFItem[] = parsedData.items.map((raw: ParsedNFItem) => {
         const matched = findMatchingProduct(raw.description, raw.codeEAN);
+        const standardUnit = mapUnitToStandard(raw.unit);
+        const detectedCat = detectCategory(raw.description);
 
         return {
           id: raw.id,
           codeEAN: raw.codeEAN,
+          cProd: raw.cProd,
           description: raw.description,
           quantity: raw.quantity,
           costPrice: raw.costPrice,
           batchNumber: raw.batchNumber,
           expirationDate: raw.expirationDate,
-          unit: raw.unit,
-          category: raw.category,
+          unit: matched ? matched.unit : standardUnit,
+          category: matched ? matched.category : detectedCat,
           linkType: matched ? ('existing' as const) : ('new' as const),
           matchedProductId: matched ? matched.id : '',
           newProductData: {
-            sku: `FINI-${raw.description.substring(0, 8).toUpperCase().replace(/\s+/g, '')}`,
+            sku: `FINI-${(raw.cProd || raw.description.substring(0, 8)).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
             name: raw.description,
-            category: raw.category,
-            unit: raw.unit,
-            sellPrice: Math.round(raw.costPrice * 1.85 * 100) / 100, // Default 85% margin suggestion
+            category: detectedCat,
+            unit: standardUnit,
+            sellPrice: Math.round(raw.costPrice * 1.85 * 100) / 100, // Margem sugerida padrão de 85%
             minStockDeposito: 30,
             minStockLoja: 10,
           },
@@ -278,26 +264,13 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
       });
 
       setImportedItems(mapped);
-      setIsQueryingReceita(false);
-    }, 800);
-  };
-
-  // Handler for XML upload
-  const handleXmlFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsQueryingReceita(true);
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      // Parse file or simulate parsed NFe XML structure
-      setTimeout(() => {
-        handleConsultReceita('nf-receita-001');
-      }, 500);
-    };
-
-    reader.readAsText(file);
+    } catch (err: any) {
+      console.error('Erro ao importar XML de NF-e:', err);
+      setXmlError(err?.message || 'Erro inesperado ao ler e processar o arquivo XML da NF-e.');
+      setImportedItems([]);
+    } finally {
+      setIsProcessingXml(false);
+    }
   };
 
   // Toggle item link mode (existing vs new)
@@ -344,23 +317,23 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     );
   };
 
-  // Remove item from imported Receita list
+  // Remove item from imported XML list
   const removeImportedItem = (index: number) => {
     setImportedItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   // Calculate totals
-  const receitaTotalValue = importedItems.reduce(
+  const xmlTotalValue = importedItems.reduce(
     (acc, item) => acc + item.quantity * item.costPrice,
     0
   );
 
-  // Submit Receita NF Entry (Registers missing products + inserts NF Entry into Depósito)
-  const handleSubmitReceitaNF = async (e: React.FormEvent) => {
+  // Submit XML NF Entry (Registers missing products + inserts NF Entry into Depósito)
+  const handleSubmitXmlNF = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!receitaHeader.numberNF) {
-      alert('Selecione ou consulte uma Nota Fiscal da Receita Federal primeiro.');
+    if (!xmlHeader.numberNF) {
+      alert('Faça o upload de um arquivo XML de NF-e válido primeiro.');
       return;
     }
 
@@ -377,7 +350,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
       let finalProductId = item.matchedProductId;
       let finalProductName = item.description;
 
-      // If user chose "Cadastrar como Novo Produto", create it in StockContext first!
+      // If user chose "Cadastrar como Novo Produto", create it in database first!
       if (item.linkType === 'new' || !finalProductId) {
         const newPData = item.newProductData;
         const newProdId = `prod-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -385,8 +358,8 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         const createdProd = await addProduct({
           id: newProdId,
           sku: newPData.sku || `SKU-${Date.now().toString().slice(-6)}`,
-          ean: item.codeEAN || '7898591450000',
-          codeEAN: item.codeEAN || '7898591450000',
+          ean: item.codeEAN || '',
+          codeEAN: item.codeEAN || '',
           name: newPData.name,
           category: newPData.category,
           unit: newPData.unit,
@@ -395,7 +368,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
           minStockDeposito: Number(newPData.minStockDeposito) || 30,
           minStockLoja: Number(newPData.minStockLoja) || 10,
           costPrice: item.costPrice,
-          sellPrice: Number(newPData.sellPrice) || item.costPrice * 1.8,
+          sellPrice: Number(newPData.sellPrice) || Math.round(item.costPrice * 1.8 * 100) / 100,
           expirationDate: item.expirationDate,
           batchNumber: item.batchNumber,
         });
@@ -424,27 +397,27 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     // Save NF Entry
     try {
       await addNFEntry({
-        numberNF: receitaHeader.numberNF,
-        accessKey: receitaHeader.accessKey,
-        supplier: receitaHeader.supplier,
-        cnpjSupplier: receitaHeader.cnpjSupplier,
-        issueDate: receitaHeader.issueDate,
+        numberNF: xmlHeader.numberNF,
+        accessKey: xmlHeader.accessKey,
+        supplier: xmlHeader.supplier,
+        cnpjSupplier: xmlHeader.cnpjSupplier,
+        issueDate: xmlHeader.issueDate,
         items: finalNFItems,
-        totalValue: receitaTotalValue,
-        notes: `${receitaHeader.notes} (${newProductsCreatedCount} novos produtos cadastrados auto)`,
+        totalValue: xmlTotalValue,
+        notes: `${xmlHeader.notes} (${newProductsCreatedCount} novos produtos cadastrados auto)`,
         createdBy: currentUser.name,
       });
 
-      const successMsg = `Entrada por Nota Fiscal Receita Federal #${receitaHeader.numberNF} CONCLUÍDA! ${finalNFItems.length} itens lançados no DEPÓSITO CENTRAL. ${
+      const successMsg = `Entrada de NF-e #${xmlHeader.numberNF} CONCLUÍDA! ${finalNFItems.length} itens lançados no DEPÓSITO CENTRAL. ${
         newProductsCreatedCount > 0
           ? `${newProductsCreatedCount} novo(s) produto(s) cadastrado(s) automaticamente no sistema.`
           : ''
       }`;
 
-      setReceitaSuccessMessage(successMsg);
+      setXmlSuccessMessage(successMsg);
 
       setTimeout(() => {
-        setReceitaSuccessMessage('');
+        setXmlSuccessMessage('');
         onClose();
       }, 2000);
     } catch (err: any) {
@@ -527,7 +500,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[94vh] flex flex-col">
         
-        {/* Modal Header - Fixed top */}
+        {/* Modal Header */}
         <div className="bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 p-3.5 sm:p-5 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-3">
             <div className="p-2 sm:p-2.5 rounded-2xl bg-rose-600/30 border border-rose-500/40 text-rose-300 shrink-0">
@@ -543,7 +516,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                 </span>
               </div>
               <p className="text-[11px] text-rose-200/80 text-left line-clamp-1">
-                Importação direta da Receita Federal e Revisão / Vínculo de Produtos
+                Importação oficial de XML de NF-e e Lançamento de Estoque
               </p>
             </div>
           </div>
@@ -556,21 +529,18 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
           </button>
         </div>
 
-        {/* Mode Selector Tabs (Receita Federal Direct vs Manual) */}
+        {/* Mode Selector Tabs */}
         <div className="bg-slate-100 p-1.5 border-b border-slate-200 flex flex-col sm:flex-row items-center gap-1.5 shrink-0">
           <button
-            onClick={() => {
-              setActiveTabMode('receita');
-              if (importedItems.length === 0) handleConsultReceita('nf-receita-001');
-            }}
+            onClick={() => setActiveTabMode('xml')}
             className={`w-full sm:flex-1 flex items-center justify-center gap-2 py-2 sm:py-2.5 px-3 sm:px-4 rounded-xl text-xs font-bold transition-all ${
-              activeTabMode === 'receita'
+              activeTabMode === 'xml'
                 ? 'bg-rose-600 text-white shadow-md'
                 : 'text-slate-600 hover:bg-slate-200/70'
             }`}
           >
-            <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
-            <span className="text-center sm:text-left">Importação Receita Federal / XML (Auto)</span>
+            <FileCode className="w-4 h-4 shrink-0" />
+            <span className="text-center sm:text-left">Importar XML (NF-e Oficial)</span>
           </button>
 
           <button
@@ -587,132 +557,128 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         </div>
 
         {/* Success Alert Banner */}
-        {receitaSuccessMessage ? (
+        {xmlSuccessMessage ? (
           <div className="p-8 text-center space-y-3">
             <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
               <Check className="w-7 h-7" />
             </div>
             <p className="text-base font-extrabold text-slate-800 max-w-lg mx-auto">
-              {receitaSuccessMessage}
+              {xmlSuccessMessage}
             </p>
           </div>
-        ) : activeTabMode === 'receita' ? (
+        ) : activeTabMode === 'xml' ? (
           /* =========================================================================
-             MODE 1: RECEITA FEDERAL DIRECT IMPORT & SMART LINKING
+             MODE 1: REAL XML FILE IMPORT & SMART ITEM LINKING
              ========================================================================= */
-          <form onSubmit={handleSubmitReceitaNF} className="p-5 space-y-5 max-h-[75vh] overflow-y-auto">
+          <form onSubmit={handleSubmitXmlNF} className="p-5 space-y-5 max-h-[75vh] overflow-y-auto">
             
-            {/* Search Query & XML File Bar */}
-            <div className="bg-gradient-to-r from-rose-50 via-slate-50 to-rose-50/50 p-4 rounded-2xl border border-rose-200/80 space-y-3">
-              <div className="flex items-center justify-between">
+            {/* XML Upload Box */}
+            <div className="bg-gradient-to-r from-rose-50/70 via-slate-50 to-rose-50/70 p-5 rounded-2xl border border-rose-200/80 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-rose-600" />
                   <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                    Consultar webservice Receita Federal / SEFAZ ou Upload XML
+                    Importação de Arquivo XML de Nota Fiscal Eletrônica
                   </h3>
                 </div>
-                <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">
-                  NF-e On-line
-                </span>
+                {currentTenant?.cnpj && (
+                  <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
+                    CNPJ da Empresa: <strong className="text-slate-900 font-mono">{currentTenant.cnpj}</strong>
+                  </span>
+                )}
               </div>
 
-              <div className="flex flex-col sm:flex-row items-center gap-2">
-                <div className="relative flex-1 w-full">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    placeholder="Cole a Chave de Acesso da NF-e (44 dígitos) ou CNPJ do fornecedor..."
-                    value={accessKeyInput}
-                    onChange={(e) => setAccessKeyInput(e.target.value)}
-                    className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white font-mono focus:ring-2 focus:ring-rose-500/20"
-                  />
+              {/* Upload Drop Area */}
+              <div className="flex flex-col items-center justify-center border-2 border-dashed border-rose-300 hover:border-rose-500 bg-white rounded-2xl p-6 text-center transition-colors">
+                {isProcessingXml ? (
+                  <div className="py-4 flex flex-col items-center gap-2">
+                    <Loader2 className="w-8 h-8 text-rose-600 animate-spin" />
+                    <p className="text-xs font-bold text-slate-800">Processando e validando arquivo XML da NF-e...</p>
+                    <p className="text-[11px] text-slate-500">Conferindo CNPJ do destinatário, chave de acesso e produtos.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
+                      <Upload className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">
+                        Clique para selecionar ou arraste o arquivo XML da NF-e
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Aceita arquivos padrão <strong>.xml</strong> emitidos pela SEFAZ (limite de até 5MB).
+                      </p>
+                    </div>
+                    <div>
+                      <label className="cursor-pointer inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 px-5 rounded-xl text-xs shadow-sm transition-colors">
+                        <FileCode className="w-4 h-4" />
+                        <span>Selecionar Arquivo XML</span>
+                        <input
+                          type="file"
+                          accept=".xml"
+                          onChange={handleXmlFileSelected}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                    {importedFileName && !xmlError && importedItems.length > 0 && (
+                      <p className="text-[11px] text-emerald-700 font-bold bg-emerald-50 px-3 py-1 rounded-full inline-block">
+                        ✓ Arquivo carregado: {importedFileName}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Error Message Box */}
+              {xmlError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-800 text-xs animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                  <div className="flex-1">
+                    <strong className="block font-bold">Não foi possível importar esta Nota Fiscal:</strong>
+                    <p className="mt-0.5 text-rose-700">{xmlError}</p>
+                  </div>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleConsultReceita()}
-                  disabled={isQueryingReceita}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-sm transition-all"
-                >
-                  {isQueryingReceita ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Buscando Receita...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 text-amber-300" />
-                      <span>Buscar na Receita</span>
-                    </>
-                  )}
-                </button>
-
-                <label className="w-full sm:w-auto cursor-pointer flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs transition-colors">
-                  <Upload className="w-4 h-4 text-rose-400" />
-                  <span>Subir Arquivo XML</span>
-                  <input
-                    type="file"
-                    accept=".xml"
-                    onChange={handleXmlFileUpload}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              {/* Sample NF Preset Chips */}
-              <div className="pt-1 flex flex-wrap items-center gap-2">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Testar NFs Prontas:</span>
-                <button
-                  type="button"
-                  onClick={() => handleConsultReceita('nf-receita-001')}
-                  className="text-xs px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
-                >
-                  <Building className="w-3.5 h-3.5 text-rose-600" />
-                  <span>NF #001.095.420 (Fini S/A - Inclui Novo Produto)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleConsultReceita('nf-receita-002')}
-                  className="text-xs px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
-                >
-                  <Building className="w-3.5 h-3.5 text-sky-600" />
-                  <span>NF #002.884.102 (Candy Friburgo)</span>
-                </button>
-              </div>
+              )}
             </div>
 
             {/* Imported Header Info Card */}
-            {receitaHeader.numberNF && (
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            {xmlHeader.numberNF && (
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 animate-in fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-2.5 gap-2">
                   <div className="flex items-center gap-2">
-                    <Building className="w-4 h-4 text-rose-600" />
+                    <Building className="w-4 h-4 text-rose-600 shrink-0" />
                     <span className="text-xs font-black text-slate-800 uppercase">
-                      Dados do Emitente & Nota Fiscal Receita Federal
+                      Dados da Nota Fiscal & Fornecedor
                     </span>
                   </div>
-                  <span className="text-xs font-mono font-bold text-slate-500">
-                    NF nº {receitaHeader.numberNF}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold text-slate-700 bg-white px-2.5 py-0.5 rounded-md border border-slate-200">
+                      NF nº {xmlHeader.numberNF}
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Destinatário Validado
+                    </span>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                   <div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Fornecedor:</span>
-                    <span className="font-bold text-slate-900">{receitaHeader.supplier}</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Fornecedor Emitente:</span>
+                    <span className="font-bold text-slate-900 block truncate" title={xmlHeader.supplier}>{xmlHeader.supplier}</span>
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">CNPJ Emitente:</span>
-                    <span className="font-mono text-slate-700">{receitaHeader.cnpjSupplier}</span>
+                    <span className="font-mono text-slate-700">{xmlHeader.cnpjSupplier}</span>
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">Data de Emissão:</span>
-                    <span className="font-bold text-slate-800">{receitaHeader.issueDate}</span>
+                    <span className="font-bold text-slate-800">{xmlHeader.issueDate}</span>
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">Chave de Acesso:</span>
-                    <span className="font-mono text-[10px] text-slate-600 truncate block" title={receitaHeader.accessKey}>
-                      {receitaHeader.accessKey}
+                    <span className="font-mono text-[10px] text-slate-600 truncate block" title={xmlHeader.accessKey}>
+                      {xmlHeader.accessKey || 'Não informada no XML'}
                     </span>
                   </div>
                 </div>
@@ -724,23 +690,25 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider text-left">
-                    Itens Extraídos da Nota Fiscal ({importedItems.length})
+                    Itens Extraídos do XML ({importedItems.length})
                   </h4>
                   <p className="text-[11px] text-slate-500 text-left">
-                    O sistema vincula automaticamente produtos existentes ou permite configurar cadastros novos.
+                    O sistema vincula produtos existentes pelo Código EAN/Nome ou permite cadastrar novos produtos.
                   </p>
                 </div>
-                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl self-start sm:self-auto">
-                  Total NF: {formatCurrency(receitaTotalValue)}
-                </span>
+                {importedItems.length > 0 && (
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl self-start sm:self-auto">
+                    Total da Nota: {formatCurrency(xmlTotalValue)}
+                  </span>
+                )}
               </div>
 
               {importedItems.length === 0 ? (
                 <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 text-xs space-y-2">
-                  <Search className="w-8 h-8 text-slate-300 mx-auto" />
-                  <p>Nenhuma nota fiscal selecionada ainda.</p>
+                  <FileCode className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p>Nenhum item carregado.</p>
                   <p className="text-[11px]">
-                    Clique em um dos botões de teste acima ou digite a Chave de Acesso para buscar.
+                    Selecione um arquivo XML de NF-e acima para extrair e conferir os produtos.
                   </p>
                 </div>
               ) : (
@@ -759,20 +727,27 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                       >
                         {/* Item Info Line */}
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
-                          <div className="space-y-1.5 text-left">
+                          <div className="space-y-1.5 text-left flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-xs font-black text-slate-900">
                                 {index + 1}. {item.description}
                               </span>
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
-                                EAN: {item.codeEAN}
-                              </span>
+                              {item.codeEAN && (
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
+                                  EAN: {item.codeEAN}
+                                </span>
+                              )}
+                              {item.cProd && (
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold">
+                                  Cód: {item.cProd}
+                                </span>
+                              )}
                             </div>
 
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-slate-700 pt-1">
                               <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
                                 <span className="text-[10px] text-slate-400 block font-bold uppercase">Quantidade</span>
-                                <strong className="text-sky-700 font-black">+{item.quantity} un</strong>
+                                <strong className="text-sky-700 font-black">+{item.quantity} {item.unit}</strong>
                               </div>
 
                               <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
@@ -853,7 +828,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                               </select>
 
                               {matchedProduct && (
-                                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 shrink-0">
                                   ✓ Vinculado a {matchedProduct.name}
                                 </span>
                               )}
@@ -957,10 +932,10 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
             <div className="bg-slate-900 text-white p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <p className="text-[10px] text-slate-400 uppercase font-bold">
-                  Valor Total da Nota Fiscal Receita
+                  Valor Total da Nota Fiscal XML
                 </p>
                 <p className="text-2xl font-black text-emerald-400">
-                  {formatCurrency(receitaTotalValue)}
+                  {formatCurrency(xmlTotalValue)}
                 </p>
               </div>
 
@@ -987,7 +962,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
           </form>
         ) : (
           /* =========================================================================
-             MODE 2: MANUAL ENTRY FORM
+             MODE 2: MANUAL ENTRY FORM (UNCHANGED)
              ========================================================================= */
           <form onSubmit={handleSubmitManual} className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
             

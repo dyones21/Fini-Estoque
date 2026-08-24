@@ -14,13 +14,13 @@ declare global {
  * Monta e valida a string de conexão real do PostgreSQL / Supabase
  */
 export function getValidPostgresConnectionString(): string {
-  // Lista de variáveis candidatas onde a URL de conexão pode estar configurada
+  // Lista de variáveis candidatas onde a URL de conexão do PostgreSQL pode estar configurada
   const candidates = [
-    process.env.SQL_SSL,
-    process.env.POSTGRES_URL,
-    process.env.SUPABASE_DATABASE_URL,
     process.env.DATABASE_URL,
+    process.env.SUPABASE_DATABASE_URL,
+    process.env.POSTGRES_URL,
     process.env.POSTGRES_PRISMA_URL,
+    process.env.SQL_SSL, // Suporte retrocompatível caso a string tenha sido colocada em SQL_SSL
   ];
 
   for (const raw of candidates) {
@@ -54,14 +54,15 @@ export function getValidPostgresConnectionString(): string {
     }
   }
 
-  // Fallback para variáveis individuais SQL_*
+  // Fallback para variáveis individuais SQL_* (exceto socket antigo do Cloud SQL)
   if (
     process.env.SQL_HOST &&
     process.env.SQL_USER &&
     !process.env.SQL_HOST.startsWith('/app/cloudsql') &&
     !process.env.SQL_HOST.includes('localhost') &&
     !process.env.SQL_HOST.includes('127.0.0.1') &&
-    !process.env.SQL_USER.includes('seu_projeto')
+    !process.env.SQL_USER.includes('seu_projeto') &&
+    process.env.SQL_USER !== 'ai_studio_app_user'
   ) {
     const user = encodeURIComponent(process.env.SQL_USER);
     const pass = process.env.SQL_PASSWORD ? encodeURIComponent(process.env.SQL_PASSWORD) : '';

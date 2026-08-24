@@ -25,6 +25,7 @@ import {
 import { adminAuth } from './src/lib/firebase-admin.ts';
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { requirePermission } from './src/middleware/requirePermission.ts';
+import { parseNFeXml } from './src/utils/nfeXmlParser.ts';
 
 async function startServer() {
   const app = express();
@@ -316,6 +317,28 @@ async function startServer() {
     } catch (error: any) {
       console.error('API Error /api/nf-entries:', error);
       res.status(500).json({ error: error.message || 'Erro ao carregar NFs do Supabase' });
+    }
+  });
+
+  // Importação e Validação de Arquivo XML NF-e: Exige canAddNFEntries
+  app.post('/api/nfe/import-xml', requireAuth, requirePermission('canAddNFEntries'), async (req, res) => {
+    try {
+      const { xml, companyCnpj } = req.body || {};
+
+      if (!xml || typeof xml !== 'string') {
+        return res.status(400).json({ error: 'Conteúdo do arquivo XML não foi fornecido ou é inválido.' });
+      }
+
+      // Limite de segurança no tamanho do XML (5MB)
+      if (Buffer.byteLength(xml, 'utf8') > 5 * 1024 * 1024) {
+        return res.status(400).json({ error: 'O arquivo XML excede o limite máximo permitido de 5MB.' });
+      }
+
+      const parsedData = parseNFeXml(xml, companyCnpj);
+      res.json({ success: true, data: parsedData });
+    } catch (error: any) {
+      console.warn('API Warning /api/nfe/import-xml:', error.message);
+      res.status(400).json({ error: error.message || 'Erro ao processar o arquivo XML da NF-e' });
     }
   });
 
