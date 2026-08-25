@@ -27,6 +27,13 @@ export const companyInfo = pgTable('company_info', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+// Categories Table
+export const categories = pgTable('categories', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Users Table (Supabase Auth sync)
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),

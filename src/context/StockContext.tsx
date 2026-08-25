@@ -10,7 +10,7 @@ import {
   CloudBackupInfo,
   UserRole,
   UserPermissions,
-  Tenant,
+  CompanyInfo,
 } from '../types';
 import {
   INITIAL_PRODUCTS,
@@ -19,8 +19,6 @@ import {
   INITIAL_MOVEMENTS,
   INITIAL_USERS,
 } from '../data/initialData';
-import { INITIAL_TENANTS } from '../data/initialTenants';
-import { getStarterProductsForTenant } from '../utils/tenantUtils';
 import { isLowStock, getDaysToExpiration } from '../utils/inventoryUtils';
 import { getRolePermissions } from '../utils/permissionUtils';
 import { notifyLowStock, notifyNewNFEntry } from '../utils/notificationService';
@@ -57,18 +55,12 @@ interface StockContextType {
   unreadNotificationCount: number;
   isLoadingCloudSql: boolean;
   isLoadingSupabase: boolean;
+  isLoadingUsers: boolean;
+  isLoadingCompany: boolean;
 
-  // Tenants / Company
-  tenants: Tenant[];
-  currentTenant: Tenant;
-  isTenantModalOpen: boolean;
-  setCurrentTenantId: (tenantId: string) => void;
-  addTenant: (tenant: Omit<Tenant, 'id' | 'createdAt'>) => Tenant;
-  updateTenant: (tenant: Tenant) => void;
-  updateCompanyInfo: (info: Partial<Tenant>) => Promise<Tenant>;
-  deleteTenant: (tenantId: string) => void;
-  openTenantModal: () => void;
-  closeTenantModal: () => void;
+  // Company Info
+  companyInfo: CompanyInfo;
+  updateCompanyInfo: (info: Partial<CompanyInfo>) => Promise<CompanyInfo>;
 
   // Actions & Auth
   setActiveLocation: (loc: LocationType) => void;
@@ -78,13 +70,13 @@ interface StockContextType {
   logoutAndLock: () => void;
   openSwitchUserModal: () => void;
   closeAuthModal: () => void;
-  updateUser: (user: UserProfile) => void;
-  addUser: (user: UserProfile) => void;
-  deleteUser: (userId: string) => void;
+  updateUser: (user: UserProfile) => Promise<void>;
+  addUser: (user: UserProfile) => Promise<void>;
+  deleteUser: (userId: string) => Promise<void>;
   checkPermission: (permissionKey: keyof UserPermissions) => boolean;
 
   // Category Operations
-  addCategory: (newCategoryName: string) => boolean;
+  addCategory: (newCategoryName: string) => Promise<boolean>;
 
   // Product Operations
   addProduct: (product: Omit<Product, 'id' | 'lastUpdated' | 'totalSalesQuantity' | 'totalSalesValue'> & { id?: string }) => Promise<Product>;
@@ -128,78 +120,41 @@ export const DEFAULT_CATEGORIES = [
   'Linha Importada & Especiais',
 ];
 
-const USERS_STORAGE_KEY = 'FINI_USERS_V2';
-const CURRENT_USER_KEY = 'FINI_CURRENT_USER_ID_V2';
-const CATEGORIES_STORAGE_KEY = 'FINI_CATEGORIES_V1';
-const TENANTS_STORAGE_KEY = 'FINI_TENANTS_V1';
-
 export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Multi-tenant State
-  const [tenants, setTenants] = useState<Tenant[]>(() => {
-    try {
-      const saved = localStorage.getItem(TENANTS_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Error loading tenants from storage:', e);
-    }
-    return INITIAL_TENANTS;
+  // Company Info State (strictly single-tenant from PostgreSQL)
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>({
+    id: 'default-company',
+    name: '',
+    tradeName: '',
+    cnpj: '',
+    address: '',
+    city: '',
+    state: '',
+    isConfigured: false,
+    active: true,
+    isMaster: true,
+  });
+  const [isLoadingCompany, setIsLoadingCompany] = useState<boolean>(true);
+
+  // Categories State (loaded strictly from PostgreSQL /api/categories)
+  const [categories, setCategories] = useState<string[]>([]);
+
+  // Users State (loaded strictly from PostgreSQL /api/users)
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
+
+  // Current logged in user (strictly set via auth / handleUserAuthenticated)
+  const [currentUser, setCurrentUser] = useState<UserProfile>({
+    id: '',
+    name: '',
+    email: '',
+    role: 'operador_deposito',
+    pin: '',
+    permissions: getRolePermissions('operador_deposito'),
+    active: true,
   });
 
-  const [currentTenantId, setCurrentTenantId] = useState<string>(() => {
-    return INITIAL_TENANTS[0].id;
-  });
-
-  const [isTenantModalOpen, setIsTenantModalOpen] = useState<boolean>(false);
-
-  const currentTenant = useMemo(() => {
-    return tenants.find((t) => t.id === currentTenantId) || tenants[0] || INITIAL_TENANTS[0];
-  }, [tenants, currentTenantId]);
-
-  // Categories State
-  const [categories, setCategories] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(CATEGORIES_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Error loading categories from storage:', e);
-    }
-    return DEFAULT_CATEGORIES;
-  });
-
-  // Users State
-  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => {
-    try {
-      const saved = localStorage.getItem(USERS_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Error loading users from storage:', e);
-    }
-    return INITIAL_USERS;
-  });
-
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
-    try {
-      const savedId = localStorage.getItem(CURRENT_USER_KEY);
-      if (savedId) {
-        const found = allUsers.find((u) => u.id === savedId);
-        if (found) return found;
-      }
-    } catch (e) {
-      console.error('Error loading current user from storage:', e);
-    }
-    return allUsers[0] || INITIAL_USERS[0];
-  });
-
-  // Multi-tenant product and data states (populated exclusively from PostgreSQL server)
+  // Product and inventory data states (populated exclusively from PostgreSQL server)
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [allNfEntries, setAllNfEntries] = useState<NFEntry[]>([]);
   const [allTransfers, setAllTransfers] = useState<StockTransfer[]>([]);
@@ -223,51 +178,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const notifiedLowStockRef = useRef<Set<string>>(new Set());
 
-  // Filtered views without tenant restrictions (Single Enterprise ERP)
-  const products = useMemo(() => {
-    return allProducts;
-  }, [allProducts]);
-
-  const nfEntries = useMemo(() => {
-    return allNfEntries;
-  }, [allNfEntries]);
-
-  const transfers = useMemo(() => {
-    return allTransfers;
-  }, [allTransfers]);
-
-  const movements = useMemo(() => {
-    return allMovements;
-  }, [allMovements]);
-
-  const users = useMemo(() => {
-    return allUsers;
-  }, [allUsers]);
-
-  // Persist Tenant / Categories / Users meta locally
-  useEffect(() => {
-    try {
-      localStorage.setItem(TENANTS_STORAGE_KEY, JSON.stringify(tenants));
-    } catch (e) {
-      console.error('Error saving tenants to storage:', e);
-    }
-  }, [tenants]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories));
-    } catch (e) {
-      console.error('Error saving categories to storage:', e);
-    }
-  }, [categories]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(allUsers));
-    } catch (e) {
-      console.error('Error saving users to storage:', e);
-    }
-  }, [allUsers]);
+  const products = useMemo(() => allProducts, [allProducts]);
+  const nfEntries = useMemo(() => allNfEntries, [allNfEntries]);
+  const transfers = useMemo(() => allTransfers, [allTransfers]);
+  const movements = useMemo(() => allMovements, [allMovements]);
+  const users = useMemo(() => allUsers, [allUsers]);
 
   // Observa mudanças em allUsers (sincronização periódica com o banco de dados) e atualiza o currentUser se houver alteração de role, permissões, nome ou status ativo
   useEffect(() => {
@@ -285,7 +200,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const nameChanged = Boolean(matchingUser.name && matchingUser.name !== currentUser.name);
     const activeChanged = matchingUser.active !== undefined && matchingUser.active !== currentUser.active;
 
-    // Compara as permissões atuais com as novas permissões do perfil atualizado
     const newPermissions = matchingUser.permissions || getRolePermissions(matchingUser.role);
     const currentPermissions = currentUser.permissions || getRolePermissions(currentUser.role);
     const permissionsChanged = JSON.stringify(newPermissions) !== JSON.stringify(currentPermissions);
@@ -302,15 +216,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       };
 
       setCurrentUser(updatedUser);
-      try {
-        localStorage.setItem(CURRENT_USER_KEY, updatedUser.id);
-      } catch (e) {
-        console.error('Error updating saved current user:', e);
-      }
     }
   }, [allUsers, currentUser?.id, currentUser?.email, currentUser?.role, currentUser?.name, currentUser?.active, currentUser?.permissions]);
 
-  // Helper de notificação amigável para acessos bloqueados por falta de permissão (HTTP 403)
+  // Helper de notificação para acessos bloqueados por falta de permissão (HTTP 403)
   const handle403PermissionDenied = (actionName?: string) => {
     const errorText = 'Você não tem permissão para esta ação.';
     console.warn(`[Segurança 403] Bloqueio de autorização no servidor: ${actionName || 'Ação restrita'}`);
@@ -458,11 +367,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setCurrentUser(target);
       setIsAuthenticated(true);
       setIsAuthModalOpen(false);
-      try {
-        localStorage.setItem(CURRENT_USER_KEY, target.id);
-      } catch (e) {
-        console.error('Error saving current user:', e);
-      }
       return true;
     }
     return false;
@@ -512,7 +416,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         pin: userToSave.pin || undefined,
       });
     } catch (e: any) {
-      // Reverte em caso de erro
       setAllUsers(previousUsers);
       setCurrentUser(previousCurrentUser);
       console.error('Falha ao sincronizar atualização do usuário no servidor:', e);
@@ -543,7 +446,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         pin: userToSave.pin || undefined,
       });
     } catch (e: any) {
-      // Reverte em caso de erro
       setAllUsers(previousUsers);
       console.error('Falha ao persistir novo usuário no servidor:', e);
       throw e;
@@ -603,13 +505,14 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
 
-      const [resProd, resMov, resNFs, resSales, resUsers, resComp] = await Promise.all([
+      const [resProd, resMov, resNFs, resSales, resUsers, resComp, resCats] = await Promise.all([
         authFetch('/api/products').catch(() => null),
         authFetch('/api/movements').catch(() => null),
         authFetch('/api/nf-entries').catch(() => null),
         authFetch('/api/sales').catch(() => null),
         authFetch('/api/users').catch(() => null),
         authFetch('/api/company').catch(() => null),
+        authFetch('/api/categories').catch(() => null),
       ]);
 
       let loadedProducts: Product[] = [];
@@ -618,18 +521,34 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       let loadedUsers: any[] = [];
       let loadedSales: any[] = [];
 
-      const [dataProd, dataMov, dataNFs, dataSales, dataUsers, dataComp] = await Promise.all([
+      const [dataProd, dataMov, dataNFs, dataSales, dataUsers, dataComp, dataCats] = await Promise.all([
         safeParseJson(resProd),
         safeParseJson(resMov),
         safeParseJson(resNFs),
         safeParseJson(resSales),
         safeParseJson(resUsers),
         safeParseJson(resComp),
+        safeParseJson(resCats),
       ]);
 
-      if (dataComp && dataComp.cnpj) {
-        setTenants([dataComp]);
-        setCurrentTenantId(dataComp.id);
+      if (dataComp && typeof dataComp === 'object') {
+        setCompanyInfo({
+          id: dataComp.id || 'default-company',
+          name: dataComp.name || '',
+          tradeName: dataComp.tradeName || '',
+          cnpj: dataComp.cnpj || '',
+          address: dataComp.address || '',
+          city: dataComp.city || '',
+          state: dataComp.state || 'RJ',
+          isConfigured: Boolean(dataComp.isConfigured || (dataComp.name && dataComp.cnpj)),
+          active: dataComp.active ?? true,
+          isMaster: true,
+        });
+      }
+      setIsLoadingCompany(false);
+
+      if (Array.isArray(dataCats)) {
+        setCategories(dataCats);
       }
 
       if (Array.isArray(dataProd)) loadedProducts = dataProd;
@@ -673,7 +592,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setAllNfEntries(dataNFs);
       }
 
-      if (Array.isArray(dataUsers) && dataUsers.length > 0) {
+      if (Array.isArray(dataUsers)) {
         const mappedUsers: UserProfile[] = dataUsers.map((u: any) => {
           const role = (u.role || 'Operador Depósito/Loja') as UserRole;
           return {
@@ -689,6 +608,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         });
         setAllUsers(mappedUsers);
       }
+      setIsLoadingUsers(false);
 
       const totalItems = (Array.isArray(dataProd) ? dataProd.length : 0) +
         (Array.isArray(dataNFs) ? dataNFs.length : 0) +
@@ -706,6 +626,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setCloudInfo((prev) => ({ ...prev, status: 'error' }));
     } finally {
       setIsLoadingServer(false);
+      setIsLoadingUsers(false);
+      setIsLoadingCompany(false);
     }
   };
 
@@ -713,26 +635,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     fetchServerData();
   }, []);
 
-  // Tenant Operations
-  const setCurrentTenant = (tenantId: string) => {
-    setCurrentTenantId(tenantId);
-  };
-
-  const addTenant = (tenantData: Omit<Tenant, 'id' | 'createdAt'>): Tenant => {
-    const newTenant: Tenant = {
-      ...tenantData,
-      id: `tenant-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    setTenants((prev) => [...prev, newTenant]);
-
-    const starterProducts = getStarterProductsForTenant(newTenant);
-    setAllProducts((prev) => [...starterProducts, ...prev]);
-
-    return newTenant;
-  };
-
-  const updateCompanyInfo = async (info: Partial<Tenant>): Promise<Tenant> => {
+  const updateCompanyInfo = async (info: Partial<CompanyInfo>): Promise<CompanyInfo> => {
     const res = await authFetch('/api/company', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -748,44 +651,32 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       throw new Error(msg);
     }
 
-    const savedCompany: Tenant = await res.json();
-    setTenants([savedCompany]);
-    setCurrentTenantId(savedCompany.id);
+    const savedCompany: CompanyInfo = await res.json();
+    setCompanyInfo(savedCompany);
     return savedCompany;
   };
 
-  const updateTenant = (updatedTenant: Tenant) => {
-    setTenants((prev) => prev.map((t) => (t.id === updatedTenant.id ? updatedTenant : t)));
-    updateCompanyInfo(updatedTenant).catch((err) => {
-      console.warn('Aviso ao sincronizar dados da empresa com o servidor:', err);
-    });
-  };
-
-  const deleteTenant = (tenantId: string) => {
-    if (tenants.length <= 1) return;
-    setTenants((prev) => prev.filter((t) => t.id !== tenantId));
-    setAllProducts((prev) => prev.filter((p) => p.tenantId !== tenantId));
-    setAllNfEntries((prev) => prev.filter((n) => n.tenantId !== tenantId));
-    setAllTransfers((prev) => prev.filter((t) => t.tenantId !== tenantId));
-    setAllMovements((prev) => prev.filter((m) => m.tenantId !== tenantId));
-
-    if (currentTenantId === tenantId) {
-      const remaining = tenants.filter((t) => t.id !== tenantId);
-      setCurrentTenantId(remaining[0].id);
-    }
-  };
-
-  const openTenantModal = () => setIsTenantModalOpen(true);
-  const closeTenantModal = () => setIsTenantModalOpen(false);
-
-  // Category Operations
-  const addCategory = (newCategoryName: string): boolean => {
+  // Category Operations (persisted directly to Postgres /api/categories)
+  const addCategory = async (newCategoryName: string): Promise<boolean> => {
     const trimmed = newCategoryName.trim();
     if (!trimmed) return false;
-    const exists = categories.some((c) => c.toLowerCase() === trimmed.toLowerCase());
-    if (exists) return false;
-    setCategories((prev) => [...prev, trimmed]);
-    return true;
+    try {
+      const res = await authFetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (res.ok) {
+        setCategories((prev) => {
+          if (prev.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return prev;
+          return [...prev, trimmed].sort();
+        });
+        return true;
+      }
+    } catch (e) {
+      console.error('Error adding category to server:', e);
+    }
+    return false;
   };
 
   // Low stock & Expiration Monitoring
@@ -808,17 +699,16 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           title: `Estoque Baixo no Depósito: ${p.name}`,
           message: `O estoque atual do depósito é de ${p.stockDeposito} ${p.unit} (Mínimo: ${p.minStockDeposito}).`,
           type: 'low_stock',
-          severity: p.stockDeposito === 0 ? 'high' : 'medium',
+          severity: 'high',
           timestamp: new Date().toISOString(),
-          read: false,
           productId: p.id,
-          location: 'deposito',
+          read: false,
         });
       }
 
       // Low stock in Loja
       if (p.stockLoja <= p.minStockLoja) {
-        const key = `loj-${p.id}`;
+        const key = `loja-${p.id}`;
         currentLowStockKeys.add(key);
 
         if (!notifiedLowStockRef.current.has(key)) {
@@ -826,513 +716,319 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         }
 
         newAlerts.push({
-          id: `low-loj-${p.id}`,
+          id: `low-loja-${p.id}`,
           title: `Estoque Baixo na Loja: ${p.name}`,
-          message: `Apenas ${p.stockLoja} ${p.unit} na loja (Mínimo: ${p.minStockLoja}). Solicite transferência do depósito!`,
+          message: `O estoque atual da loja é de ${p.stockLoja} ${p.unit} (Mínimo: ${p.minStockLoja}).`,
           type: 'low_stock',
           severity: p.stockLoja === 0 ? 'high' : 'medium',
           timestamp: new Date().toISOString(),
-          read: false,
           productId: p.id,
-          location: 'loja',
+          read: false,
         });
       }
 
-      // Expiration check
-      const days = getDaysToExpiration(p.expirationDate);
-      if (days < 0) {
-        newAlerts.push({
-          id: `exp-expired-${p.id}`,
-          title: `PRODUTO VENCIDO: ${p.name}`,
-          message: `Lote ${p.batchNumber} venceu em ${p.expirationDate}. Realize a baixa por perda/avaria imediatamente.`,
-          type: 'expiration',
-          severity: 'high',
-          timestamp: new Date().toISOString(),
-          read: false,
-          productId: p.id,
-        });
-      } else if (days <= 30) {
-        newAlerts.push({
-          id: `exp-near-${p.id}`,
-          title: `Atenção à Validade: ${p.name}`,
-          message: `Vence em ${days} dias (${p.expirationDate}). Considere criar promoção na loja.`,
-          type: 'expiration',
-          severity: 'medium',
-          timestamp: new Date().toISOString(),
-          read: false,
-          productId: p.id,
-        });
+      // Expiration Alert
+      if (p.expirationDate) {
+        const daysTo = getDaysToExpiration(p.expirationDate);
+        if (daysTo <= 30) {
+          newAlerts.push({
+            id: `exp-${p.id}`,
+            title: `Validade Próxima: ${p.name}`,
+            message:
+              daysTo < 0
+                ? `PRODUTO VENCIDO há ${Math.abs(daysTo)} dias (${p.expirationDate}). Lote: ${p.batchNumber || 'N/A'}`
+                : `Vence em ${daysTo} dias (${p.expirationDate}). Lote: ${p.batchNumber || 'N/A'}`,
+            type: 'expiration',
+            severity: daysTo <= 7 ? 'high' : 'medium',
+            timestamp: new Date().toISOString(),
+            productId: p.id,
+            read: false,
+          });
+        }
       }
     });
 
     notifiedLowStockRef.current = currentLowStockKeys;
-    setNotifications(newAlerts);
+
+    setNotifications((prev) => {
+      const existingIds = new Set(prev.map((n) => n.id));
+      const filteredNew = newAlerts.filter((n) => !existingIds.has(n.id));
+      return [...filteredNew, ...prev].slice(0, 50);
+    });
   }, [products]);
 
   const unreadNotificationCount = useMemo(() => {
     return notifications.filter((n) => !n.read).length;
   }, [notifications]);
 
-  // Switch Role
   const setCurrentUserRole = (role: UserRole) => {
-    const found = users.find((u) => u.role === role);
-    if (found) setCurrentUser(found);
+    setCurrentUser((prev) => ({
+      ...prev,
+      role,
+      permissions: getRolePermissions(role),
+    }));
   };
 
-  // Add Product with server Express API
   const addProduct = async (
-    newP: Partial<Product> & Omit<Product, 'lastUpdated' | 'totalSalesQuantity' | 'totalSalesValue'> & { id?: string }
+    productData: Omit<Product, 'id' | 'lastUpdated' | 'totalSalesQuantity' | 'totalSalesValue'> & { id?: string }
   ): Promise<Product> => {
-    const createdId = newP.id || `p-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const eanVal = newP.ean || (newP as any).codeEAN || '';
-
-    const created: Product = {
-      ...newP,
-      id: createdId,
-      sku: newP.sku || `SKU-${Date.now().toString().slice(-6)}`,
-      ean: eanVal,
-      codeEAN: eanVal,
-      name: newP.name || 'Novo Produto',
-      category: newP.category || 'Balas de Gelatina',
-      unit: newP.unit || 'Pacote 500g',
-      stockDeposito: Number(newP.stockDeposito) || 0,
-      stockLoja: Number(newP.stockLoja) || 0,
-      minStockDeposito: Number(newP.minStockDeposito) || 15,
-      minStockLoja: Number(newP.minStockLoja) || 5,
-      costPrice: Number(newP.costPrice) || 10,
-      sellPrice: Number(newP.sellPrice) || 20,
-      expirationDate: newP.expirationDate || '2027-12-31',
-      batchNumber: newP.batchNumber || `LOTE-${new Date().getFullYear()}`,
+    const newProduct: Product = {
+      ...productData,
+      id: productData.id || `p-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       lastUpdated: new Date().toISOString(),
       totalSalesQuantity: 0,
       totalSalesValue: 0,
     };
 
-    setAllProducts((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
+    setAllProducts((prev) => [newProduct, ...prev]);
 
     try {
       const response = await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(created),
+        body: JSON.stringify(newProduct),
       });
 
       if (!response.ok) {
-        let errorMessage = `Erro ao salvar produto no servidor (HTTP ${response.status}).`;
-        try {
-          const errData = await response.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await response.text();
-            if (errText) errorMessage = errText;
-          } catch {}
-        }
-
         if (response.status === 403) {
-          handle403PermissionDenied('cadastrar produto');
+          handle403PermissionDenied('Cadastrar Novo Produto');
+          setAllProducts((prev) => prev.filter((p) => p.id !== newProduct.id));
+          throw new Error('Você não tem permissão para cadastrar novos produtos no estoque.');
         }
-
-        setAllProducts((prev) => prev.filter((p) => p.id !== created.id));
-        throw new Error(errorMessage);
+        const errData = await safeParseJson<{ error?: string }>(response);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao salvar produto no servidor.`);
       }
-    } catch (e: any) {
-      setAllProducts((prev) => prev.filter((p) => p.id !== created.id));
-      console.error('Erro ao salvar produto via API:', e);
-      throw e;
-    }
 
-    return created;
+      const saved = await safeParseJson<Product>(response);
+      return saved || newProduct;
+    } catch (error) {
+      console.error('Falha ao sincronizar novo produto com o servidor PostgreSQL:', error);
+      throw error;
+    }
   };
 
-  // Update Product with server Express API
-  const updateProduct = async (id: string, updated: Partial<Product>) => {
-    const targetProduct = allProducts.find((p) => p.id === id);
-    if (!targetProduct) return;
-
-    const previousProduct = { ...targetProduct };
-    const newProd = {
-      ...targetProduct,
-      ...updated,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    setAllProducts((prev) => {
-      const exists = prev.some((p) => p.id === id);
-      if (exists) {
-        return prev.map((p) => (p.id === id ? newProd : p));
-      }
-      return [newProd, ...prev];
-    });
+  const updateProduct = async (id: string, updatedFields: Partial<Product>) => {
+    const prevProducts = [...allProducts];
+    setAllProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === id) {
+          return {
+            ...p,
+            ...updatedFields,
+            lastUpdated: new Date().toISOString(),
+          };
+        }
+        return p;
+      })
+    );
 
     try {
-      const response = await authFetch('/api/products', {
-        method: 'POST',
+      const response = await authFetch(`/api/products/${id}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProd),
+        body: JSON.stringify({
+          ...updatedFields,
+          lastUpdated: new Date().toISOString(),
+        }),
       });
 
       if (!response.ok) {
-        let errorMessage = `Erro ao atualizar produto no servidor (HTTP ${response.status}).`;
-        try {
-          const errData = await response.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await response.text();
-            if (errText) errorMessage = errText;
-          } catch {}
-        }
-
         if (response.status === 403) {
-          handle403PermissionDenied('editar produto');
+          handle403PermissionDenied('Editar Dados do Produto');
+          setAllProducts(prevProducts);
+          throw new Error('Você não tem permissão para editar dados de produtos.');
         }
-
-        setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct : p)));
-        throw new Error(errorMessage);
+        const errData = await safeParseJson<{ error?: string }>(response);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao atualizar produto no servidor.`);
       }
-    } catch (e: any) {
-      setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct : p)));
-      console.error('Erro ao atualizar produto via API:', e);
-      throw e;
+    } catch (error) {
+      setAllProducts(prevProducts);
+      console.error('Falha ao atualizar produto no servidor PostgreSQL:', error);
+      throw error;
     }
   };
 
-  // Delete Product with server Express API
   const deleteProduct = async (id: string) => {
-    const previousProducts = [...allProducts];
+    const prevProducts = [...allProducts];
     setAllProducts((prev) => prev.filter((p) => p.id !== id));
 
     try {
-      const response = await authFetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const response = await authFetch(`/api/products/${id}`, {
+        method: 'DELETE',
+      });
 
       if (!response.ok) {
-        let errorMessage = `Erro ao excluir produto no servidor (HTTP ${response.status}).`;
-        try {
-          const errData = await response.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await response.text();
-            if (errText) errorMessage = errText;
-          } catch {}
-        }
-
         if (response.status === 403) {
-          handle403PermissionDenied('excluir produto');
+          handle403PermissionDenied('Excluir Produto');
+          setAllProducts(prevProducts);
+          throw new Error('Você não tem permissão para excluir produtos do catálogo.');
         }
-
-        setAllProducts(previousProducts);
-        throw new Error(errorMessage);
+        const errData = await safeParseJson<{ error?: string }>(response);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao excluir produto no servidor.`);
       }
-    } catch (e: any) {
-      setAllProducts(previousProducts);
-      console.error('Erro ao deletar produto via API:', e);
-      throw e;
+    } catch (error) {
+      setAllProducts(prevProducts);
+      console.error('Falha ao deletar produto do servidor PostgreSQL:', error);
+      throw error;
     }
   };
 
-  // Add NF Entry with server Express API
   const addNFEntry = async (nfData: Omit<NFEntry, 'id' | 'receiveDate'>) => {
-    const previousNFs = [...allNfEntries];
-    const previousProducts = [...allProducts];
-    const previousMovements = [...allMovements];
-
-    const nowISO = new Date().toISOString();
-    const newNF: NFEntry = {
+    const newEntry: NFEntry = {
       ...nfData,
       id: `nf-${Date.now()}`,
-      receiveDate: nowISO.slice(0, 10),
+      receiveDate: new Date().toISOString().slice(0, 10),
     };
 
-    setAllNfEntries((prev) => [newNF, ...prev]);
+    setAllNfEntries((prev) => [newEntry, ...prev]);
 
-    let finalUpdatedProds: Product[] = [];
-
-    setAllProducts((prevProducts) => {
-      const updatedProdsList: Product[] = [];
-      const matchedItemIds = new Set<string>();
-
-      const nextProducts = prevProducts.map((p) => {
-        const pEan = p.ean || p.codeEAN || '';
-        const item = nfData.items.find(
-          (i) =>
-            i.productId === p.id ||
-            (pEan && i.productId && pEan === i.productId) ||
-            (p.sku && i.productId && p.sku === i.productId)
-        );
-
+    setAllProducts((prev) =>
+      prev.map((p) => {
+        const item = newEntry.items.find((i) => i.productId === p.id);
         if (item) {
-          matchedItemIds.add(item.productId);
-          const addedQty = Number(item.quantity) || 0;
-          const currentDepStock = Number(p.stockDeposito) || 0;
-          const updated: Product = {
+          return {
             ...p,
-            stockDeposito: currentDepStock + addedQty,
-            costPrice: Number(item.costPrice) > 0 ? Number(item.costPrice) : p.costPrice,
-            batchNumber: item.batchNumber || p.batchNumber,
-            expirationDate: item.expirationDate || p.expirationDate,
-            lastUpdated: nowISO,
+            stockDeposito: p.stockDeposito + item.quantity,
+            costPrice: item.costPrice || p.costPrice,
+            lastUpdated: new Date().toISOString(),
           };
-          updatedProdsList.push(updated);
-          return updated;
         }
         return p;
-      });
+      })
+    );
 
-      const missingItems = nfData.items.filter(
-        (i) =>
-          !matchedItemIds.has(i.productId) &&
-          !nextProducts.some(
-            (p) => p.id === i.productId || (p.ean && p.ean === i.productId) || (p.sku && p.sku === i.productId)
-          )
-      );
-
-      if (missingItems.length > 0) {
-        missingItems.forEach((i) => {
-          const autoCreated: Product = {
-            id: i.productId || `p-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            sku: `SKU-${Date.now().toString().slice(-6)}`,
-            ean: '',
-            codeEAN: '',
-            name: i.productName || 'Produto Importado por NF',
-            category: 'Balas de Gelatina',
-            unit: 'Pacote 500g',
-            stockDeposito: Number(i.quantity) || 0,
-            stockLoja: 0,
-            minStockDeposito: 15,
-            minStockLoja: 5,
-            costPrice: Number(i.costPrice) || 10,
-            sellPrice: (Number(i.costPrice) || 10) * 1.8,
-            expirationDate: i.expirationDate || '2027-12-31',
-            batchNumber: i.batchNumber || `LOTE-${new Date().getFullYear()}`,
-            lastUpdated: nowISO,
-            totalSalesQuantity: 0,
-            totalSalesValue: 0,
-          };
-          nextProducts.unshift(autoCreated);
-          updatedProdsList.push(autoCreated);
-        });
-      }
-
-      finalUpdatedProds = updatedProdsList;
-      return nextProducts;
-    });
-
-    const newMovements: StockMovement[] = nfData.items.map((item) => ({
-      id: `mov-${Date.now()}-${item.productId}`,
-      date: nowISO,
+    const newMovements: StockMovement[] = newEntry.items.map((item) => ({
+      id: `mov-nf-${Date.now()}-${item.productId}`,
       productId: item.productId,
       productName: item.productName,
       type: 'entrada_nf',
-      quantity: Number(item.quantity) || 0,
+      quantity: item.quantity,
       location: 'deposito',
-      unitPrice: Number(item.costPrice) || 0,
-      totalValue: Number(item.totalCost) || (Number(item.quantity) || 0) * (Number(item.costPrice) || 0),
-      reason: `Nota Fiscal #${nfData.numberNF} (${nfData.supplier})`,
+      date: new Date().toISOString(),
       userName: currentUser.name,
+      reason: `Entrada por NF ${newEntry.numberNF} (${newEntry.supplier})`,
+      unitPrice: item.costPrice,
     }));
 
     setAllMovements((prev) => [...newMovements, ...prev]);
-
-    notifyNewNFEntry(
-      newNF.numberNF,
-      newNF.supplier,
-      newNF.items.length,
-      newNF.totalValue
-    );
 
     try {
       const response = await authFetch('/api/nf-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newNF),
+        body: JSON.stringify(newEntry),
       });
 
       if (!response.ok) {
-        let errorMessage = `Erro ao salvar NF no servidor (HTTP ${response.status}).`;
-        try {
-          const errData = await response.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await response.text();
-            if (errText) errorMessage = errText;
-          } catch {}
-        }
-
         if (response.status === 403) {
-          handle403PermissionDenied('lançar nota fiscal (NF)');
+          handle403PermissionDenied('Dar Entrada em Nota Fiscal');
+          throw new Error('Você não tem permissão para lançar notas fiscais de entrada.');
         }
-
-        setAllNfEntries(previousNFs);
-        setAllProducts(previousProducts);
-        setAllMovements(previousMovements);
-        throw new Error(errorMessage);
+        const errData = await safeParseJson<{ error?: string }>(response);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao registrar NF no servidor.`);
       }
 
-      for (const p of finalUpdatedProds) {
-        await authFetch('/api/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(p),
-        });
-      }
-
-      for (const m of newMovements) {
-        await authFetch('/api/movements', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(m),
-        });
-      }
-    } catch (e: any) {
-      setAllNfEntries(previousNFs);
-      setAllProducts(previousProducts);
-      setAllMovements(previousMovements);
-      console.error('Erro ao salvar NF via API:', e);
-      throw e;
+      await notifyNewNFEntry(
+        newEntry.numberNF,
+        newEntry.supplier,
+        newEntry.items.reduce((acc, i) => acc + i.quantity, 0),
+        newEntry.totalValue
+      );
+    } catch (error) {
+      console.error('Falha ao sincronizar entrada de NF no servidor PostgreSQL:', error);
+      throw error;
     }
   };
 
-  // Transfer Stock from Depósito to Loja with server Express API
-  const transferStock = async (productId: string, quantity: number, notes?: string) => {
+  const transferStock = async (
+    productId: string,
+    quantity: number,
+    notes?: string
+  ): Promise<{ success: boolean; message: string }> => {
     const product = allProducts.find((p) => p.id === productId);
-    if (!product) return { success: false, message: 'Produto não encontrado neste estabelecimento.' };
-
-    if (quantity <= 0) {
-      return { success: false, message: 'Informe uma quantidade maior que zero.' };
+    if (!product) {
+      return { success: false, message: 'Produto não localizado no estoque.' };
     }
 
     if (product.stockDeposito < quantity) {
       return {
         success: false,
-        message: `Saldo insuficiente no Depósito. Saldo atual do Depósito: ${product.stockDeposito} ${product.unit}.`,
+        message: `Estoque insuficiente no Depósito. Disponível: ${product.stockDeposito} ${product.unit}.`,
       };
     }
 
-    const previousProducts = [...allProducts];
-    const nowISO = new Date().toISOString();
-    const updatedProd: Product = {
-      ...product,
-      stockDeposito: product.stockDeposito - quantity,
-      stockLoja: product.stockLoja + quantity,
-      lastUpdated: nowISO,
-    };
-
-    setAllProducts((prev) => {
-      const exists = prev.some((p) => p.id === productId);
-      if (exists) {
-        return prev.map((p) => (p.id === productId ? updatedProd : p));
-      }
-      return [updatedProd, ...prev];
-    });
-
     const newTransfer: StockTransfer = {
-      id: `trf-${Date.now()}`,
-      date: nowISO,
-      productId: product.id,
+      id: `transf-${Date.now()}`,
+      productId,
       productName: product.name,
       quantity,
+      date: new Date().toISOString(),
       origin: 'deposito',
       destination: 'loja',
       operatorName: currentUser.name,
-      notes,
       status: 'concluida',
+      notes,
     };
 
-    setAllTransfers((prev) => [newTransfer, ...prev]);
-
     const newMovement: StockMovement = {
-      id: `mov-${Date.now()}`,
-      date: nowISO,
-      productId: product.id,
+      id: `mov-transf-${Date.now()}`,
+      productId,
       productName: product.name,
       type: 'transferencia_deposito_loja',
       quantity,
       location: 'ambos',
-      reason: notes || 'Transferência Depósito ➔ Loja',
+      date: new Date().toISOString(),
       userName: currentUser.name,
+      reason: `Transferência Depósito ➔ Loja: ${quantity} ${product.unit}${notes ? ` (${notes})` : ''}`,
+      unitPrice: product.sellPrice,
     };
 
+    setAllTransfers((prev) => [newTransfer, ...prev]);
     setAllMovements((prev) => [newMovement, ...prev]);
 
+    setAllProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          return {
+            ...p,
+            stockDeposito: p.stockDeposito - quantity,
+            stockLoja: p.stockLoja + quantity,
+            lastUpdated: new Date().toISOString(),
+          };
+        }
+        return p;
+      })
+    );
+
     try {
-      const movRes = await authFetch('/api/movements', {
+      const response = await authFetch('/api/transfers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMovement),
+        body: JSON.stringify(newTransfer),
       });
 
-      if (!movRes.ok) {
-        let errorMessage = `Erro ao salvar transferência no servidor (HTTP ${movRes.status}).`;
-        try {
-          const errData = await movRes.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await movRes.text();
-            if (errText) errorMessage = errText;
-          } catch {}
+      if (!response.ok) {
+        if (response.status === 403) {
+          handle403PermissionDenied('Transferência Depósito ➔ Loja');
+          throw new Error('Você não tem permissão para realizar transferências de estoque.');
         }
-
-        if (movRes.status === 403) {
-          handle403PermissionDenied('transferir estoque');
-        }
-
-        setAllProducts(previousProducts);
-        setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
-        setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
-        return {
-          success: false,
-          message: errorMessage,
-        };
+        const errData = await safeParseJson<{ error?: string }>(response);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao registrar transferência no servidor.`);
       }
 
-      const prodRes = await authFetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedProd),
-      });
-
-      if (!prodRes.ok) {
-        let errorMessage = `Erro ao atualizar estoque na transferência (HTTP ${prodRes.status}).`;
-        try {
-          const errData = await prodRes.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await prodRes.text();
-            if (errText) errorMessage = errText;
-          } catch {}
-        }
-
-        setAllProducts(previousProducts);
-        setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
-        setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
-        return {
-          success: false,
-          message: errorMessage,
-        };
-      }
-    } catch (e: any) {
-      setAllProducts(previousProducts);
-      setAllTransfers((prev) => prev.filter((t) => t.id !== newTransfer.id));
-      setAllMovements((prev) => prev.filter((m) => m.id !== newMovement.id));
-      console.error('Erro ao salvar transferência via API:', e);
+      return {
+        success: true,
+        message: `Transferência de ${quantity} ${product.unit} de "${product.name}" para a Loja realizada com sucesso!`,
+      };
+    } catch (error: any) {
+      console.error('Falha ao sincronizar transferência no servidor PostgreSQL:', error);
       return {
         success: false,
-        message: e?.message || 'Erro ao comunicar com o servidor.',
+        message: error?.message || 'Falha ao processar transferência no servidor.',
       };
     }
-
-    return {
-      success: true,
-      message: `Transferência de ${quantity}x "${product.name}" do Depósito para a Loja realizada com sucesso!`,
-    };
   };
 
-  // Register Movement (Sale, Loss, Adjustment) with server Express API
   const registerMovement = async (
     productId: string,
     type: StockMovement['type'],
@@ -1342,150 +1038,75 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     unitPrice?: number
   ) => {
     const product = allProducts.find((p) => p.id === productId);
-    if (!product || quantity <= 0) return;
-
-    const previousProducts = [...allProducts];
-    const previousMovements = [...allMovements];
-    const nowISO = new Date().toISOString();
-    const price = unitPrice ?? (type === 'venda_loja' ? product.sellPrice : product.costPrice);
-    const totalVal = price * quantity;
-
-    let newStockDep = product.stockDeposito;
-    let newStockLoj = product.stockLoja;
-    let newSalesQty = product.totalSalesQuantity;
-    let newSalesVal = product.totalSalesValue;
-
-    if (type === 'venda_loja') {
-      newStockLoj = Math.max(0, product.stockLoja - quantity);
-      newSalesQty += quantity;
-      newSalesVal += totalVal;
-    } else if (type === 'perda_avaria') {
-      if (location === 'loja') newStockLoj = Math.max(0, product.stockLoja - quantity);
-      else newStockDep = Math.max(0, product.stockDeposito - quantity);
-    } else if (type === 'ajuste_inventario') {
-      if (location === 'loja') newStockLoj = quantity;
-      else if (location === 'deposito') newStockDep = quantity;
-    }
-
-    const updatedProd: Product = {
-      ...product,
-      stockDeposito: newStockDep,
-      stockLoja: newStockLoj,
-      totalSalesQuantity: newSalesQty,
-      totalSalesValue: newSalesVal,
-      lastUpdated: nowISO,
-    };
-
-    setAllProducts((prev) => {
-      const exists = prev.some((p) => p.id === productId);
-      if (exists) {
-        return prev.map((p) => (p.id === productId ? updatedProd : p));
-      }
-      return [updatedProd, ...prev];
-    });
+    if (!product) return;
 
     const newMov: StockMovement = {
       id: `mov-${Date.now()}`,
-      date: nowISO,
-      productId: product.id,
+      productId,
       productName: product.name,
       type,
       quantity,
       location,
-      unitPrice: price,
-      totalValue: totalVal,
-      reason,
+      date: new Date().toISOString(),
       userName: currentUser.name,
+      reason: reason || `Movimentação avulsa: ${type}`,
+      unitPrice: unitPrice !== undefined ? unitPrice : product.sellPrice,
     };
 
     setAllMovements((prev) => [newMov, ...prev]);
 
+    setAllProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          let newDeposito = p.stockDeposito;
+          let newLoja = p.stockLoja;
+
+          if (type === 'venda_loja') {
+            newLoja = Math.max(0, newLoja - quantity);
+          } else if (type === 'perda_avaria') {
+            if (location === 'deposito' || location === 'ambos') {
+              newDeposito = Math.max(0, newDeposito - quantity);
+            }
+            if (location === 'loja') {
+              newLoja = Math.max(0, newLoja - quantity);
+            }
+          } else if (type === 'ajuste_inventario') {
+            if (location === 'deposito') newDeposito = quantity;
+            if (location === 'loja') newLoja = quantity;
+          } else if (type === 'transferencia_deposito_loja') {
+            newDeposito = Math.max(0, newDeposito - quantity);
+            newLoja = newLoja + quantity;
+          }
+
+          return {
+            ...p,
+            stockDeposito: newDeposito,
+            stockLoja: newLoja,
+            lastUpdated: new Date().toISOString(),
+          };
+        }
+        return p;
+      })
+    );
+
     try {
-      const movRes = await authFetch('/api/movements', {
+      const response = await authFetch('/api/movements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newMov),
       });
 
-      if (!movRes.ok) {
-        let errorMessage = `Erro ao salvar movimentação no servidor (HTTP ${movRes.status}).`;
-        try {
-          const errData = await movRes.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await movRes.text();
-            if (errText) errorMessage = errText;
-          } catch {}
+      if (!response.ok) {
+        if (response.status === 403) {
+          handle403PermissionDenied('Registrar Movimentação de Estoque');
+          throw new Error('Você não tem permissão para lançar movimentações manuais de estoque.');
         }
-
-        if (movRes.status === 403) {
-          handle403PermissionDenied('registrar movimentação');
-        }
-
-        setAllProducts(previousProducts);
-        setAllMovements(previousMovements);
-        throw new Error(errorMessage);
+        const errData = await safeParseJson<{ error?: string }>(response);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao registrar movimentação no servidor.`);
       }
-
-      const prodRes = await authFetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedProd),
-      });
-
-      if (!prodRes.ok) {
-        let errorMessage = `Erro ao atualizar estoque da movimentação (HTTP ${prodRes.status}).`;
-        try {
-          const errData = await prodRes.json();
-          if (errData?.error) errorMessage = errData.error;
-        } catch {
-          try {
-            const errText = await prodRes.text();
-            if (errText) errorMessage = errText;
-          } catch {}
-        }
-
-        setAllProducts(previousProducts);
-        setAllMovements(previousMovements);
-        throw new Error(errorMessage);
-      }
-
-      if (type === 'venda_loja') {
-        const saleRes = await authFetch('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: `sale-${Date.now()}`,
-            productId: product.id,
-            productName: product.name,
-            quantity,
-            unitPrice: price,
-            totalAmount: totalVal,
-            paymentMethod: 'PIX',
-            sellerName: currentUser.name,
-            timestamp: nowISO,
-          }),
-        });
-
-        if (!saleRes.ok) {
-          let errorMessage = `Erro ao registrar venda (HTTP ${saleRes.status}).`;
-          try {
-            const errData = await saleRes.json();
-            if (errData?.error) errorMessage = errData.error;
-          } catch {}
-
-          if (saleRes.status === 403) {
-            handle403PermissionDenied('registrar venda');
-          }
-          console.warn('Aviso ao registrar venda detalhada:', errorMessage);
-        }
-      }
-    } catch (e: any) {
-      setAllProducts(previousProducts);
-      setAllMovements(previousMovements);
-      console.error('Erro ao salvar movimentação via API:', e);
-      throw e;
+    } catch (error) {
+      console.error('Falha ao registrar movimentação no servidor PostgreSQL:', error);
+      throw error;
     }
   };
 
@@ -1505,15 +1126,16 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const exportBackupJSON = () => {
     const backupData = {
-      app: 'Fini ERP Multi-tenant System',
+      app: 'Fini ERP System',
       version: '2.0.0',
       timestamp: new Date().toISOString(),
-      tenant: currentTenant,
+      company: companyInfo,
       products,
       nfEntries,
       transfers,
       movements,
       users,
+      categories,
     };
 
     const blob = new Blob([JSON.stringify(backupData, null, 2)], {
@@ -1523,7 +1145,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const link = document.createElement('a');
     const dateStr = new Date().toISOString().slice(0, 10);
     link.href = url;
-    link.download = `backup_fini_${currentTenant.code}_${dateStr}.json`;
+    link.download = `backup_fini_${companyInfo.cnpj ? companyInfo.cnpj.replace(/\D/g, '') : 'empresa'}_${dateStr}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1606,16 +1228,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         unreadNotificationCount,
         isLoadingCloudSql: isLoadingServer,
         isLoadingSupabase: isLoadingServer,
-        tenants,
-        currentTenant,
-        isTenantModalOpen,
-        setCurrentTenantId: setCurrentTenant,
-        addTenant,
-        updateTenant,
+        isLoadingUsers,
+        isLoadingCompany,
+        companyInfo,
         updateCompanyInfo,
-        deleteTenant,
-        openTenantModal,
-        closeTenantModal,
         setActiveLocation,
         setCurrentUserRole,
         loginWithPin,

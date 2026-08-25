@@ -48,8 +48,6 @@ interface HeaderProps {
   onToggleMobileMenu?: () => void;
   isMobileMenuOpen?: boolean;
   onNavigateToStock?: (filters: StockFilterOptions) => void;
-  onOpenSaaSModal?: () => void;
-  onSwitchToSaaSMaster?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -59,8 +57,6 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
   isMobileMenuOpen = false,
   onNavigateToStock,
-  onOpenSaaSModal,
-  onSwitchToSaaSMaster,
 }) => {
   const {
     activeLocation,
@@ -77,7 +73,7 @@ export const Header: React.FC<HeaderProps> = ({
     checkPermission,
     products,
     updateUser,
-    currentTenant,
+    companyInfo,
   } = useStock();
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -232,9 +228,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="font-extrabold text-slate-900 tracking-tight text-base sm:text-lg text-left">
                   FINI ERP
                 </span>
-                <span className="text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200/60 text-left hidden sm:inline max-w-48 truncate">
-                  {currentTenant?.name || 'Unidade Principal'}
-                </span>
+                {companyInfo?.name && (
+                  <span className="text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200/60 text-left hidden sm:inline max-w-48 truncate">
+                    {companyInfo.tradeName || companyInfo.name}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 hidden md:block text-left">
                 Gestão de Estoque Unificada

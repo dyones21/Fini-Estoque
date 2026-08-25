@@ -16,6 +16,8 @@ import {
   getCompanyInfo,
   saveCompanyInfo,
   getCompanyCnpj,
+  getAllCategories,
+  insertCategory,
 } from './src/db/dbService.ts';
 import {
   getOrCreateUser,
@@ -274,6 +276,33 @@ async function startServer() {
     }
   });
 
+  // CATEGORIES API
+  // Leitura: Permitida para qualquer usuário autenticado
+  app.get('/api/categories', requireAuth, async (req, res) => {
+    try {
+      const cats = await getAllCategories();
+      res.json(cats);
+    } catch (error: any) {
+      console.error('API Error GET /api/categories:', error);
+      res.status(500).json({ error: error.message || 'Erro ao carregar categorias do Supabase' });
+    }
+  });
+
+  // Criação de Categoria: Exige canManageProducts
+  app.post('/api/categories', requireAuth, requirePermission('canManageProducts'), async (req, res) => {
+    try {
+      const name = req.body?.name;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Nome da categoria é obrigatório.' });
+      }
+      const savedName = await insertCategory(name);
+      res.json({ success: true, name: savedName });
+    } catch (error: any) {
+      console.error('API Error POST /api/categories:', error);
+      res.status(500).json({ error: error.message || 'Erro ao salvar categoria no Supabase' });
+    }
+  });
+
   // STOCK MOVEMENTS API
   // Leitura: Permitida para qualquer usuário autenticado
   app.get('/api/movements', requireAuth, async (req, res) => {
@@ -379,6 +408,13 @@ async function startServer() {
 
       // Busca o CNPJ oficial diretamente do banco de dados (não confia em payload do cliente)
       const officialCompanyCnpj = await getCompanyCnpj();
+      const cleanOfficialCnpj = (officialCompanyCnpj || '').replace(/\D/g, '');
+
+      if (!cleanOfficialCnpj || cleanOfficialCnpj.length !== 14) {
+        return res.status(400).json({
+          error: 'Cadastre o CNPJ da empresa em Configurações → Dados da Empresa antes de importar notas fiscais',
+        });
+      }
 
       const parsedData = parseNFeXml(xml, officialCompanyCnpj);
       res.json({ success: true, data: parsedData });

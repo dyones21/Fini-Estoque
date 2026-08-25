@@ -1,7 +1,17 @@
 import { db, pool, isPostgresConfigured, withRetry } from './index.ts';
-import { products, stockMovements, nfEntries, nfItems, storeSales, companyInfo } from './schema.ts';
-import { eq } from 'drizzle-orm';
+import { products, stockMovements, nfEntries, nfItems, storeSales, companyInfo, categories } from './schema.ts';
+import { eq, asc } from 'drizzle-orm';
 import { Product, StockMovement, NFEntry, Sale, CompanyInfo } from '../types.ts';
+
+export const DEFAULT_CATEGORIES = [
+  'Balas de Gelatina',
+  'Marshmallows',
+  'Regaliz & Tubes',
+  'Chicletes',
+  'Balas Azedas',
+  'Caixas & Displays',
+  'Linha Importada & Especiais',
+];
 
 function checkDbConnection() {
   if (!isPostgresConfigured || !db) {
@@ -367,104 +377,60 @@ export async function wipeAllStockData(): Promise<{ success: boolean; message: s
   };
 }
 
-let isCompanyTableChecked = false;
-
-export async function ensureCompanyTable(): Promise<void> {
-  if (isCompanyTableChecked || !isPostgresConfigured || !pool) return;
-
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS company_info (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          trade_name TEXT DEFAULT '',
-          cnpj TEXT NOT NULL,
-          address TEXT DEFAULT '',
-          city TEXT NOT NULL,
-          state TEXT NOT NULL,
-          updated_at TIMESTAMP DEFAULT NOW()
-        );
-      `);
-      isCompanyTableChecked = true;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.warn('Could not auto-create company_info table:', err);
-  }
-}
-
 /**
  * Busca os dados da empresa cadastrada no PostgreSQL.
- * Se não existir nenhum registro, insere o padrão e o retorna.
+ * Se não existir nenhum registro ainda, retorna campos vazios com isConfigured: false sem gravar no banco.
  */
 export async function getCompanyInfo(): Promise<CompanyInfo> {
   checkDbConnection();
-  await ensureCompanyTable();
 
   return await withRetry(async () => {
     const rows = await db.select().from(companyInfo).limit(1);
     if (!rows || rows.length === 0) {
-      const defaultCompany: CompanyInfo = {
+      return {
         id: 'default-company',
-        name: 'Doceria Nova Friburgo Ltda',
-        tradeName: 'Fini Nova Friburgo',
-        cnpj: '02.408.821/0001-44',
-        address: 'Rua Alberto Braune, 120 - Centro',
-        city: 'Nova Friburgo',
-        state: 'RJ',
+        name: '',
+        tradeName: '',
+        cnpj: '',
+        address: '',
+        city: '',
+        state: '',
+        isConfigured: false,
         active: true,
         isMaster: true,
       };
-
-      await db
-        .insert(companyInfo)
-        .values({
-          id: defaultCompany.id,
-          name: defaultCompany.name,
-          tradeName: defaultCompany.tradeName || '',
-          cnpj: defaultCompany.cnpj,
-          address: defaultCompany.address || '',
-          city: defaultCompany.city,
-          state: defaultCompany.state,
-        })
-        .onConflictDoNothing();
-
-      return defaultCompany;
     }
 
     const r = rows[0];
     return {
       id: r.id,
-      name: r.name,
+      name: r.name || '',
       tradeName: r.tradeName || '',
-      cnpj: r.cnpj,
+      cnpj: r.cnpj || '',
       address: r.address || '',
-      city: r.city,
-      state: r.state,
+      city: r.city || '',
+      state: r.state || '',
+      isConfigured: Boolean(r.name && r.cnpj),
       active: true,
       isMaster: true,
-      updatedAt: r.updatedAt ? r.updatedAt.toISOString() : new Date().toISOString(),
+      updatedAt: r.updatedAt ? r.updatedAt.toISOString() : undefined,
     };
   });
 }
 
 /**
- * Salva ou atualiza os dados da empresa no PostgreSQL.
+ * Salva ou atualiza os dados da empresa no PostgreSQL quando submetido pelo usuário.
  */
 export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<CompanyInfo> {
   checkDbConnection();
-  await ensureCompanyTable();
 
   const id = info.id || 'default-company';
-  const name = info.name?.trim() || 'Doceria Nova Friburgo Ltda';
+  const name = info.name?.trim() || '';
   const tradeName = info.tradeName?.trim() || '';
-  const cnpj = info.cnpj?.trim() || '02.408.821/0001-44';
+  const cnpj = info.cnpj?.trim() || '';
   const address = info.address?.trim() || '';
-  const city = info.city?.trim() || 'Nova Friburgo';
-  const state = info.state?.trim().toUpperCase() || 'RJ';
+  const city = info.city?.trim() || '';
+  const state = info.state?.trim().toUpperCase() || '';
 
   return await withRetry(async () => {
     await db
@@ -499,6 +465,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
       address,
       city,
       state,
+      isConfigured: true,
       active: true,
       isMaster: true,
       updatedAt: new Date().toISOString(),
@@ -512,9 +479,55 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
 export async function getCompanyCnpj(): Promise<string> {
   try {
     const comp = await getCompanyInfo();
-    return comp.cnpj || '02.408.821/0001-44';
+    return comp.cnpj ? comp.cnpj.trim() : '';
   } catch (e) {
-    return '02.408.821/0001-44';
+    return '';
   }
+}
+
+/**
+ * Busca todas as categorias de produtos cadastradas no PostgreSQL.
+ * Na primeira execução, caso a tabela esteja vazia, popula com as categorias padrão (DEFAULT_CATEGORIES).
+ */
+export async function getAllCategories(): Promise<string[]> {
+  checkDbConnection();
+
+  return await withRetry(async () => {
+    const rows = await db.select().from(categories).orderBy(asc(categories.name));
+    if (!rows || rows.length === 0) {
+      const inserted = await db
+        .insert(categories)
+        .values(DEFAULT_CATEGORIES.map((name) => ({ name })))
+        .onConflictDoNothing()
+        .returning();
+
+      if (inserted && inserted.length > 0) {
+        return inserted.map((c) => c.name).sort();
+      }
+      return DEFAULT_CATEGORIES;
+    }
+
+    return rows.map((r) => r.name);
+  });
+}
+
+/**
+ * Insere uma nova categoria de produto no PostgreSQL.
+ */
+export async function insertCategory(name: string): Promise<string> {
+  checkDbConnection();
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error('O nome da categoria não pode ser vazio.');
+  }
+
+  return await withRetry(async () => {
+    await db
+      .insert(categories)
+      .values({ name: trimmed })
+      .onConflictDoNothing();
+
+    return trimmed;
+  });
 }
 

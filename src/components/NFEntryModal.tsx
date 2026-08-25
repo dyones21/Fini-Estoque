@@ -58,7 +58,7 @@ interface ImportedNFItem {
 }
 
 export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) => {
-  const { products, addProduct, addNFEntry, currentUser, currentTenant, checkPermission } = useStock();
+  const { products, addProduct, addNFEntry, currentUser, companyInfo, checkPermission } = useStock();
 
   // Mode tab: 'xml' (XML File Import) vs 'manual' (Manual Form)
   const [activeTabMode, setActiveTabMode] = useState<'xml' | 'manual'>('xml');
@@ -95,8 +95,8 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
   // Manual Mode state
   const [manualNumberNF, setManualNumberNF] = useState('');
   const [manualAccessKey, setManualAccessKey] = useState('');
-  const [manualSupplier, setManualSupplier] = useState('Fini Comercializadora de Alimentos S/A');
-  const [manualCnpj, setManualCnpj] = useState('02.408.821/0001-44');
+  const [manualSupplier, setManualSupplier] = useState('');
+  const [manualCnpj, setManualCnpj] = useState('');
   const [manualIssueDate, setManualIssueDate] = useState(new Date().toISOString().slice(0, 10));
   const [manualNotes, setManualNotes] = useState('');
   const [manualItems, setManualItems] = useState<NFItem[]>([]);
@@ -208,7 +208,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           xml: xmlText,
-          companyCnpj: currentTenant?.cnpj || '',
+          companyCnpj: companyInfo?.cnpj || '',
         }),
       });
 
@@ -581,9 +581,13 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                     Importação de Arquivo XML de Nota Fiscal Eletrônica
                   </h3>
                 </div>
-                {currentTenant?.cnpj && (
+                {companyInfo?.cnpj ? (
                   <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
-                    CNPJ da Empresa: <strong className="text-slate-900 font-mono">{currentTenant.cnpj}</strong>
+                    CNPJ da Empresa: <strong className="text-slate-900 font-mono">{companyInfo.cnpj}</strong>
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+                    CNPJ não cadastrado (Configurações → Dados da Empresa)
                   </span>
                 )}
               </div>

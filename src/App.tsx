@@ -14,9 +14,6 @@ import { MovementModal } from './components/MovementModal';
 import { ProductFormModal } from './components/ProductFormModal';
 import { StoreSaleModal } from './components/StoreSaleModal';
 import { LoginPage } from './components/LoginPage';
-import { TenantManagementModal } from './components/TenantManagementModal';
-import { SaaSManagementModal } from './components/SaaSManagementModal';
-import { SaaSMasterScreen } from './components/SaaSMasterScreen';
 import { UserManagementView } from './components/UserManagementView';
 import { CompanyDataView } from './components/CompanyDataView';
 import { ProductHistoryModal } from './components/ProductHistoryModal';
@@ -47,20 +44,9 @@ const MainApp: React.FC = () => {
     isAuthenticated,
     isAuthModalOpen,
     checkPermission,
-    isTenantModalOpen,
-    closeTenantModal,
   } = useStock();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
-  /**
-   * MULTI-TENANT ARCHITECTURAL NOTE:
-   * O sistema opera em modo Single-Tenant dedicado para "Fini Nova Friburgo".
-   * A gestão multi-tenant (SaaSMasterScreen, TenantManagementModal, SaaSManagementModal)
-   * foi desativada da navegação e fica reservada para uma fase futura de expansão com
-   * colunas 'tenant_id' em todas as tabelas do PostgreSQL.
-   */
-  const [saasViewMode, setSaasViewMode] = useState<'master' | 'erp'>('erp');
 
   // Stock table filter state for drill-down navigation from Dashboard
   const [stockFilters, setStockFilters] = useState<StockFilterOptions>({});
@@ -71,8 +57,6 @@ const MainApp: React.FC = () => {
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
-  // Multi-tenant modals desativados para fase single-tenant
-  const [isSaaSModalOpen, setIsSaaSModalOpen] = useState(false);
 
   // Selected product for modals
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -147,7 +131,6 @@ const MainApp: React.FC = () => {
             setIsTransferModalOpen(true);
           }}
           onOpenSaleModal={() => handleOpenSaleForProduct()}
-          onOpenSaaSModal={() => setIsSaaSModalOpen(true)}
           isMobileOpen={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
@@ -266,13 +249,6 @@ const MainApp: React.FC = () => {
 
       {/* Global Dedicated Login Page & Account Switcher Portal */}
       <LoginPage />
-
-      {/* 
-        MULTI-TENANT / SAAS MODALS (Desativados para a fase Single-Tenant "Fini Nova Friburgo"):
-        - SaaSManagementModal
-        - TenantManagementModal
-        A infraestrutura de múltiplos tenants será reativada quando o banco for migrado para multi-tenant (com tenant_id).
-      */}
 
       {/* Operational Modals */}
       <StoreSaleModal

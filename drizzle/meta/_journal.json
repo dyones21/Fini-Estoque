@@ -15,6 +15,20 @@
       "when": 1787332807959,
       "tag": "0001_marvelous_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787652341229,
+      "tag": "0002_square_catseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787653100653,
+      "tag": "0003_colorful_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }

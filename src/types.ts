@@ -6,22 +6,22 @@ export type MovementType = 'entrada_nf' | 'transferencia_deposito_loja' | 'venda
 
 export type UserRole = 'super_admin' | 'admin' | 'gerente_loja' | 'operador_deposito' | 'caixa' | 'auditor';
 
-export interface Tenant {
-  id: string;          // ex: 'default-company' ou 'tenant-friburgo'
-  code?: string;       // ex: 'FRIBURGO'
-  name: string;        // Razão Social (ex: 'Doceria Nova Friburgo Ltda')
-  tradeName?: string;  // Nome Fantasia (ex: 'Fini Nova Friburgo')
-  cnpj: string;        // CNPJ (ex: '02.408.821/0001-44')
-  address?: string;    // Endereço (ex: 'Rua Alberto Braune, 120 - Centro')
-  city: string;        // Cidade (ex: 'Nova Friburgo')
-  state: string;       // Estado (ex: 'RJ')
+export interface CompanyInfo {
+  id: string;          // ex: 'default-company'
+  name: string;        // Razão Social
+  tradeName?: string;  // Nome Fantasia
+  cnpj: string;        // CNPJ
+  address?: string;    // Endereço
+  city: string;        // Cidade
+  state: string;       // Estado
+  isConfigured?: boolean; // Se os dados reais foram cadastrados no banco
   active?: boolean;
   isMaster?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
 
-export type CompanyInfo = Tenant;
+export type Tenant = CompanyInfo;
 
 export interface UserPermissions {
   canViewDashboard: boolean;

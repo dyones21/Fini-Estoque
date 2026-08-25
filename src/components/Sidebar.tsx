@@ -41,7 +41,6 @@ interface SidebarProps {
   onOpenNFModal: () => void;
   onOpenTransferModal: () => void;
   onOpenSaleModal?: () => void;
-  onOpenSaaSModal?: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
 }
@@ -52,7 +51,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenNFModal,
   onOpenTransferModal,
   onOpenSaleModal,
-  onOpenSaaSModal,
   isMobileOpen = false,
   onCloseMobile,
 }) => {

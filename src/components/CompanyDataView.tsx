@@ -88,7 +88,7 @@ function isValidCnpj(cnpj: string): boolean {
 }
 
 export const CompanyDataView: React.FC = () => {
-  const { currentTenant, updateCompanyInfo } = useStock();
+  const { companyInfo, updateCompanyInfo } = useStock();
 
   const [name, setName] = useState('');
   const [tradeName, setTradeName] = useState('');
@@ -101,17 +101,21 @@ export const CompanyDataView: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Sincroniza campos locais quando os dados da empresa no contexto carregam/mudam
+  // Sincroniza campos locais quando os dados reais da empresa carregam do servidor
   useEffect(() => {
-    if (currentTenant) {
-      setName(currentTenant.name || '');
-      setTradeName(currentTenant.tradeName || 'Fini Nova Friburgo');
-      setCnpj(formatCnpj(currentTenant.cnpj || '02.408.821/0001-44'));
-      setAddress(currentTenant.address || 'Rua Alberto Braune, 120 - Centro');
-      setCity(currentTenant.city || 'Nova Friburgo');
-      setState(currentTenant.state || 'RJ');
+    if (companyInfo) {
+      setName(companyInfo.name || '');
+      setTradeName(companyInfo.tradeName || '');
+      setCnpj(companyInfo.cnpj ? formatCnpj(companyInfo.cnpj) : '');
+      setAddress(companyInfo.address || '');
+      setCity(companyInfo.city || '');
+      setState(companyInfo.state || 'RJ');
     }
-  }, [currentTenant]);
+  }, [companyInfo]);
+
+  const isConfigured = Boolean(
+    companyInfo?.isConfigured && companyInfo?.name && companyInfo?.cnpj
+  );
 
   const handleCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatCnpj(e.target.value);
@@ -148,16 +152,17 @@ export const CompanyDataView: React.FC = () => {
 
     try {
       await updateCompanyInfo({
-        id: currentTenant?.id || 'default-company',
+        id: companyInfo?.id || 'default-company',
         name: name.trim(),
         tradeName: tradeName.trim() || name.trim(),
         cnpj: formatCnpj(cleanCnpjDigits),
         address: address.trim(),
         city: city.trim(),
         state: state.trim().toUpperCase(),
+        isConfigured: true,
       });
 
-      setSuccessMsg('Dados da empresa atualizados com sucesso no banco de dados!');
+      setSuccessMsg('Dados da empresa gravados com sucesso no banco de dados!');
       setTimeout(() => {
         setSuccessMsg('');
       }, 4000);
@@ -180,8 +185,10 @@ export const CompanyDataView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-black text-slate-900">Dados da Empresa</h1>
-              <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 uppercase">
-                Cadastro Oficial
+              <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase ${
+                isConfigured ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {isConfigured ? 'Cadastro Configurado' : 'Aguardando Cadastro'}
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -190,6 +197,21 @@ export const CompanyDataView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Unconfigured Alert Banner */}
+      {!isConfigured && (
+        <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3.5 shadow-2xs animate-in fade-in">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-amber-950 space-y-1">
+            <p className="font-bold text-amber-900">
+              Nenhum dado cadastrado ainda — preencha o formulário abaixo
+            </p>
+            <p className="text-amber-800 leading-relaxed">
+              Os dados oficiais e o CNPJ da empresa ainda não foram cadastrados. Preencha e salve o formulário com as informações reais para habilitar a validação e importação de Notas Fiscais Eletrônicas (NF-e).
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Security & Fiscal Integrity Notice */}
       <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3.5 shadow-2xs">
@@ -244,7 +266,7 @@ export const CompanyDataView: React.FC = () => {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Ex: Doceria Nova Friburgo Ltda"
+                placeholder="Ex: Razão Social da Empresa Ltda"
                 required
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-slate-50/50"
               />
@@ -259,7 +281,7 @@ export const CompanyDataView: React.FC = () => {
                 type="text"
                 value={tradeName}
                 onChange={(e) => setTradeName(e.target.value)}
-                placeholder="Ex: Fini Nova Friburgo (Matriz)"
+                placeholder="Ex: Nome Fantasia (Opcional)"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-slate-50/50"
               />
             </div>
@@ -292,7 +314,7 @@ export const CompanyDataView: React.FC = () => {
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder="Ex: Rua Alberto Braune, 120 - Centro"
+                placeholder="Ex: Rua, Número, Complemento, Bairro"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-slate-50/50"
               />
             </div>
@@ -306,7 +328,7 @@ export const CompanyDataView: React.FC = () => {
                 type="text"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                placeholder="Ex: Nova Friburgo"
+                placeholder="Ex: Nome da Cidade"
                 required
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-slate-50/50"
               />
@@ -323,6 +345,7 @@ export const CompanyDataView: React.FC = () => {
                 required
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-slate-50/50"
               >
+                <option value="">Selecione o Estado...</option>
                 {BRAZILIAN_STATES.map((st) => (
                   <option key={st.uf} value={st.uf}>
                     {st.uf} - {st.name}
