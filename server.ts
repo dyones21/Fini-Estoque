@@ -8,6 +8,7 @@ import {
   deleteProductById,
   getAllMovements,
   insertMovement,
+  processStockTransfer,
   getAllNFEntries,
   insertNFEntry,
   getAllSales,
@@ -339,6 +340,39 @@ async function startServer() {
       }
     }
   );
+
+  // STOCK TRANSFERS API (Depósito Central ➔ Loja Nova Friburgo)
+  // Exige requireAuth + canTransferStock
+  app.post('/api/transfers', requireAuth, requirePermission('canTransferStock'), async (req: AuthRequest, res) => {
+    try {
+      const transferData = req.body;
+      if (!transferData || !transferData.productId || !transferData.quantity) {
+        return res.status(400).json({ error: 'Produto e quantidade são obrigatórios para a transferência de estoque.' });
+      }
+
+      const qty = Number(transferData.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        return res.status(400).json({ error: 'A quantidade a transferir deve ser um número maior que zero.' });
+      }
+
+      const result = await processStockTransfer({
+        id: transferData.id,
+        productId: transferData.productId,
+        productName: transferData.productName,
+        quantity: qty,
+        date: transferData.date || new Date().toISOString(),
+        origin: 'deposito',
+        destination: 'loja',
+        operatorName: transferData.operatorName || req.user?.name || 'Operador',
+        notes: transferData.notes,
+      });
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error('API Error POST /api/transfers:', error);
+      res.status(400).json({ error: error.message || 'Erro ao registrar transferência no banco de dados' });
+    }
+  });
 
   // COMPANY DATA API
   // Leitura: Permitida para qualquer usuário autenticado

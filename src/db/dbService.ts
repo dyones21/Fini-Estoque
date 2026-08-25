@@ -168,6 +168,109 @@ export async function getAllMovements(): Promise<StockMovement[]> {
  * Insere movimentação de estoque diretamente no PostgreSQL.
  * Lança erro caso ocorra falha.
  */
+export async function processStockTransfer(transfer: {
+  id?: string;
+  productId: string;
+  productName?: string;
+  quantity: number;
+  date?: string;
+  origin?: string;
+  destination?: string;
+  operatorName?: string;
+  notes?: string;
+}): Promise<{ success: boolean; movement: StockMovement; updatedProduct: Product }> {
+  checkDbConnection();
+
+  return await withRetry(async () => {
+    return await db.transaction(async (tx: any) => {
+      const rows = await tx.select().from(products).where(eq(products.id, transfer.productId));
+      if (!rows || rows.length === 0) {
+        throw new Error('Produto não localizado no banco de dados.');
+      }
+      const prod = rows[0];
+
+      if (prod.stockDeposito < transfer.quantity) {
+        throw new Error(`Estoque insuficiente no Depósito Central (${prod.stockDeposito} disponível).`);
+      }
+
+      const newStockDeposito = prod.stockDeposito - transfer.quantity;
+      const newStockLoja = prod.stockLoja + transfer.quantity;
+
+      await tx
+        .update(products)
+        .set({
+          stockDeposito: newStockDeposito,
+          stockLoja: newStockLoja,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, transfer.productId));
+
+      const movementId = transfer.id
+        ? transfer.id.startsWith('mov-')
+          ? transfer.id
+          : `mov-${transfer.id}`
+        : `mov-transf-${Date.now()}`;
+      const timestamp = transfer.date || new Date().toISOString();
+      const createdBy = transfer.operatorName || 'Operador';
+      const reasonText = transfer.notes
+        ? `Transferência: ${transfer.notes}`
+        : 'Transferência Depósito ➔ Loja';
+
+      await tx
+        .insert(stockMovements)
+        .values({
+          id: movementId,
+          productId: transfer.productId,
+          productName: transfer.productName || prod.name,
+          type: 'transferencia_deposito_loja',
+          origin: 'Depósito Central',
+          destination: 'Loja Nova Friburgo',
+          quantity: transfer.quantity,
+          batchNumber: prod.batchNumber || 'LOTE-DEFAULT',
+          reason: reasonText,
+          createdBy,
+          timestamp,
+        })
+        .onConflictDoNothing();
+
+      return {
+        success: true,
+        movement: {
+          id: movementId,
+          productId: transfer.productId,
+          productName: transfer.productName || prod.name,
+          type: 'transferencia_deposito_loja' as any,
+          quantity: transfer.quantity,
+          location: 'ambos' as any,
+          date: timestamp,
+          userName: createdBy,
+          reason: reasonText,
+          unitPrice: prod.sellPrice,
+        },
+        updatedProduct: {
+          id: prod.id,
+          sku: prod.sku,
+          ean: prod.ean,
+          name: prod.name,
+          category: prod.category as any,
+          unit: prod.unit as any,
+          stockDeposito: newStockDeposito,
+          stockLoja: newStockLoja,
+          minStockDeposito: prod.minStockDeposito,
+          minStockLoja: prod.minStockLoja,
+          costPrice: prod.costPrice,
+          sellPrice: prod.sellPrice,
+          expirationDate: prod.expirationDate,
+          batchNumber: prod.batchNumber,
+          lastUpdated: new Date().toISOString(),
+          totalSalesQuantity: 0,
+          totalSalesValue: 0,
+        },
+      };
+    });
+  });
+}
+
 export async function insertMovement(m: StockMovement): Promise<StockMovement> {
   checkDbConnection();
 

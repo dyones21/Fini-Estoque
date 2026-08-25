@@ -586,6 +586,21 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       if (Array.isArray(dataMov)) {
         setAllMovements(dataMov);
+        const reconstructedTransfers: StockTransfer[] = dataMov
+          .filter((m: any) => m.type === 'transferencia_deposito_loja' || m.type === 'Transferência Interna')
+          .map((m: any) => ({
+            id: m.id.replace(/^mov-/, ''),
+            productId: m.productId,
+            productName: m.productName,
+            quantity: m.quantity,
+            date: m.date,
+            origin: 'deposito',
+            destination: 'loja',
+            operatorName: m.userName || 'Operador',
+            status: 'concluida',
+            notes: m.reason?.startsWith('Transferência:') ? m.reason.replace('Transferência:', '').trim() : undefined,
+          }));
+        setAllTransfers(reconstructedTransfers);
       }
 
       if (Array.isArray(dataNFs)) {
@@ -957,6 +972,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       };
     }
 
+    const prevProducts = allProducts;
+    const prevTransfers = allTransfers;
+    const prevMovements = allMovements;
+
     const newTransfer: StockTransfer = {
       id: `transf-${Date.now()}`,
       productId,
@@ -1016,12 +1035,24 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao registrar transferência no servidor.`);
       }
 
+      const result = await safeParseJson<any>(response);
+      if (result?.updatedProduct) {
+        setAllProducts((prev) =>
+          prev.map((p) => (p.id === productId ? { ...p, ...result.updatedProduct } : p))
+        );
+      }
+
       return {
         success: true,
         message: `Transferência de ${quantity} ${product.unit} de "${product.name}" para a Loja realizada com sucesso!`,
       };
     } catch (error: any) {
       console.error('Falha ao sincronizar transferência no servidor PostgreSQL:', error);
+      // Revert optimistic updates
+      setAllProducts(prevProducts);
+      setAllTransfers(prevTransfers);
+      setAllMovements(prevMovements);
+
       return {
         success: false,
         message: error?.message || 'Falha ao processar transferência no servidor.',
