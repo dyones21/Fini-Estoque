@@ -15,6 +15,18 @@ import {
  * nf_entries, sales e users, além do isolamento por tenant no banco) fica reservada para uma fase futura de expansão SaaS.
  */
 
+// Company Info Table (Single Enterprise Settings)
+export const companyInfo = pgTable('company_info', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  tradeName: text('trade_name').default(''),
+  cnpj: text('cnpj').notNull(),
+  address: text('address').default(''),
+  city: text('city').notNull(),
+  state: text('state').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 // Users Table (Supabase Auth sync)
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),

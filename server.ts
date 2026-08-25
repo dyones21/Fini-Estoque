@@ -13,6 +13,9 @@ import {
   getAllSales,
   insertSale,
   wipeAllStockData,
+  getCompanyInfo,
+  saveCompanyInfo,
+  getCompanyCnpj,
 } from './src/db/dbService.ts';
 import {
   getOrCreateUser,
@@ -308,6 +311,46 @@ async function startServer() {
     }
   );
 
+  // COMPANY DATA API
+  // Leitura: Permitida para qualquer usuário autenticado
+  app.get('/api/company', requireAuth, async (req, res) => {
+    try {
+      const company = await getCompanyInfo();
+      res.json(company);
+    } catch (error: any) {
+      console.error('API Error GET /api/company:', error);
+      res.status(500).json({ error: error.message || 'Erro ao carregar dados da empresa' });
+    }
+  });
+
+  // Atualização dos Dados da Empresa
+  app.put('/api/company', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: 'Não autenticado' });
+      }
+
+      const p = user.permissions;
+      const hasPermission =
+        user.role === 'super_admin' ||
+        user.role === 'admin' ||
+        p?.canManageUsers ||
+        p?.canManageBackup ||
+        p?.canManageCompany;
+
+      if (!hasPermission) {
+        return res.status(403).json({ error: 'Acesso negado: você não possui permissão para editar os dados da empresa.' });
+      }
+
+      const saved = await saveCompanyInfo(req.body);
+      res.json(saved);
+    } catch (error: any) {
+      console.error('API Error PUT /api/company:', error);
+      res.status(500).json({ error: error.message || 'Erro ao salvar dados da empresa' });
+    }
+  });
+
   // NF ENTRIES API
   // Leitura: Permitida para qualquer usuário autenticado
   app.get('/api/nf-entries', requireAuth, async (req, res) => {
@@ -323,7 +366,7 @@ async function startServer() {
   // Importação e Validação de Arquivo XML NF-e: Exige canAddNFEntries
   app.post('/api/nfe/import-xml', requireAuth, requirePermission('canAddNFEntries'), async (req, res) => {
     try {
-      const { xml, companyCnpj } = req.body || {};
+      const { xml } = req.body || {};
 
       if (!xml || typeof xml !== 'string') {
         return res.status(400).json({ error: 'Conteúdo do arquivo XML não foi fornecido ou é inválido.' });
@@ -334,7 +377,10 @@ async function startServer() {
         return res.status(400).json({ error: 'O arquivo XML excede o limite máximo permitido de 5MB.' });
       }
 
-      const parsedData = parseNFeXml(xml, companyCnpj);
+      // Busca o CNPJ oficial diretamente do banco de dados (não confia em payload do cliente)
+      const officialCompanyCnpj = await getCompanyCnpj();
+
+      const parsedData = parseNFeXml(xml, officialCompanyCnpj);
       res.json({ success: true, data: parsedData });
     } catch (error: any) {
       console.warn('API Warning /api/nfe/import-xml:', error.message);

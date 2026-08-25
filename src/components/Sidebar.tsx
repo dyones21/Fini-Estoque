@@ -31,6 +31,7 @@ export type ActiveTab =
   | 'entrada_nf'
   | 'relatorios'
   | 'curva_abc_ranking'
+  | 'empresa'
   | 'backup'
   | 'usuarios';
 
@@ -61,7 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(() => {
-    return activeTab === 'backup' || activeTab === 'usuarios';
+    return activeTab === 'backup' || activeTab === 'usuarios' || activeTab === 'empresa';
   });
 
   const toggleCollapse = () => {
@@ -122,6 +123,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const configNavItems = [
+    ...(checkPermission('canManageBackup') || checkPermission('canManageUsers') || checkPermission('canManageCompany')
+      ? [
+          {
+            id: 'empresa',
+            label: 'Dados da Empresa',
+            icon: Building2,
+            badge: 'Cadastro',
+          },
+        ]
+      : []),
     ...(checkPermission('canManageBackup')
       ? [
           {

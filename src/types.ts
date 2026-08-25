@@ -7,16 +7,21 @@ export type MovementType = 'entrada_nf' | 'transferencia_deposito_loja' | 'venda
 export type UserRole = 'super_admin' | 'admin' | 'gerente_loja' | 'operador_deposito' | 'caixa' | 'auditor';
 
 export interface Tenant {
-  id: string;          // ex: 'tenant-friburgo', 'tenant-petropolis', 'tenant-niteroi'
-  code: string;        // ex: 'FRIBURGO', 'PETROPOLIS', 'NITEROI'
-  name: string;        // ex: 'Doceria Nova Friburgo (Matriz)'
-  cnpj: string;        // ex: '02.408.821/0001-44'
-  city: string;        // ex: 'Nova Friburgo'
-  state: string;       // ex: 'RJ'
-  active: boolean;
+  id: string;          // ex: 'default-company' ou 'tenant-friburgo'
+  code?: string;       // ex: 'FRIBURGO'
+  name: string;        // Razão Social (ex: 'Doceria Nova Friburgo Ltda')
+  tradeName?: string;  // Nome Fantasia (ex: 'Fini Nova Friburgo')
+  cnpj: string;        // CNPJ (ex: '02.408.821/0001-44')
+  address?: string;    // Endereço (ex: 'Rua Alberto Braune, 120 - Centro')
+  city: string;        // Cidade (ex: 'Nova Friburgo')
+  state: string;       // Estado (ex: 'RJ')
+  active?: boolean;
   isMaster?: boolean;
   createdAt?: string;
+  updatedAt?: string;
 }
+
+export type CompanyInfo = Tenant;
 
 export interface UserPermissions {
   canViewDashboard: boolean;
@@ -27,6 +32,7 @@ export interface UserPermissions {
   canRegisterMovements: boolean; // Vendas na Loja, Ajustes e Perdas
   canManageUsers: boolean;   // Gerenciar Usuários, Permissões e PINs (Admin)
   canManageBackup: boolean;  // Gerenciar Backup e Sincronização
+  canManageCompany?: boolean; // Gerenciar Dados da Empresa
 }
 
 export interface UserProfile {

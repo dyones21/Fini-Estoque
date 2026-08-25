@@ -18,6 +18,8 @@ import { TenantManagementModal } from './components/TenantManagementModal';
 import { SaaSManagementModal } from './components/SaaSManagementModal';
 import { SaaSMasterScreen } from './components/SaaSMasterScreen';
 import { UserManagementView } from './components/UserManagementView';
+import { CompanyDataView } from './components/CompanyDataView';
+import { ProductHistoryModal } from './components/ProductHistoryModal';
 import { ReportsView } from './components/ReportsView';
 import { Product } from './types';
 import { StockFilterOptions } from './components/Dashboard';
@@ -75,6 +77,10 @@ const MainApp: React.FC = () => {
   // Selected product for modals
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
+  // Product History Modal state
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
+
   const handleNavigateToStock = (filters: StockFilterOptions) => {
     setStockFilters(filters);
     setActiveTab('estoque_geral');
@@ -88,6 +94,11 @@ const MainApp: React.FC = () => {
   const handleOpenMovementForProduct = (p: Product) => {
     setSelectedProduct(p);
     setIsMovementModalOpen(true);
+  };
+
+  const handleOpenHistoryForProduct = (p: Product) => {
+    setHistoryProduct(p);
+    setIsHistoryModalOpen(true);
   };
 
   const handleOpenEditProduct = (p: Product) => {
@@ -165,6 +176,7 @@ const MainApp: React.FC = () => {
                 onOpenEditProductModal={handleOpenEditProduct}
                 onOpenNewProductModal={handleOpenNewProduct}
                 onOpenSaleModalForProduct={handleOpenSaleForProduct}
+                onOpenHistoryModalForProduct={handleOpenHistoryForProduct}
                 onOpenNFModal={() => setIsNFModalOpen(true)}
                 onOpenGeneralTransferModal={() => {
                   setSelectedProduct(null);
@@ -191,6 +203,7 @@ const MainApp: React.FC = () => {
                 onOpenEditProductModal={handleOpenEditProduct}
                 onOpenNewProductModal={handleOpenNewProduct}
                 onOpenSaleModalForProduct={handleOpenSaleForProduct}
+                onOpenHistoryModalForProduct={handleOpenHistoryForProduct}
                 onOpenNFModal={() => setIsNFModalOpen(true)}
                 onOpenGeneralTransferModal={() => {
                   setSelectedProduct(null);
@@ -222,6 +235,14 @@ const MainApp: React.FC = () => {
               </div>
             ) : (
               <AccessDeniedMessage featureName="Análise Curva ABC & Ranking" />
+            )
+          )}
+
+          {activeTab === 'empresa' && (
+            checkPermission('canManageBackup') || checkPermission('canManageUsers') || checkPermission('canManageCompany') ? (
+              <CompanyDataView />
+            ) : (
+              <AccessDeniedMessage featureName="Dados da Empresa" />
             )
           )}
 
@@ -258,6 +279,12 @@ const MainApp: React.FC = () => {
         isOpen={isSaleModalOpen}
         onClose={() => setIsSaleModalOpen(false)}
         preselectedProduct={selectedProduct}
+      />
+
+      <ProductHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        product={historyProduct}
       />
 
       <NFEntryModal

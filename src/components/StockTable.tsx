@@ -15,6 +15,7 @@ import {
   Warehouse,
   FileSpreadsheet,
   ShoppingBag,
+  History,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -36,6 +37,7 @@ interface StockTableProps {
   onOpenEditProductModal: (p: Product) => void;
   onOpenNewProductModal: () => void;
   onOpenSaleModalForProduct?: (p: Product) => void;
+  onOpenHistoryModalForProduct?: (p: Product) => void;
   onOpenNFModal?: () => void;
   onOpenGeneralTransferModal?: () => void;
   initialSearchQuery?: string;
@@ -51,6 +53,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   onOpenEditProductModal,
   onOpenNewProductModal,
   onOpenSaleModalForProduct,
+  onOpenHistoryModalForProduct,
   onOpenNFModal,
   onOpenGeneralTransferModal,
   initialSearchQuery = '',
@@ -547,6 +550,18 @@ export const StockTable: React.FC<StockTableProps> = ({
                           {/* Action Buttons */}
                           <td className="py-3 px-4">
                             <div className="flex items-center justify-center gap-1.5">
+                              {/* View Product History */}
+                              {onOpenHistoryModalForProduct && (
+                                <button
+                                  onClick={() => onOpenHistoryModalForProduct(product)}
+                                  title="Ver Linha do Tempo e Histórico de Movimentações"
+                                  className="p-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition-colors flex items-center gap-1 font-semibold text-[11px]"
+                                >
+                                  <History className="w-3.5 h-3.5 text-slate-600" />
+                                  <span className="hidden xl:inline">Histórico</span>
+                                </button>
+                              )}
+
                               {/* Direct Store Sale / Baixa para Baleiro */}
                               {onOpenSaleModalForProduct && checkPermission('canRegisterMovements') && (
                                 <button
@@ -740,6 +755,17 @@ export const StockTable: React.FC<StockTableProps> = ({
 
                       {/* Touch Friendly Action Buttons Grid */}
                       <div className="grid grid-cols-2 xs:grid-cols-3 gap-1.5 pt-1">
+                        {onOpenHistoryModalForProduct && (
+                          <button
+                            onClick={() => onOpenHistoryModalForProduct(product)}
+                            className="py-2 px-2 rounded-lg bg-slate-800 text-white font-bold text-[11px] flex items-center justify-center gap-1 shadow-2xs text-left"
+                            title="Ver Histórico de Movimentações"
+                          >
+                            <History className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                            <span>Histórico</span>
+                          </button>
+                        )}
+
                         {onOpenSaleModalForProduct && checkPermission('canRegisterMovements') && (
                           <button
                             onClick={() => onOpenSaleModalForProduct(product)}

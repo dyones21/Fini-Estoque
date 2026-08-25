@@ -1,7 +1,7 @@
-import { db, isPostgresConfigured, withRetry } from './index.ts';
-import { products, stockMovements, nfEntries, nfItems, storeSales } from './schema.ts';
+import { db, pool, isPostgresConfigured, withRetry } from './index.ts';
+import { products, stockMovements, nfEntries, nfItems, storeSales, companyInfo } from './schema.ts';
 import { eq } from 'drizzle-orm';
-import { Product, StockMovement, NFEntry, Sale } from '../types.ts';
+import { Product, StockMovement, NFEntry, Sale, CompanyInfo } from '../types.ts';
 
 function checkDbConnection() {
   if (!isPostgresConfigured || !db) {
@@ -366,3 +366,155 @@ export async function wipeAllStockData(): Promise<{ success: boolean; message: s
     message: 'Todos os registros de produtos, estoque, notas fiscais, movimentações e vendas foram permanentemente apagados do banco de dados.',
   };
 }
+
+let isCompanyTableChecked = false;
+
+export async function ensureCompanyTable(): Promise<void> {
+  if (isCompanyTableChecked || !isPostgresConfigured || !pool) return;
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS company_info (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          trade_name TEXT DEFAULT '',
+          cnpj TEXT NOT NULL,
+          address TEXT DEFAULT '',
+          city TEXT NOT NULL,
+          state TEXT NOT NULL,
+          updated_at TIMESTAMP DEFAULT NOW()
+        );
+      `);
+      isCompanyTableChecked = true;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.warn('Could not auto-create company_info table:', err);
+  }
+}
+
+/**
+ * Busca os dados da empresa cadastrada no PostgreSQL.
+ * Se não existir nenhum registro, insere o padrão e o retorna.
+ */
+export async function getCompanyInfo(): Promise<CompanyInfo> {
+  checkDbConnection();
+  await ensureCompanyTable();
+
+  return await withRetry(async () => {
+    const rows = await db.select().from(companyInfo).limit(1);
+    if (!rows || rows.length === 0) {
+      const defaultCompany: CompanyInfo = {
+        id: 'default-company',
+        name: 'Doceria Nova Friburgo Ltda',
+        tradeName: 'Fini Nova Friburgo',
+        cnpj: '02.408.821/0001-44',
+        address: 'Rua Alberto Braune, 120 - Centro',
+        city: 'Nova Friburgo',
+        state: 'RJ',
+        active: true,
+        isMaster: true,
+      };
+
+      await db
+        .insert(companyInfo)
+        .values({
+          id: defaultCompany.id,
+          name: defaultCompany.name,
+          tradeName: defaultCompany.tradeName || '',
+          cnpj: defaultCompany.cnpj,
+          address: defaultCompany.address || '',
+          city: defaultCompany.city,
+          state: defaultCompany.state,
+        })
+        .onConflictDoNothing();
+
+      return defaultCompany;
+    }
+
+    const r = rows[0];
+    return {
+      id: r.id,
+      name: r.name,
+      tradeName: r.tradeName || '',
+      cnpj: r.cnpj,
+      address: r.address || '',
+      city: r.city,
+      state: r.state,
+      active: true,
+      isMaster: true,
+      updatedAt: r.updatedAt ? r.updatedAt.toISOString() : new Date().toISOString(),
+    };
+  });
+}
+
+/**
+ * Salva ou atualiza os dados da empresa no PostgreSQL.
+ */
+export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<CompanyInfo> {
+  checkDbConnection();
+  await ensureCompanyTable();
+
+  const id = info.id || 'default-company';
+  const name = info.name?.trim() || 'Doceria Nova Friburgo Ltda';
+  const tradeName = info.tradeName?.trim() || '';
+  const cnpj = info.cnpj?.trim() || '02.408.821/0001-44';
+  const address = info.address?.trim() || '';
+  const city = info.city?.trim() || 'Nova Friburgo';
+  const state = info.state?.trim().toUpperCase() || 'RJ';
+
+  return await withRetry(async () => {
+    await db
+      .insert(companyInfo)
+      .values({
+        id,
+        name,
+        tradeName,
+        cnpj,
+        address,
+        city,
+        state,
+      })
+      .onConflictDoUpdate({
+        target: companyInfo.id,
+        set: {
+          name,
+          tradeName,
+          cnpj,
+          address,
+          city,
+          state,
+          updatedAt: new Date(),
+        },
+      });
+
+    return {
+      id,
+      name,
+      tradeName,
+      cnpj,
+      address,
+      city,
+      state,
+      active: true,
+      isMaster: true,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+}
+
+/**
+ * Retorna diretamente o CNPJ da empresa salvo no banco de dados para validação de NF-e
+ */
+export async function getCompanyCnpj(): Promise<string> {
+  try {
+    const comp = await getCompanyInfo();
+    return comp.cnpj || '02.408.821/0001-44';
+  } catch (e) {
+    return '02.408.821/0001-44';
+  }
+}
+

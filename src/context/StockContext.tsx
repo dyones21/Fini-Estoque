@@ -58,13 +58,14 @@ interface StockContextType {
   isLoadingCloudSql: boolean;
   isLoadingSupabase: boolean;
 
-  // Tenants (Multi-tenant ERP)
+  // Tenants / Company
   tenants: Tenant[];
   currentTenant: Tenant;
   isTenantModalOpen: boolean;
   setCurrentTenantId: (tenantId: string) => void;
   addTenant: (tenant: Omit<Tenant, 'id' | 'createdAt'>) => Tenant;
   updateTenant: (tenant: Tenant) => void;
+  updateCompanyInfo: (info: Partial<Tenant>) => Promise<Tenant>;
   deleteTenant: (tenantId: string) => void;
   openTenantModal: () => void;
   closeTenantModal: () => void;
@@ -602,12 +603,13 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
 
-      const [resProd, resMov, resNFs, resSales, resUsers] = await Promise.all([
+      const [resProd, resMov, resNFs, resSales, resUsers, resComp] = await Promise.all([
         authFetch('/api/products').catch(() => null),
         authFetch('/api/movements').catch(() => null),
         authFetch('/api/nf-entries').catch(() => null),
         authFetch('/api/sales').catch(() => null),
         authFetch('/api/users').catch(() => null),
+        authFetch('/api/company').catch(() => null),
       ]);
 
       let loadedProducts: Product[] = [];
@@ -616,13 +618,19 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       let loadedUsers: any[] = [];
       let loadedSales: any[] = [];
 
-      const [dataProd, dataMov, dataNFs, dataSales, dataUsers] = await Promise.all([
+      const [dataProd, dataMov, dataNFs, dataSales, dataUsers, dataComp] = await Promise.all([
         safeParseJson(resProd),
         safeParseJson(resMov),
         safeParseJson(resNFs),
         safeParseJson(resSales),
         safeParseJson(resUsers),
+        safeParseJson(resComp),
       ]);
+
+      if (dataComp && dataComp.cnpj) {
+        setTenants([dataComp]);
+        setCurrentTenantId(dataComp.id);
+      }
 
       if (Array.isArray(dataProd)) loadedProducts = dataProd;
       if (Array.isArray(dataMov)) loadedMovements = dataMov;
@@ -724,8 +732,33 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return newTenant;
   };
 
+  const updateCompanyInfo = async (info: Partial<Tenant>): Promise<Tenant> => {
+    const res = await authFetch('/api/company', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(info),
+    });
+
+    if (!res.ok) {
+      let msg = 'Erro ao salvar dados da empresa no servidor.';
+      try {
+        const errData = await res.json();
+        if (errData?.error) msg = errData.error;
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const savedCompany: Tenant = await res.json();
+    setTenants([savedCompany]);
+    setCurrentTenantId(savedCompany.id);
+    return savedCompany;
+  };
+
   const updateTenant = (updatedTenant: Tenant) => {
     setTenants((prev) => prev.map((t) => (t.id === updatedTenant.id ? updatedTenant : t)));
+    updateCompanyInfo(updatedTenant).catch((err) => {
+      console.warn('Aviso ao sincronizar dados da empresa com o servidor:', err);
+    });
   };
 
   const deleteTenant = (tenantId: string) => {
@@ -1579,6 +1612,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setCurrentTenantId: setCurrentTenant,
         addTenant,
         updateTenant,
+        updateCompanyInfo,
         deleteTenant,
         openTenantModal,
         closeTenantModal,
