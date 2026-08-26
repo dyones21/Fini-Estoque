@@ -132,7 +132,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           msg = 'E-mail ou senha incorretos. Verifique suas credenciais com o administrador ou redefina sua senha.';
         }
       } else if (code === 'auth/invalid-email' || errMsg.includes('invalid-email')) {
-        msg = 'Endereço de e-mail inválido. Digite um e-mail válido (ex: nome@fininovafriburgo.com.br).';
+        msg = 'Endereço de e-mail inválido. Digite um e-mail válido (ex: nome@gummystock.com.br).';
       } else if (code === 'auth/user-disabled' || errMsg.includes('user-disabled')) {
         msg = 'Esta conta de usuário foi desativada pelo administrador.';
       } else if (code === 'auth/too-many-requests' || errMsg.includes('too-many-requests')) {
@@ -255,10 +255,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 p-6 border-b border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-rose-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-md">
-              F
+              G
             </div>
             <div>
-              <h1 className="text-xl font-black text-white tracking-tight">FINI ERP</h1>
+              <h1 className="text-xl font-black text-white tracking-tight">GummyStock</h1>
               <p className="text-xs text-slate-400 font-medium">Gestão de Estoque & Vendas</p>
             </div>
           </div>
@@ -338,7 +338,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       type="email"
                       required
                       disabled={isBusy}
-                      placeholder="usuario@fininovafriburgo.com.br"
+                      placeholder="usuario@gummystock.com.br"
                       value={email}
                       onChange={(e) => {
                         setEmail(e.target.value);
@@ -470,7 +470,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       <UserAvatar
                         avatarUrl={u.avatarUrl}
                         name={u.name}
-                        role={u.role}
                         className="w-8 h-8 rounded-xl shrink-0"
                       />
                       <div className="truncate">

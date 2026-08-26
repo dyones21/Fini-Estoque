@@ -29,6 +29,8 @@ import {
   getDaysToExpiration,
   calculateCurvaABC,
 } from '../utils/inventoryUtils';
+import { exportToExcel, exportToCSV } from '../utils/exportUtils';
+import { ExportButton } from './ExportButton';
 
 interface StockTableProps {
   locationMode: LocationType;
@@ -171,6 +173,83 @@ export const StockTable: React.FC<StockTableProps> = ({
 
   const locInfo = getLocationTitle();
 
+  const handleExportExcel = () => {
+    const data = filteredProducts.map((p) => {
+      const totalStock = p.stockLoja + p.stockDeposito;
+      const daysToExp = getDaysToExpiration(p.expirationDate);
+      let statusValidade = 'Em dia';
+      if (daysToExp < 0) statusValidade = 'Vencido';
+      else if (daysToExp <= 30) statusValidade = `Próximo (<${daysToExp}d)`;
+
+      return {
+        SKU: p.sku,
+        Produto: p.name,
+        Categoria: p.category,
+        Unidade: p.unit,
+        'Cód. Barras (EAN)': p.ean || '',
+        Lote: p.batchNumber,
+        'Data Validade': p.expirationDate,
+        'Status Validade': statusValidade,
+        'Estoque Loja': p.stockLoja,
+        'Estoque Mínimo Loja': p.minStockLoja,
+        'Estoque Depósito': p.stockDeposito,
+        'Estoque Mínimo Depósito': p.minStockDeposito,
+        'Estoque Total': totalStock,
+        'Custo Unitário (R$)': Number(p.costPrice.toFixed(2)),
+        'Preço Venda (R$)': Number(p.sellPrice.toFixed(2)),
+        'Valor Total Custo (R$)': Number((p.costPrice * totalStock).toFixed(2)),
+        'Valor Total Venda (R$)': Number((p.sellPrice * totalStock).toFixed(2)),
+      };
+    });
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const locSuffix = locationMode === 'loja' ? 'loja' : locationMode === 'deposito' ? 'deposito' : 'unificado';
+    exportToExcel(data, `estoque_gummystock_${locSuffix}_${dateStr}`, 'Estoque');
+  };
+
+  const handleExportCSV = () => {
+    const headers = [
+      'SKU',
+      'Produto',
+      'Categoria',
+      'Unidade',
+      'EAN',
+      'Lote',
+      'Data Validade',
+      'Estoque Loja',
+      'Estoque Depósito',
+      'Estoque Total',
+      'Custo Unitário (R$)',
+      'Preço Venda (R$)',
+      'Valor Total Custo (R$)',
+      'Valor Total Venda (R$)',
+    ];
+
+    const rows = filteredProducts.map((p) => {
+      const totalStock = p.stockLoja + p.stockDeposito;
+      return [
+        p.sku,
+        p.name,
+        p.category,
+        p.unit,
+        p.ean || '',
+        p.batchNumber,
+        p.expirationDate,
+        p.stockLoja,
+        p.stockDeposito,
+        totalStock,
+        p.costPrice.toFixed(2),
+        p.sellPrice.toFixed(2),
+        (p.costPrice * totalStock).toFixed(2),
+        (p.sellPrice * totalStock).toFixed(2),
+      ];
+    });
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const locSuffix = locationMode === 'loja' ? 'loja' : locationMode === 'deposito' ? 'deposito' : 'unificado';
+    exportToCSV(headers, rows, `estoque_gummystock_${locSuffix}_${dateStr}`);
+  };
+
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
       
@@ -194,6 +273,13 @@ export const StockTable: React.FC<StockTableProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          {/* Botão de Exportação de Dados Filtrados */}
+          <ExportButton
+            onExportExcel={handleExportExcel}
+            onExportCSV={handleExportCSV}
+            label="Exportar Estoque"
+          />
+
           {onOpenGeneralTransferModal && checkPermission('canTransferStock') && (
             <button
               onClick={onOpenGeneralTransferModal}

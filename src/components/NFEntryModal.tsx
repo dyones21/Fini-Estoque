@@ -842,7 +842,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                             <div className="bg-amber-100/50 p-3 rounded-xl border border-amber-200 space-y-2">
                               <div className="flex items-center gap-2 text-amber-900 font-extrabold text-xs">
                                 <Tag className="w-4 h-4 text-amber-600" />
-                                <span>Configurar Cadastro Automático para este Novo Produto Fini:</span>
+                                <span>Configurar Cadastro Automático para este Novo Produto:</span>
                               </div>
 
                               <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
@@ -863,7 +863,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
 
                                 <div>
                                   <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
-                                    Categoria Fini
+                                    Categoria do Produto
                                   </label>
                                   <select
                                     value={item.newProductData.category}
@@ -1063,7 +1063,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                     onChange={(e) => handleManualProductSelect(e.target.value)}
                     className="w-full text-xs p-2 rounded-xl border border-slate-200 bg-white"
                   >
-                    <option value="">-- Selecione o Produto Fini --</option>
+                    <option value="">-- Selecione o Produto GummyStock --</option>
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name} ({p.unit})

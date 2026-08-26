@@ -5,7 +5,7 @@ export const INITIAL_USERS: UserProfile[] = [
   {
     id: 'u0',
     name: 'Super Admin Master',
-    email: 'superadmin@fini-erp.local',
+    email: 'superadmin@gummystock.local',
     role: 'super_admin',
     pin: '2101',
     active: true,
@@ -22,7 +22,7 @@ export const INITIAL_USERS: UserProfile[] = [
       canManageBackup: true,
     },
   },
-  // Friburgo Users
+  // GummyStock Users
   {
     id: 'u1',
     name: 'Carlos Eduardo (Admin Matriz)',
@@ -409,7 +409,7 @@ export const INITIAL_NF_ENTRIES: NFEntry[] = [
     receiveDate: '2026-07-22',
     totalValue: 5840.00,
     createdBy: 'Roberto Alves (Depósito)',
-    notes: 'Carga entregue em perfeitas condições no Depósito Nova Friburgo.',
+    notes: 'Carga entregue em perfeitas condições no Depósito Central.',
     items: [
       {
         productId: 'p1',
@@ -501,7 +501,7 @@ export const INITIAL_TRANSFERS: StockTransfer[] = [
     origin: 'deposito',
     destination: 'loja',
     operatorName: 'Roberto Alves (Depósito)',
-    notes: 'Reposição gôndola de entrada da loja Nova Friburgo.',
+    notes: 'Reposição gôndola de entrada da Loja GummyStock.',
     status: 'concluida',
   },
   {

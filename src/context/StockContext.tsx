@@ -246,7 +246,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         u.email?.toLowerCase() === email ||
         u.id === userPayload.uid
     );
-    const name = localUser?.name || userPayload.displayName || email.split('@')[0] || 'Usuário Fini';
+    const name = localUser?.name || userPayload.displayName || email.split('@')[0] || 'Usuário GummyStock';
 
     try {
       const syncedUser = await syncUserWithPostgres({
@@ -612,7 +612,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           const role = (u.role || 'Operador Depósito/Loja') as UserRole;
           return {
             id: u.uid || `usr-${u.id}`,
-            name: u.name || 'Usuário Fini',
+            name: u.name || 'Usuário GummyStock',
             email: u.email,
             role,
             pin: u.pin || '',
@@ -1157,7 +1157,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const exportBackupJSON = () => {
     const backupData = {
-      app: 'Fini ERP System',
+      app: 'GummyStock ERP System',
       version: '2.0.0',
       timestamp: new Date().toISOString(),
       company: companyInfo,
@@ -1176,7 +1176,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const link = document.createElement('a');
     const dateStr = new Date().toISOString().slice(0, 10);
     link.href = url;
-    link.download = `backup_fini_${companyInfo.cnpj ? companyInfo.cnpj.replace(/\D/g, '') : 'empresa'}_${dateStr}.json`;
+    link.download = `backup_gummystock_${companyInfo.cnpj ? companyInfo.cnpj.replace(/\D/g, '') : 'empresa'}_${dateStr}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

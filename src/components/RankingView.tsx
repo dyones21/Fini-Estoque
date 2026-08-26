@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Trophy, Flame, ShoppingBag, ArrowUpRight, Award } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { formatCurrency } from '../utils/inventoryUtils';
+import { exportToExcel, exportToCSV } from '../utils/exportUtils';
+import { ExportButton } from './ExportButton';
 
 export const RankingView: React.FC = () => {
   const { products } = useStock();
@@ -25,10 +27,56 @@ export const RankingView: React.FC = () => {
       : rankedProducts[0].totalSalesQuantity;
   }, [rankedProducts, metric]);
 
+  const handleExportExcel = () => {
+    const data = rankedProducts.map((p, idx) => ({
+      Posição: `${idx + 1}º`,
+      SKU: p.sku,
+      'Cód. Barras (EAN)': p.ean || '',
+      Produto: p.name,
+      Categoria: p.category,
+      Unidade: p.unit,
+      'Faturamento Total (R$)': Number(p.totalSalesValue.toFixed(2)),
+      'Quantidade Vendida': p.totalSalesQuantity,
+      'Preço Venda Unit. (R$)': Number(p.sellPrice.toFixed(2)),
+      'Estoque Atual Total': p.stockLoja + p.stockDeposito,
+    }));
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportToExcel(data, `ranking_vendas_gummystock_${metric}_${dateStr}`, 'Ranking Vendas');
+  };
+
+  const handleExportCSV = () => {
+    const headers = [
+      'Posição',
+      'SKU',
+      'EAN',
+      'Produto',
+      'Categoria',
+      'Unidade',
+      'Faturamento Total (R$)',
+      'Quantidade Vendida',
+      'Preço Venda Unit. (R$)',
+      'Estoque Atual Total',
+    ];
+    const rows = rankedProducts.map((p, idx) => [
+      `${idx + 1}º`,
+      p.sku,
+      p.ean || '',
+      p.name,
+      p.category,
+      p.unit,
+      p.totalSalesValue.toFixed(2),
+      p.totalSalesQuantity,
+      p.sellPrice.toFixed(2),
+      p.stockLoja + p.stockDeposito,
+    ]);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportToCSV(headers, rows, `ranking_vendas_gummystock_${metric}_${dateStr}`);
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       
-      {/* Title & Metric Switcher */}
+      {/* Title & Metric Switcher & Export */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200">
@@ -37,40 +85,49 @@ export const RankingView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-black text-slate-900">
-                Ranking de Saída de Produtos (Giro Fini)
+                Ranking de Saída de Produtos (Giro GummyStock)
               </h2>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 uppercase">
                 Top Vendas
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Acompanhe os campeões de vendas e saída de estoque em Nova Friburgo
+              Acompanhe os campeões de vendas e saída de estoque do GummyStock
             </p>
           </div>
         </div>
 
-        {/* Toggle metric */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-          <button
-            onClick={() => setMetric('faturamento')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              metric === 'faturamento'
-                ? 'bg-white text-rose-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Por Faturamento (R$)
-          </button>
-          <button
-            onClick={() => setMetric('quantidade')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              metric === 'quantidade'
-                ? 'bg-white text-rose-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Por Unidades Vendidas
-          </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Toggle metric */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              onClick={() => setMetric('faturamento')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                metric === 'faturamento'
+                  ? 'bg-white text-rose-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Por Faturamento (R$)
+            </button>
+            <button
+              onClick={() => setMetric('quantidade')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                metric === 'quantidade'
+                  ? 'bg-white text-rose-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Por Unidades Vendidas
+            </button>
+          </div>
+
+          {/* Export Button */}
+          <ExportButton
+            onExportExcel={handleExportExcel}
+            onExportCSV={handleExportCSV}
+            label="Exportar Ranking"
+          />
         </div>
       </div>
 

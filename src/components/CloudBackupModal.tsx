@@ -118,7 +118,7 @@ export const CloudBackupModal: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Servidor de redundância em tempo real com backup criptografado do banco de dados do estoque Fini
+              Servidor de redundância em tempo real com backup criptografado do banco de dados do estoque GummyStock
             </p>
           </div>
         </div>

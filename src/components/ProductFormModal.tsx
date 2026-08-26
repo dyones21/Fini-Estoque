@@ -111,7 +111,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setFormError(null);
 
     if (!name.trim()) {
-      setFormError('Informe o Nome do Produto Fini.');
+      setFormError('Informe o Nome do Produto.');
       return;
     }
 
@@ -176,7 +176,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-black tracking-tight">
-                {editingProduct ? 'Editar Produto Fini' : 'Cadastrar Novo Produto Fini'}
+                {editingProduct ? 'Editar Produto' : 'Cadastrar Novo Produto'}
               </h2>
               <p className="text-xs text-slate-400">
                 Ajuste de metadados, valores de custo/venda e limites mínimos de estoque
@@ -211,7 +211,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="Ex: Fini Dentaduras 500g"
+                placeholder="Ex: Dentaduras 500g"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-bold focus:ring-2 focus:ring-rose-500/20"

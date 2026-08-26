@@ -20,6 +20,7 @@ import { ProductHistoryModal } from './components/ProductHistoryModal';
 import { ReportsView } from './components/ReportsView';
 import { Product } from './types';
 import { StockFilterOptions } from './components/Dashboard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const AccessDeniedMessage: React.FC<{ featureName: string }> = ({ featureName }) => (
   <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm text-center max-w-lg mx-auto my-12 space-y-4">
@@ -100,7 +101,7 @@ const MainApp: React.FC = () => {
     setIsSaleModalOpen(true);
   };
 
-  // Nota: SaaSMasterScreen desativada para manter fluxo single-tenant direto no ERP Fini Nova Friburgo
+  // Nota: SaaSMasterScreen desativada para manter fluxo direto no GummyStock
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-800 antialiased selection:bg-rose-500 selection:text-white">
@@ -135,115 +136,119 @@ const MainApp: React.FC = () => {
           onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
 
-        {/* View Switcher Container */}
+        {/* View Switcher Container with ErrorBoundary and Smooth Fade-In Transition */}
         <main className="flex-1 min-w-0">
-          {activeTab === 'dashboard' && (
-            checkPermission('canViewDashboard') ? (
-              <Dashboard
-                setActiveTab={setActiveTab}
-                onNavigateToStock={handleNavigateToStock}
-              />
-            ) : (
-              <AccessDeniedMessage featureName="Dashboard e Indicadores" />
-            )
-          )}
+          <ErrorBoundary>
+            <div key={activeTab} className="animate-moduleFadeIn">
+              {activeTab === 'dashboard' && (
+                checkPermission('canViewDashboard') ? (
+                  <Dashboard
+                    setActiveTab={setActiveTab}
+                    onNavigateToStock={handleNavigateToStock}
+                  />
+                ) : (
+                  <AccessDeniedMessage featureName="Dashboard e Indicadores" />
+                )
+              )}
 
-          {(activeTab === 'estoque_geral' ||
-            activeTab === 'estoque_loja' ||
-            activeTab === 'estoque_deposito') && (
-            checkPermission('canViewStock') ? (
-              <StockTable
-                locationMode={activeTab === 'estoque_loja' ? 'loja' : activeTab === 'estoque_deposito' ? 'deposito' : 'geral'}
-                onOpenTransferModalForProduct={handleOpenTransferForProduct}
-                onOpenMovementModalForProduct={handleOpenMovementForProduct}
-                onOpenEditProductModal={handleOpenEditProduct}
-                onOpenNewProductModal={handleOpenNewProduct}
-                onOpenSaleModalForProduct={handleOpenSaleForProduct}
-                onOpenHistoryModalForProduct={handleOpenHistoryForProduct}
-                onOpenNFModal={() => setIsNFModalOpen(true)}
-                onOpenGeneralTransferModal={() => {
-                  setSelectedProduct(null);
-                  setIsTransferModalOpen(true);
-                }}
-                initialSearchQuery={stockFilters.searchQuery}
-                initialCategory={stockFilters.category}
-                initialStatus={stockFilters.status}
-                initialIsFiltersOpen={
-                  !!(stockFilters.searchQuery || stockFilters.category || stockFilters.status)
-                }
-              />
-            ) : (
-              <AccessDeniedMessage featureName="Tabelas de Estoque" />
-            )
-          )}
+              {(activeTab === 'estoque_geral' ||
+                activeTab === 'estoque_loja' ||
+                activeTab === 'estoque_deposito') && (
+                checkPermission('canViewStock') ? (
+                  <StockTable
+                    locationMode={activeTab === 'estoque_loja' ? 'loja' : activeTab === 'estoque_deposito' ? 'deposito' : 'geral'}
+                    onOpenTransferModalForProduct={handleOpenTransferForProduct}
+                    onOpenMovementModalForProduct={handleOpenMovementForProduct}
+                    onOpenEditProductModal={handleOpenEditProduct}
+                    onOpenNewProductModal={handleOpenNewProduct}
+                    onOpenSaleModalForProduct={handleOpenSaleForProduct}
+                    onOpenHistoryModalForProduct={handleOpenHistoryForProduct}
+                    onOpenNFModal={() => setIsNFModalOpen(true)}
+                    onOpenGeneralTransferModal={() => {
+                      setSelectedProduct(null);
+                      setIsTransferModalOpen(true);
+                    }}
+                    initialSearchQuery={stockFilters.searchQuery}
+                    initialCategory={stockFilters.category}
+                    initialStatus={stockFilters.status}
+                    initialIsFiltersOpen={
+                      !!(stockFilters.searchQuery || stockFilters.category || stockFilters.status)
+                    }
+                  />
+                ) : (
+                  <AccessDeniedMessage featureName="Tabelas de Estoque" />
+                )
+              )}
 
-          {activeTab === 'entrada_nf' && (
-            checkPermission('canAddNFEntries') ? (
-              <StockTable
-                locationMode="geral"
-                onOpenTransferModalForProduct={handleOpenTransferForProduct}
-                onOpenMovementModalForProduct={handleOpenMovementForProduct}
-                onOpenEditProductModal={handleOpenEditProduct}
-                onOpenNewProductModal={handleOpenNewProduct}
-                onOpenSaleModalForProduct={handleOpenSaleForProduct}
-                onOpenHistoryModalForProduct={handleOpenHistoryForProduct}
-                onOpenNFModal={() => setIsNFModalOpen(true)}
-                onOpenGeneralTransferModal={() => {
-                  setSelectedProduct(null);
-                  setIsTransferModalOpen(true);
-                }}
-                initialSearchQuery={stockFilters.searchQuery}
-                initialCategory={stockFilters.category}
-                initialStatus={stockFilters.status}
-                initialIsFiltersOpen={true}
-              />
-            ) : (
-              <AccessDeniedMessage featureName="Entrada de Notas Fiscais" />
-            )
-          )}
+              {activeTab === 'entrada_nf' && (
+                checkPermission('canAddNFEntries') ? (
+                  <StockTable
+                    locationMode="geral"
+                    onOpenTransferModalForProduct={handleOpenTransferForProduct}
+                    onOpenMovementModalForProduct={handleOpenMovementForProduct}
+                    onOpenEditProductModal={handleOpenEditProduct}
+                    onOpenNewProductModal={handleOpenNewProduct}
+                    onOpenSaleModalForProduct={handleOpenSaleForProduct}
+                    onOpenHistoryModalForProduct={handleOpenHistoryForProduct}
+                    onOpenNFModal={() => setIsNFModalOpen(true)}
+                    onOpenGeneralTransferModal={() => {
+                      setSelectedProduct(null);
+                      setIsTransferModalOpen(true);
+                    }}
+                    initialSearchQuery={stockFilters.searchQuery}
+                    initialCategory={stockFilters.category}
+                    initialStatus={stockFilters.status}
+                    initialIsFiltersOpen={true}
+                  />
+                ) : (
+                  <AccessDeniedMessage featureName="Entrada de Notas Fiscais" />
+                )
+              )}
 
-          {activeTab === 'relatorios' && (
-            checkPermission('canViewDashboard') || checkPermission('canViewStock') ? (
-              <ReportsView />
-            ) : (
-              <AccessDeniedMessage featureName="Relatórios de Movimentação" />
-            )
-          )}
+              {activeTab === 'relatorios' && (
+                checkPermission('canViewDashboard') || checkPermission('canViewStock') ? (
+                  <ReportsView />
+                ) : (
+                  <AccessDeniedMessage featureName="Relatórios de Movimentação" />
+                )
+              )}
 
-          {activeTab === 'curva_abc_ranking' && (
-            checkPermission('canViewDashboard') ? (
-              <div className="space-y-8">
-                <CurvaABCView />
-                <RankingView />
-              </div>
-            ) : (
-              <AccessDeniedMessage featureName="Análise Curva ABC & Ranking" />
-            )
-          )}
+              {activeTab === 'curva_abc_ranking' && (
+                checkPermission('canViewDashboard') ? (
+                  <div className="space-y-8">
+                    <CurvaABCView />
+                    <RankingView />
+                  </div>
+                ) : (
+                  <AccessDeniedMessage featureName="Análise Curva ABC & Ranking" />
+                )
+              )}
 
-          {activeTab === 'empresa' && (
-            checkPermission('canManageBackup') || checkPermission('canManageUsers') || checkPermission('canManageCompany') ? (
-              <CompanyDataView />
-            ) : (
-              <AccessDeniedMessage featureName="Dados da Empresa" />
-            )
-          )}
+              {activeTab === 'empresa' && (
+                checkPermission('canManageBackup') || checkPermission('canManageUsers') || checkPermission('canManageCompany') ? (
+                  <CompanyDataView />
+                ) : (
+                  <AccessDeniedMessage featureName="Dados da Empresa" />
+                )
+              )}
 
-          {activeTab === 'backup' && (
-            checkPermission('canManageBackup') ? (
-              <CloudBackupModal />
-            ) : (
-              <AccessDeniedMessage featureName="Backup e Sincronização em Nuvem" />
-            )
-          )}
+              {activeTab === 'backup' && (
+                checkPermission('canManageBackup') ? (
+                  <CloudBackupModal />
+                ) : (
+                  <AccessDeniedMessage featureName="Backup e Sincronização em Nuvem" />
+                )
+              )}
 
-          {activeTab === 'usuarios' && (
-            checkPermission('canManageUsers') ? (
-              <UserManagementView />
-            ) : (
-              <AccessDeniedMessage featureName="Gestão de Usuários e Permissões" />
-            )
-          )}
+              {activeTab === 'usuarios' && (
+                checkPermission('canManageUsers') ? (
+                  <UserManagementView />
+                ) : (
+                  <AccessDeniedMessage featureName="Gestão de Usuários e Permissões" />
+                )
+              )}
+            </div>
+          </ErrorBoundary>
         </main>
       </div>
 
@@ -298,7 +303,7 @@ const AuthGate: React.FC = () => {
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
         <div className="text-center space-y-4 animate-fadeIn">
           <div className="w-16 h-16 rounded-3xl bg-linear-to-tr from-rose-600 to-pink-500 flex items-center justify-center mx-auto shadow-xl shadow-rose-900/30">
-            <span className="text-2xl font-black text-white tracking-tighter">FINI</span>
+            <span className="text-xl font-black text-white tracking-tighter">GUMMY</span>
           </div>
           <div className="flex items-center justify-center gap-3">
             <div className="w-5 h-5 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />

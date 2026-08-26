@@ -96,7 +96,7 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
         qtyPrefix: '',
         qtyClass: 'text-sky-800 font-bold',
         defaultOrigin: 'Depósito Central',
-        defaultDest: 'Loja Nova Friburgo',
+        defaultDest: 'Loja GummyStock',
       };
     }
 
@@ -108,7 +108,7 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
         iconColor: 'text-teal-600',
         qtyPrefix: '-',
         qtyClass: 'text-teal-700 font-extrabold',
-        defaultOrigin: 'Loja Nova Friburgo',
+        defaultOrigin: 'Loja GummyStock',
         defaultDest: 'Baleiro / Consumidor Final',
       };
     }
@@ -121,7 +121,7 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
       iconColor: 'text-amber-600',
       qtyPrefix: '-',
       qtyClass: 'text-amber-700 font-bold',
-      defaultOrigin: m.location === 'deposito' ? 'Depósito Central' : 'Loja Nova Friburgo',
+      defaultOrigin: m.location === 'deposito' ? 'Depósito Central' : 'Loja GummyStock',
       defaultDest: 'Baixa Operacional',
     };
   };
@@ -200,7 +200,7 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
                 const originText = (mov as any).origin || meta.defaultOrigin;
                 const destText = (mov as any).destination || meta.defaultDest;
                 const batchText = (mov as any).batchNumber || product.batchNumber || 'LOTE-GERAL';
-                const userText = mov.userName || (mov as any).createdBy || 'Sistema Fini';
+                const userText = mov.userName || (mov as any).createdBy || 'Sistema GummyStock';
                 const reasonText = mov.reason || (mov as any).notes;
 
                 return (

@@ -1,6 +1,6 @@
 {
-  "name": "Controlador de Estoque - Fini Nova Friburgo",
-  "description": "Sistema moderno de gestão de estoque para Fini Nova Friburgo com visão geral, loja, depósito, entrada de NF, transferências, curva ABC, ranking e backup em nuvem.",
+  "name": "GummyStock",
+  "description": "Sistema moderno de gestão de estoque GummyStock com visão geral, loja, depósito, entrada de NF, transferências, curva ABC, ranking e backup em nuvem.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

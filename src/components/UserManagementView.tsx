@@ -106,7 +106,7 @@ export const UserManagementView: React.FC = () => {
 
   const generateTemporaryPassword = () => {
     const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-    let pass = 'Fini@';
+    let pass = 'Gummy@';
     for (let i = 0; i < 4; i++) {
       pass += chars.charAt(Math.floor(Math.random() * chars.length));
     }
@@ -268,7 +268,7 @@ export const UserManagementView: React.FC = () => {
       const createdUser: UserProfile = {
         id: createdUid,
         name: trimmedName,
-        email: trimmedEmail || `${trimmedName.toLowerCase().replace(/\s+/g, '.')}@fininovafriburgo.com.br`,
+        email: trimmedEmail || `${trimmedName.toLowerCase().replace(/\s+/g, '.')}@gummystock.com.br`,
         role: newUserRole,
         pin: newUserPin,
         active: true,
@@ -377,7 +377,7 @@ export const UserManagementView: React.FC = () => {
             <h2 className="text-xl font-black">Gestão de Usuários, PINs e Permissões</h2>
           </div>
           <p className="text-xs text-rose-200 max-w-2xl">
-            Configure o PIN numérico de 4 dígitos para troca rápida de operador e defina as permissões individuais ou por cargo de cada colaborador Fini Nova Friburgo.
+            Configure o PIN numérico de 4 dígitos para troca rápida de operador e defina as permissões individuais ou por cargo de cada colaborador do GummyStock.
           </p>
         </div>
 
@@ -1000,7 +1000,7 @@ export const UserManagementView: React.FC = () => {
                   </label>
                   <input
                     type="email"
-                    placeholder="joao@fininovafriburgo.com.br"
+                    placeholder="joao@gummystock.com.br"
                     value={newUserEmail}
                     onChange={(e) => setNewUserEmail(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:bg-white focus:outline-none"
@@ -1057,7 +1057,7 @@ export const UserManagementView: React.FC = () => {
 
                   <input
                     type={showModalPassword ? 'text' : 'password'}
-                    placeholder="Mínimo 6 caracteres (ex: Fini@2026!)"
+                    placeholder="Mínimo 6 caracteres (ex: Gummy@2026!)"
                     value={newUserPassword}
                     onChange={(e) => {
                       setNewUserPassword(e.target.value);

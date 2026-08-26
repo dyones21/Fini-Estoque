@@ -27,6 +27,8 @@ import {
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory, StockMovement, NFEntry, StockTransfer } from '../types';
 import { formatCurrency, formatDateTime, getDaysToExpiration, isLowStock } from '../utils/inventoryUtils';
+import { exportToExcel, exportToCSV } from '../utils/exportUtils';
+import { ExportButton } from './ExportButton';
 
 export type ReportType =
   | 'posicao_estoque'
@@ -251,13 +253,93 @@ export const ReportsView: React.FC = () => {
     window.print();
   };
 
-  // Handler for Exporting CSV
-  const handleExportCSV = () => {
-    let csvRows: string[][] = [];
-    let filename = `relatorio_${reportType}_${new Date().toISOString().slice(0, 10)}.csv`;
+  // Handler for Exporting Excel (.xlsx)
+  const handleExportExcel = () => {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const fileName = `relatorio_${reportType}_${dateStr}`;
 
     if (reportType === 'posicao_estoque') {
-      csvRows.push([
+      const data = filteredProducts.map((p) => {
+        const total = p.stockLoja + p.stockDeposito;
+        return {
+          SKU: p.sku,
+          'Cód. Barras (EAN)': p.ean || '',
+          Produto: p.name,
+          Categoria: p.category,
+          Embalagem: p.unit,
+          'Estoque Loja': p.stockLoja,
+          'Estoque Depósito': p.stockDeposito,
+          'Estoque Total': total,
+          'Preço Custo (R$)': Number(p.costPrice.toFixed(2)),
+          'Preço Venda (R$)': Number(p.sellPrice.toFixed(2)),
+          'Valor Custo Total (R$)': Number((total * p.costPrice).toFixed(2)),
+          'Valor Venda Total (R$)': Number((total * p.sellPrice).toFixed(2)),
+          Lote: p.batchNumber,
+          'Data Validade': p.expirationDate,
+        };
+      });
+      exportToExcel(data, fileName, 'Posição de Estoque');
+    } else if (reportType === 'movimentacoes') {
+      const data = filteredMovements.map((m) => ({
+        'Data/Hora': m.date,
+        Produto: m.productName,
+        'Tipo Movimento': m.type,
+        Quantidade: m.quantity,
+        Local: m.location,
+        'Valor Unit. (R$)': Number((m.unitPrice || 0).toFixed(2)),
+        'Valor Total (R$)': Number((m.totalValue || 0).toFixed(2)),
+        'Usuário': m.userName,
+        Motivo: m.reason || '',
+      }));
+      exportToExcel(data, fileName, 'Movimentações');
+    } else if (reportType === 'notas_fiscais') {
+      const data = filteredNFs.map((nf) => ({
+        'Número NF': nf.numberNF,
+        Fornecedor: nf.supplier,
+        'CNPJ Fornecedor': nf.cnpjSupplier,
+        'Data Emissão': nf.issueDate,
+        'Data Recebimento': nf.receiveDate,
+        'Qtd Total Itens': nf.items.reduce((acc, i) => acc + i.quantity, 0),
+        'Valor Total (R$)': Number(nf.totalValue.toFixed(2)),
+        'Chave Acesso': nf.accessKey || '',
+        'Responsável': nf.createdBy,
+      }));
+      exportToExcel(data, fileName, 'Notas Fiscais');
+    } else if (reportType === 'vencimentos') {
+      const data = filteredVencimentos.map(({ product, days }) => ({
+        SKU: product.sku,
+        Produto: product.name,
+        Categoria: product.category,
+        'Estoque Total': product.stockLoja + product.stockDeposito,
+        Lote: product.batchNumber,
+        'Data Validade': product.expirationDate,
+        'Dias p/ Vencer': days,
+        Status: days < 0 ? 'VENCIDO' : days <= 30 ? 'CRÍTICO (<30d)' : 'OK',
+      }));
+      exportToExcel(data, fileName, 'Vencimentos');
+    } else if (reportType === 'curva_abc') {
+      const data = abcAnalysis.map((item) => ({
+        'Classe ABC': item.classABC,
+        SKU: item.product.sku,
+        Produto: item.product.name,
+        Categoria: item.product.category,
+        'Qtd Vendida': item.product.totalSalesQuantity,
+        'Faturamento Total (R$)': Number(item.totalRevenue.toFixed(2)),
+        '% Representatividade': `${item.revenuePercentage.toFixed(2)}%`,
+        '% Acumulada': `${item.cumulativePercentage.toFixed(2)}%`,
+      }));
+      exportToExcel(data, fileName, 'Curva ABC');
+    }
+  };
+
+  // Handler for Exporting CSV
+  const handleExportCSV = () => {
+    let csvRows: (string | number)[][] = [];
+    let headers: string[] = [];
+    let filename = `relatorio_${reportType}_${new Date().toISOString().slice(0, 10)}`;
+
+    if (reportType === 'posicao_estoque') {
+      headers = [
         'SKU',
         'EAN',
         'Produto',
@@ -272,19 +354,19 @@ export const ReportsView: React.FC = () => {
         'Valor Venda Total (R$)',
         'Lote',
         'Data Validade',
-      ]);
+      ];
 
       filteredProducts.forEach((p) => {
         const total = p.stockLoja + p.stockDeposito;
         csvRows.push([
           p.sku,
           p.ean,
-          `"${p.name.replace(/"/g, '""')}"`,
-          `"${p.category}"`,
-          `"${p.unit}"`,
-          p.stockLoja.toString(),
-          p.stockDeposito.toString(),
-          total.toString(),
+          p.name,
+          p.category,
+          p.unit,
+          p.stockLoja,
+          p.stockDeposito,
+          total,
           p.costPrice.toFixed(2),
           p.sellPrice.toFixed(2),
           (total * p.costPrice).toFixed(2),
@@ -294,63 +376,63 @@ export const ReportsView: React.FC = () => {
         ]);
       });
     } else if (reportType === 'movimentacoes') {
-      csvRows.push(['Data/Hora', 'Produto', 'Tipo Movimento', 'Quantidade', 'Local', 'Valor Unit. (R$)', 'Valor Total (R$)', 'Usuário', 'Motivo']);
+      headers = ['Data/Hora', 'Produto', 'Tipo Movimento', 'Quantidade', 'Local', 'Valor Unit. (R$)', 'Valor Total (R$)', 'Usuário', 'Motivo'];
 
       filteredMovements.forEach((m) => {
         csvRows.push([
           m.date,
-          `"${m.productName.replace(/"/g, '""')}"`,
+          m.productName,
           m.type,
-          m.quantity.toString(),
+          m.quantity,
           m.location,
           (m.unitPrice || 0).toFixed(2),
           (m.totalValue || 0).toFixed(2),
-          `"${m.userName}"`,
-          `"${(m.reason || '').replace(/"/g, '""')}"`,
+          m.userName,
+          m.reason || '',
         ]);
       });
     } else if (reportType === 'notas_fiscais') {
-      csvRows.push(['Número NF', 'Fornecedor', 'CNPJ Fornecedor', 'Data Emissão', 'Data Recebimento', 'Qtd Itens', 'Valor Total (R$)', 'Chave Acesso', 'Responsável']);
+      headers = ['Número NF', 'Fornecedor', 'CNPJ Fornecedor', 'Data Emissão', 'Data Recebimento', 'Qtd Itens', 'Valor Total (R$)', 'Chave Acesso', 'Responsável'];
 
       filteredNFs.forEach((nf) => {
         csvRows.push([
           nf.numberNF,
-          `"${nf.supplier.replace(/"/g, '""')}"`,
+          nf.supplier,
           nf.cnpjSupplier,
           nf.issueDate,
           nf.receiveDate,
-          nf.items.reduce((acc, i) => acc + i.quantity, 0).toString(),
+          nf.items.reduce((acc, i) => acc + i.quantity, 0),
           nf.totalValue.toFixed(2),
           nf.accessKey || '',
-          `"${nf.createdBy}"`,
+          nf.createdBy,
         ]);
       });
     } else if (reportType === 'vencimentos') {
-      csvRows.push(['SKU', 'Produto', 'Categoria', 'Estoque Total', 'Lote', 'Data Validade', 'Dias para Vencer', 'Status Validade']);
+      headers = ['SKU', 'Produto', 'Categoria', 'Estoque Total', 'Lote', 'Data Validade', 'Dias para Vencer', 'Status Validade'];
 
       filteredVencimentos.forEach(({ product, days }) => {
         let status = days < 0 ? 'VENCIDO' : days <= 30 ? 'CRÍTICO (<30d)' : 'OK';
         csvRows.push([
           product.sku,
-          `"${product.name.replace(/"/g, '""')}"`,
-          `"${product.category}"`,
-          (product.stockLoja + product.stockDeposito).toString(),
+          product.name,
+          product.category,
+          product.stockLoja + product.stockDeposito,
           product.batchNumber,
           product.expirationDate,
-          days.toString(),
+          days,
           status,
         ]);
       });
     } else if (reportType === 'curva_abc') {
-      csvRows.push(['Classe ABC', 'SKU', 'Produto', 'Categoria', 'Qtd Vendida', 'Faturamento Total (R$)', '% Representatividade', '% Acumulada']);
+      headers = ['Classe ABC', 'SKU', 'Produto', 'Categoria', 'Qtd Vendida', 'Faturamento Total (R$)', '% Representatividade', '% Acumulada'];
 
       abcAnalysis.forEach((item) => {
         csvRows.push([
           item.classABC,
           item.product.sku,
-          `"${item.product.name.replace(/"/g, '""')}"`,
-          `"${item.product.category}"`,
-          item.product.totalSalesQuantity.toString(),
+          item.product.name,
+          item.product.category,
+          item.product.totalSalesQuantity,
           item.totalRevenue.toFixed(2),
           item.revenuePercentage.toFixed(2) + '%',
           item.cumulativePercentage.toFixed(2) + '%',
@@ -358,15 +440,7 @@ export const ReportsView: React.FC = () => {
       });
     }
 
-    const csvContent = '\uFEFF' + csvRows.map((e) => e.join(';')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    exportToCSV(headers, csvRows, filename);
   };
 
   return (
@@ -421,7 +495,7 @@ export const ReportsView: React.FC = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-black uppercase tracking-tight text-slate-900">
-              FINI CANDY STORE — NOVA FRIBURGO
+              GUMMYSTOCK — GESTÃO DE ESTOQUE
             </h1>
             <p className="text-xs font-bold text-slate-600">
               Relatório Gerencial de Estoque & Operações ERP
@@ -470,14 +544,11 @@ export const ReportsView: React.FC = () => {
             <span>Filtros {showFiltersPanel ? 'Visíveis' : 'Ocultos'}</span>
           </button>
 
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-all hover:scale-[1.01]"
-            title="Baixar Tabela em Formato Planilha (CSV / Excel)"
-          >
-            <Download className="w-4 h-4" />
-            <span>Exportar CSV</span>
-          </button>
+          <ExportButton
+            onExportExcel={handleExportExcel}
+            onExportCSV={handleExportCSV}
+            label="Exportar Relatório"
+          />
 
           <button
             onClick={handlePrintPDF}
@@ -642,7 +713,7 @@ export const ReportsView: React.FC = () => {
                 className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold bg-white"
               >
                 <option value="geral">Todos os Locais (Unificado)</option>
-                <option value="loja">Loja Nova Friburgo</option>
+                <option value="loja">Loja GummyStock</option>
                 <option value="deposito">Depósito Central</option>
               </select>
             </div>

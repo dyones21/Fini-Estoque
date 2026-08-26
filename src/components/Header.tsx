@@ -96,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
       if (res !== 'granted') return;
     }
     // Fire test notifications
-    await notifyLowStock('Bala Fini Dentaduras 500g', 3, 15, 'Depósito');
+    await notifyLowStock('Bala Dentaduras 500g', 3, 15, 'Depósito');
   };
 
   const handleTestNFAlert = async () => {
@@ -105,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
       setPushPerm(res);
       if (res !== 'granted') return;
     }
-    await notifyNewNFEntry('NF-98421', 'Fini Distribuidora S.A.', 12, 1450.80);
+    await notifyNewNFEntry('NF-98421', 'Distribuidora Regional S.A.', 12, 1450.80);
   };
 
   const notificationRef = useRef<HTMLDivElement | null>(null);
@@ -220,13 +220,13 @@ export const Header: React.FC<HeaderProps> = ({
 
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-rose-600 via-pink-500 to-amber-400 p-0.5 flex items-center justify-center shadow-md shrink-0">
               <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center font-black text-rose-600 text-lg sm:text-xl tracking-tighter">
-                F
+                G
               </div>
             </div>
             <div className="text-left hidden xs:block">
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <span className="font-extrabold text-slate-900 tracking-tight text-base sm:text-lg text-left">
-                  FINI ERP
+                  GummyStock
                 </span>
                 {companyInfo?.name && (
                   <span className="text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200/60 text-left hidden sm:inline max-w-48 truncate">

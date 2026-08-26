@@ -361,7 +361,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!isCollapsed ? (
               <>
                 <div className="flex items-center justify-between pt-1">
-                  <span className="font-semibold text-slate-400">Fini Friburgo</span>
+                  <span className="font-semibold text-slate-400">GummyStock</span>
                   <span className="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded text-emerald-400 border border-slate-700 font-bold">
                     v1.4 PIN System
                   </span>
@@ -371,7 +371,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </p>
               </>
             ) : (
-              <div className="flex justify-center" title={`Fini Nova Friburgo - Perfil: ${currentUser.name}`}>
+              <div className="flex justify-center" title={`GummyStock - Perfil: ${currentUser.name}`}>
                 <div className="w-8 h-8 rounded-lg bg-rose-950/60 text-rose-400 flex items-center justify-center font-bold text-xs border border-rose-800/50">
                   {currentUser.name.charAt(0)}
                 </div>
@@ -397,11 +397,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-600 to-pink-500 flex items-center justify-center shadow-md font-black text-white text-base">
-                  F
+                  G
                 </div>
                 <div className="text-left">
-                  <h3 className="text-sm font-extrabold text-white leading-tight">Fini ERP</h3>
-                  <span className="text-[10px] font-semibold text-rose-400">Nova Friburgo</span>
+                  <h3 className="text-sm font-extrabold text-white leading-tight">GummyStock</h3>
+                  <span className="text-[10px] font-semibold text-rose-400">Gestão de Estoque</span>
                 </div>
               </div>
 

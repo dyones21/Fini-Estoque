@@ -1,6 +1,6 @@
 {
-  "short_name": "ERP Fini",
-  "name": "ERP Fini - Controlador de Estoque",
+  "short_name": "GummyStock",
+  "name": "GummyStock - Gestão de Estoque",
   "icons": [
     {
       "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍬</text></svg>",
@@ -13,5 +13,5 @@
   "theme_color": "#0f172a",
   "display": "standalone",
   "orientation": "any",
-  "description": "Sistema moderno de gestão de estoque ERP para Fini Nova Friburgo com suporte PWA, funcionamento offline e sincronização Firestore em tempo real."
+  "description": "Sistema moderno de gestão de estoque ERP GummyStock com suporte PWA, funcionamento offline e sincronização em tempo real."
 }

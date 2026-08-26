@@ -123,7 +123,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                 Transferência de Estoque
               </h2>
               <p className="text-xs text-amber-200/80">
-                Movimentação interna: Depósito Central ➔ Loja Nova Friburgo
+                Movimentação interna: Depósito Central ➔ Loja GummyStock
               </p>
             </div>
           </div>

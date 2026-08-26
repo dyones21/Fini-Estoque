@@ -20,6 +20,8 @@ import {
 } from 'recharts';
 import { useStock } from '../context/StockContext';
 import { calculateCurvaABC, formatCurrency } from '../utils/inventoryUtils';
+import { exportToExcel, exportToCSV } from '../utils/exportUtils';
+import { ExportButton } from './ExportButton';
 
 export const CurvaABCView: React.FC = () => {
   const { products } = useStock();
@@ -62,6 +64,61 @@ export const CurvaABCView: React.FC = () => {
     return abcList.filter((i) => i.classABC === selectedClass);
   }, [abcList, selectedClass]);
 
+  const handleExportExcel = () => {
+    const data = filteredList.map((item) => ({
+      Classe: item.classABC,
+      SKU: item.product.sku,
+      'Cód. Barras (EAN)': item.product.ean || '',
+      Produto: item.product.name,
+      Categoria: item.product.category,
+      Unidade: item.product.unit,
+      'Quantidade Vendida': item.product.totalSalesQuantity,
+      'Faturamento Total (R$)': Number(item.totalRevenue.toFixed(2)),
+      '% do Total': `${item.revenuePercentage.toFixed(2)}%`,
+      '% Acumulada': `${item.cumulativePercentage.toFixed(2)}%`,
+      'Estoque Loja': item.product.stockLoja,
+      'Estoque Depósito': item.product.stockDeposito,
+      'Estoque Total': item.product.stockLoja + item.product.stockDeposito,
+    }));
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportToExcel(data, `curva_abc_gummystock_classe_${selectedClass}_${dateStr}`, 'Curva ABC');
+  };
+
+  const handleExportCSV = () => {
+    const headers = [
+      'Classe',
+      'SKU',
+      'EAN',
+      'Produto',
+      'Categoria',
+      'Unidade',
+      'Qtd Vendida',
+      'Faturamento Total (R$)',
+      '% do Total',
+      '% Acumulada',
+      'Estoque Loja',
+      'Estoque Depósito',
+      'Estoque Total',
+    ];
+    const rows = filteredList.map((item) => [
+      item.classABC,
+      item.product.sku,
+      item.product.ean || '',
+      item.product.name,
+      item.product.category,
+      item.product.unit,
+      item.product.totalSalesQuantity,
+      item.totalRevenue.toFixed(2),
+      `${item.revenuePercentage.toFixed(2)}%`,
+      `${item.cumulativePercentage.toFixed(2)}%`,
+      item.product.stockLoja,
+      item.product.stockDeposito,
+      item.product.stockLoja + item.product.stockDeposito,
+    ]);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportToCSV(headers, rows, `curva_abc_gummystock_classe_${selectedClass}_${dateStr}`);
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       
@@ -81,9 +138,17 @@ export const CurvaABCView: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Classificação estratégica dos produtos Fini por relevância de faturamento e giro comercial
+              Classificação estratégica dos produtos GummyStock por relevância de faturamento e giro comercial
             </p>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          <ExportButton
+            onExportExcel={handleExportExcel}
+            onExportCSV={handleExportCSV}
+            label="Exportar Curva ABC"
+          />
         </div>
       </div>
 

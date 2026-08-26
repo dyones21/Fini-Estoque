@@ -81,12 +81,12 @@ self.addEventListener('fetch', (event) => {
 
 // Push Event Handler
 self.addEventListener('push', (event) => {
-  let data = { title: 'ERP Fini - Notificação de Estoque', body: 'Alerta do sistema de estoque.' };
+  let data = { title: 'GummyStock - Notificação de Estoque', body: 'Alerta do sistema de estoque.' };
   if (event.data) {
     try {
       data = event.data.json();
     } catch (e) {
-      data = { title: 'ERP Fini', body: event.data.text() };
+      data = { title: 'GummyStock', body: event.data.text() };
     }
   }
 
@@ -95,7 +95,7 @@ self.addEventListener('push', (event) => {
     icon: data.icon || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🍬</text></svg>',
     badge: data.badge || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🍬</text></svg>',
     vibrate: [100, 50, 100],
-    tag: data.tag || 'erp-fini-notification',
+    tag: data.tag || 'gummystock-notification',
     renotify: true,
     data: {
       url: data.url || '/',
@@ -135,10 +135,10 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
     const { title, body, icon, tag, data } = event.data.payload || {};
     const options = {
-      body: body || 'Alerta de Estoque ERP Fini',
+      body: body || 'Alerta de Estoque GummyStock',
       icon: icon || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🍬</text></svg>',
       vibrate: [150, 50, 150],
-      tag: tag || 'erp-fini-alert',
+      tag: tag || 'gummystock-alert',
       renotify: true,
       data: data || { url: '/' },
       actions: [
@@ -146,6 +146,6 @@ self.addEventListener('message', (event) => {
       ]
     };
 
-    self.registration.showNotification(title || 'ERP Fini', options);
+    self.registration.showNotification(title || 'GummyStock', options);
   }
 });

@@ -78,7 +78,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = (props) => {
       case 'caixa':
         return 'Operador de Caixa / Vendas';
       default:
-        return 'Usuário Fini';
+        return 'Usuário GummyStock';
     }
   };
 
@@ -104,7 +104,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = (props) => {
             <Lock className="w-7 h-7" />
           </div>
 
-          <h2 className="text-xl font-black tracking-tight">Fini Nova Friburgo</h2>
+          <h2 className="text-xl font-black tracking-tight">GummyStock</h2>
           <p className="text-xs text-rose-300 font-medium mt-0.5">
             {isSwitchMode ? 'Troca de Usuário - Controle de Acesso' : 'Autenticação por PIN de Segurança'}
           </p>

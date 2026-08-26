@@ -61,7 +61,7 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
         body: payload.body,
         icon: payload.icon || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🍬</text></svg>',
         vibrate: [150, 50, 150],
-        tag: payload.tag || 'erp-fini-alert',
+        tag: payload.tag || 'gummystock-alert',
         renotify: true,
         data: payload.data || { url: '/' },
         actions: [
