@@ -6,10 +6,19 @@ import { auth } from '../lib/firebase';
  */
 export async function getAuthToken(): Promise<string | null> {
   try {
-    if (auth && auth.currentUser) {
-      const token = await auth.currentUser.getIdToken();
-      if (token && typeof token === 'string' && token.split('.').length === 3) {
-        return token;
+    if (auth) {
+      if (typeof (auth as any).authStateReady === 'function') {
+        try {
+          await (auth as any).authStateReady();
+        } catch (e) {
+          // Prossegue se authStateReady não for suportado ou falhar
+        }
+      }
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken();
+        if (token && typeof token === 'string' && token.split('.').length === 3) {
+          return token;
+        }
       }
     }
   } catch (err) {

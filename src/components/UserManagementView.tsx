@@ -27,6 +27,7 @@ import { getRolePermissions } from '../utils/permissionUtils';
 import { UserAvatar } from './UserAvatar';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import { updateUserRoleViaApi, createUserWithPasswordViaApi, setUserPasswordViaApi } from '../utils/apiAuth';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 
 export const UserManagementView: React.FC = () => {
   const { users, currentUser, updateUser, addUser, deleteUser, checkPermission, isLoadingUsers } = useStock();
@@ -213,7 +214,7 @@ export const UserManagementView: React.FC = () => {
       showNotification(`Dados e cargo do usuário "${updatedUser.name}" salvos com sucesso no servidor!`);
       setIsEditing(false);
     } catch (error: any) {
-      alert(`Falha ao alterar cargo no servidor: ${error.message || 'Apenas super_admin tem autorização para alterar cargos de usuários.'}`);
+      alert(getFriendlyErrorMessage(error, 'Falha ao alterar cargo de usuário no servidor.'));
     }
   };
 
@@ -290,7 +291,7 @@ export const UserManagementView: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Erro ao cadastrar usuário:', err);
-      setModalError(err.message || 'Erro ao criar usuário no servidor.');
+      setModalError(getFriendlyErrorMessage(err, 'Erro ao criar usuário no servidor.'));
     } finally {
       setIsCreatingUser(false);
     }
@@ -314,7 +315,7 @@ export const UserManagementView: React.FC = () => {
         }
       } catch (err: any) {
         console.error('Erro ao excluir usuário:', err);
-        alert(err.message || 'Erro ao excluir usuário no banco de dados.');
+        alert(getFriendlyErrorMessage(err, 'Erro ao excluir usuário no banco de dados.'));
       }
     }
   };

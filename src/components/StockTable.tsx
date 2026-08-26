@@ -30,6 +30,7 @@ import {
   calculateCurvaABC,
 } from '../utils/inventoryUtils';
 import { exportToExcel, exportToCSV } from '../utils/exportUtils';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { ExportButton } from './ExportButton';
 
 interface StockTableProps {
@@ -706,7 +707,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                                           await deleteProduct(product.id);
                                           alert(`Produto "${product.name}" excluído com sucesso do banco de dados!`);
                                         } catch (err: any) {
-                                          alert(`Falha ao excluir produto no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+                                          alert(getFriendlyErrorMessage(err, 'Falha ao excluir produto no servidor.'));
                                         }
                                       }
                                     }}
@@ -903,7 +904,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                                     await deleteProduct(product.id);
                                     alert(`Produto "${product.name}" excluído com sucesso!`);
                                   } catch (err: any) {
-                                    alert(`Falha ao excluir produto no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+                                    alert(getFriendlyErrorMessage(err, 'Falha ao excluir produto no servidor.'));
                                   }
                                 }
                               }}

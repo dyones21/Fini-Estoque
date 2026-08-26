@@ -329,23 +329,38 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return { success: false, redirected: false };
   };
 
-  // Listener para Firebase Auth
+  // Listener para Firebase Auth com suporte à persistência de sessão local
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    let isMounted = true;
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!isMounted) return;
+
       if (firebaseUser) {
-        handleUserAuthenticated({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          displayName: firebaseUser.displayName,
-        });
+        try {
+          await handleUserAuthenticated({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: firebaseUser.displayName,
+          });
+        } catch (err) {
+          console.warn('Erro ao processar usuário autenticado:', err);
+        } finally {
+          if (isMounted) {
+            setIsAuthChecking(false);
+          }
+        }
       } else {
-        setIsAuthenticated(false);
-        setIsAuthModalOpen(true);
-        setIsAuthChecking(false);
+        if (isMounted) {
+          setIsAuthenticated(false);
+          setIsAuthModalOpen(true);
+          setIsAuthChecking(false);
+        }
       }
     });
 
     return () => {
+      isMounted = false;
       unsubscribe();
     };
   }, []);
@@ -645,10 +660,6 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setIsLoadingCompany(false);
     }
   };
-
-  useEffect(() => {
-    fetchServerData();
-  }, []);
 
   const updateCompanyInfo = async (info: Partial<CompanyInfo>): Promise<CompanyInfo> => {
     const res = await authFetch('/api/company', {

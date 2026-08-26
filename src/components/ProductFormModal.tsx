@@ -3,6 +3,7 @@ import { X, Package, Save, FolderPlus, Check, Plus, AlertCircle, Loader2 } from 
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory } from '../types';
 import { parseNumber } from '../utils/inventoryUtils';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 
 interface ProductFormModalProps {
   isOpen: boolean;
@@ -156,9 +157,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Falha ao salvar produto:', err);
-      const msg = err?.message || 'Erro inesperado ao salvar produto no banco de dados.';
+      const msg = getFriendlyErrorMessage(err, 'Não foi possível salvar o produto no banco de dados.');
       setFormError(msg);
-      alert(`Falha ao salvar produto:\n\n${msg}`);
+      alert(msg);
     } finally {
       setIsSubmitting(false);
     }

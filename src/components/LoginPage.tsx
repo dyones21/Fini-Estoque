@@ -20,6 +20,7 @@ import {
   sendPasswordReset,
   isFirebaseConfigured,
 } from '../lib/firebase';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { UserAvatar } from './UserAvatar';
 
 interface LoginPageProps {
@@ -140,7 +141,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       } else if (code === 'auth/network-request-failed' || errMsg.includes('network')) {
         msg = 'Falha de conexão com os servidores de autenticação. Verifique sua internet.';
       } else if (err?.message) {
-        msg = err.message;
+        msg = getFriendlyErrorMessage(err, 'Não foi possível autenticar. Verifique seus dados e tente novamente.');
       }
 
       triggerErrorShake(msg);
@@ -182,9 +183,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       } else if (code === 'auth/cancelled-popup-request') {
         msg = 'Solicitação de login cancelada.';
       } else if (code === 'auth/invalid-api-key' || err?.message?.includes('api-key')) {
-        msg = 'Chave do Firebase inválida. Verifique VITE_FIREBASE_API_KEY no painel de Secrets.';
+        msg = 'Chave do Firebase inválida. Verifique a configuração de autenticação.';
       } else if (err?.message) {
-        msg = err.message;
+        msg = getFriendlyErrorMessage(err, 'Falha ao autenticar com a Conta Google. Tente novamente.');
       }
 
       triggerErrorShake(msg);

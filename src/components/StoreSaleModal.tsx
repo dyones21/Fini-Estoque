@@ -3,6 +3,7 @@ import { X, ShoppingBag, Check, Plus, Minus, Tag, Store } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product } from '../types';
 import { formatCurrency, parseNumber } from '../utils/inventoryUtils';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { ProductSearchScanner } from './ProductSearchScanner';
 
 interface StoreSaleModalProps {
@@ -97,7 +98,8 @@ export const StoreSaleModal: React.FC<StoreSaleModalProps> = ({
         onClose();
       }, 1400);
     } catch (err: any) {
-      alert(`Falha ao registrar baixa para o baleiro no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+      const friendlyMsg = getFriendlyErrorMessage(err, 'Não foi possível registrar a baixa para o baleiro no servidor.');
+      alert(friendlyMsg);
     }
   };
 

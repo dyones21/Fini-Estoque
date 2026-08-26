@@ -4,6 +4,7 @@ import { useStock } from '../context/StockContext';
 import { Product, StockMovement } from '../types';
 import { ProductSearchScanner } from './ProductSearchScanner';
 import { parseNumber } from '../utils/inventoryUtils';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 
 interface MovementModalProps {
   isOpen: boolean;
@@ -76,7 +77,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
       alert(`Movimentação registrada com sucesso para "${currentProduct.name}"!`);
       onClose();
     } catch (err: any) {
-      alert(`Falha ao registrar movimentação no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+      alert(getFriendlyErrorMessage(err, 'Falha ao registrar movimentação no servidor.'));
     }
   };
 

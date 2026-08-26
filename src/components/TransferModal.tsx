@@ -3,6 +3,7 @@ import { X, ArrowRightLeft, Warehouse, Store, CheckCircle2, AlertCircle } from '
 import { useStock } from '../context/StockContext';
 import { Product } from '../types';
 import { ProductSearchScanner } from './ProductSearchScanner';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 
 interface TransferModalProps {
   isOpen: boolean;
@@ -102,7 +103,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage('Ocorreu um erro ao processar a transferência.');
+      setErrorMessage(getFriendlyErrorMessage(err, 'Ocorreu um erro ao processar a transferência.'));
     } finally {
       setIsSubmitting(false);
     }

@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getAuth,
+  setPersistence,
+  browserLocalPersistence,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
@@ -65,6 +67,10 @@ if (isFirebaseConfigured) {
   try {
     appInstance = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     authInstance = getAuth(appInstance);
+    // Configura explicitamente a persistência da sessão no navegador
+    setPersistence(authInstance, browserLocalPersistence).catch((err) => {
+      console.warn('Aviso: Falha ao configurar browserLocalPersistence no Firebase Auth:', err);
+    });
     googleProviderInstance = new GoogleAuthProvider();
     googleProviderInstance.setCustomParameters({ prompt: 'select_account' });
   } catch (err) {

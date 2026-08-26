@@ -22,6 +22,7 @@ import {
 import { useStock } from '../context/StockContext';
 import { NFItem, Product, ProductCategory } from '../types';
 import { formatCurrency, parseNumber } from '../utils/inventoryUtils';
+import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { authFetch } from '../utils/apiAuth';
 import { ParsedNFData, ParsedNFItem } from '../utils/nfeXmlParser';
 
@@ -421,7 +422,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         onClose();
       }, 2000);
     } catch (err: any) {
-      alert(`Falha ao salvar Nota Fiscal no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+      alert(getFriendlyErrorMessage(err, 'Falha ao salvar Nota Fiscal no servidor.'));
     }
   };
 
@@ -492,7 +493,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
       );
       onClose();
     } catch (err: any) {
-      alert(`Falha ao salvar Nota Fiscal no servidor:\n\n${err?.message || 'Erro inesperado'}`);
+      alert(getFriendlyErrorMessage(err, 'Falha ao salvar Nota Fiscal no servidor.'));
     }
   };
 
