@@ -10,7 +10,10 @@ import {
   insertMovement,
   processStockTransfer,
   getAllNFEntries,
+  getNFEntryByAccessKey,
+  processNFEntry,
   insertNFEntry,
+  deleteNFEntryById,
   getAllSales,
   insertSale,
   wipeAllStockData,
@@ -19,6 +22,7 @@ import {
   getCompanyCnpj,
   getAllCategories,
   insertCategory,
+  ensureDbSchema,
 } from './src/db/dbService.ts';
 import {
   getOrCreateUser,
@@ -34,6 +38,9 @@ import { requirePermission } from './src/middleware/requirePermission.ts';
 import { parseNFeXml } from './src/utils/nfeXmlParser.ts';
 
 async function startServer() {
+  // Garante a migração de esquema/colunas em runtime
+  await ensureDbSchema().catch((e) => console.warn('Database auto-migrate notice:', e.message));
+
   const app = express();
   const PORT = 3000;
 
@@ -451,6 +458,17 @@ async function startServer() {
       }
 
       const parsedData = parseNFeXml(xml, officialCompanyCnpj);
+
+      // Validação de Chave de Acesso Duplicada
+      if (parsedData.accessKey && parsedData.accessKey.trim()) {
+        const existing = await getNFEntryByAccessKey(parsedData.accessKey.trim());
+        if (existing) {
+          return res.status(400).json({
+            error: `Esta nota fiscal já foi lançada anteriormente (NF nº ${existing.numberNF}, em ${existing.issueDate || existing.receiveDate}).`,
+          });
+        }
+      }
+
       res.json({ success: true, data: parsedData });
     } catch (error: any) {
       console.warn('API Warning /api/nfe/import-xml:', error.message);
@@ -462,11 +480,35 @@ async function startServer() {
   app.post('/api/nf-entries', requireAuth, requirePermission('canAddNFEntries'), async (req, res) => {
     try {
       const nfData = req.body;
-      const saved = await insertNFEntry(nfData);
+
+      // Validação de Chave de Acesso Duplicada
+      if (nfData.accessKey && String(nfData.accessKey).trim()) {
+        const cleanKey = String(nfData.accessKey).trim();
+        const existing = await getNFEntryByAccessKey(cleanKey);
+        if (existing && existing.id !== nfData.id) {
+          return res.status(400).json({
+            error: `Esta nota fiscal já foi lançada anteriormente (NF nº ${existing.numberNF}, em ${existing.issueDate || existing.receiveDate}).`,
+          });
+        }
+      }
+
+      const saved = await processNFEntry(nfData);
       res.json(saved);
     } catch (error: any) {
       console.error('API Error POST /api/nf-entries:', error);
-      res.status(500).json({ error: error.message || 'Erro ao registrar NF no Supabase' });
+      res.status(500).json({ error: error.message || 'Erro ao registrar e processar NF no PostgreSQL' });
+    }
+  });
+
+  // Exclusão de Nota Fiscal com Reversão de Estoque: Exige canDeleteNFEntries
+  app.delete('/api/nf-entries/:id', requireAuth, requirePermission('canDeleteNFEntries'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const result = await deleteNFEntryById(id);
+      res.json(result);
+    } catch (error: any) {
+      console.error('API Error DELETE /api/nf-entries/:id:', error);
+      res.status(400).json({ error: error.message || 'Erro ao excluir Nota Fiscal' });
     }
   });
 

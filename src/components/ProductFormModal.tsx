@@ -5,6 +5,14 @@ import { Product, ProductCategory } from '../types';
 import { parseNumber } from '../utils/inventoryUtils';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
 
+const STANDARD_UNITS = [
+  'Pacote 500g',
+  'Pacote 100g',
+  'Display 12un',
+  'Caixa 1kg',
+  'Unidade',
+] as const;
+
 interface ProductFormModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -22,7 +30,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [ean, setEan] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState<ProductCategory>('Balas de Gelatina');
-  const [unit, setUnit] = useState<Product['unit']>('Pacote 500g');
+  const [unitOption, setUnitOption] = useState<string>('Pacote 500g');
+  const [customUnit, setCustomUnit] = useState<string>('');
   const [stockDeposito, setStockDeposito] = useState<string | number>(0);
   const [stockLoja, setStockLoja] = useState<string | number>(0);
   const [minStockDeposito, setMinStockDeposito] = useState<string | number>(15);
@@ -57,7 +66,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setEan(editingProduct.ean);
       setName(editingProduct.name);
       setCategory(editingProduct.category);
-      setUnit(editingProduct.unit);
+      
+      const rawUnit = editingProduct.unit ? String(editingProduct.unit).trim() : '';
+      const isStandard = (STANDARD_UNITS as readonly string[]).includes(rawUnit);
+      if (isStandard) {
+        setUnitOption(rawUnit);
+        setCustomUnit('');
+      } else {
+        setUnitOption('custom');
+        setCustomUnit(rawUnit || '');
+      }
+
       setStockDeposito(editingProduct.stockDeposito);
       setStockLoja(editingProduct.stockLoja);
       setMinStockDeposito(editingProduct.minStockDeposito);
@@ -71,7 +90,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setEan(`789859145${Math.floor(Math.random() * 8000 + 1000)}`);
       setName('');
       setCategory('Balas de Gelatina');
-      setUnit('Pacote 500g');
+      setUnitOption('Pacote 500g');
+      setCustomUnit('');
       setStockDeposito(0);
       setStockLoja(0);
       setMinStockDeposito(15);
@@ -116,6 +136,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       return;
     }
 
+    const finalUnit = unitOption === 'custom' ? customUnit.trim() : unitOption.trim();
+    if (!finalUnit) {
+      setFormError('Informe a Apresentação do produto.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -125,7 +151,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           ean,
           name,
           category,
-          unit,
+          unit: finalUnit,
           stockDeposito: parseNumber(stockDeposito),
           stockLoja: parseNumber(stockLoja),
           minStockDeposito: parseNumber(minStockDeposito),
@@ -142,7 +168,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           ean,
           name,
           category,
-          unit,
+          unit: finalUnit,
           stockDeposito: parseNumber(stockDeposito),
           stockLoja: parseNumber(stockLoja),
           minStockDeposito: parseNumber(minStockDeposito),
@@ -311,18 +337,44 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Apresentação</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Apresentação *
+              </label>
               <select
-                value={unit}
-                onChange={(e) => setUnit(e.target.value as any)}
-                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white"
+                value={unitOption}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setUnitOption(val);
+                  if (val !== 'custom') {
+                    setCustomUnit('');
+                  }
+                }}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:ring-2 focus:ring-rose-500/20"
               >
-                <option value="Pacote 500g">Pacote 500g</option>
-                <option value="Pacote 100g">Pacote 100g</option>
-                <option value="Display 12un">Display 12un</option>
-                <option value="Caixa 1kg">Caixa 1kg</option>
-                <option value="Unidade">Unidade</option>
+                {STANDARD_UNITS.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+                <option value="custom">Outro (digitar)...</option>
               </select>
+
+              {unitOption === 'custom' && (
+                <div className="mt-1.5 animate-in fade-in duration-150">
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="Ex: Pacote 200g, Saco 750g..."
+                    value={customUnit}
+                    onChange={(e) => setCustomUnit(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-rose-300 bg-rose-50/30 text-rose-950 font-bold focus:ring-2 focus:ring-rose-500/20 placeholder:font-normal placeholder:text-slate-400"
+                  />
+                  <span className="text-[10px] text-slate-500 block mt-0.5 font-normal">
+                    Digite a apresentação ou gramatura exata
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

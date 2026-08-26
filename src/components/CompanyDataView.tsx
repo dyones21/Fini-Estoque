@@ -9,6 +9,8 @@ import {
   MapPin,
   FileText,
   Loader2,
+  TrendingUp,
+  Percent,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 
@@ -96,6 +98,7 @@ export const CompanyDataView: React.FC = () => {
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('RJ');
+  const [defaultMarkupPercent, setDefaultMarkupPercent] = useState<number | string>(85);
 
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -110,6 +113,11 @@ export const CompanyDataView: React.FC = () => {
       setAddress(companyInfo.address || '');
       setCity(companyInfo.city || '');
       setState(companyInfo.state || 'RJ');
+      setDefaultMarkupPercent(
+        companyInfo.defaultMarkupPercent !== undefined && !isNaN(companyInfo.defaultMarkupPercent)
+          ? companyInfo.defaultMarkupPercent
+          : 85
+      );
     }
   }, [companyInfo]);
 
@@ -148,6 +156,12 @@ export const CompanyDataView: React.FC = () => {
       return;
     }
 
+    const markupNum = parseFloat(String(defaultMarkupPercent));
+    if (isNaN(markupNum) || markupNum < 0) {
+      setErrorMsg('A Margem de Lucro Padrão deve ser um valor numérico positivo ou zero.');
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -159,6 +173,7 @@ export const CompanyDataView: React.FC = () => {
         address: address.trim(),
         city: city.trim(),
         state: state.trim().toUpperCase(),
+        defaultMarkupPercent: markupNum,
         isConfigured: true,
       });
 
@@ -352,6 +367,45 @@ export const CompanyDataView: React.FC = () => {
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          {/* Precificação & Margem de Lucro Padrão */}
+          <div className="pt-6 border-t border-slate-100 space-y-4">
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                Precificação & Margem de Lucro Padrão
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Configure a margem de lucro sugerida para novos produtos importados via Nota Fiscal (XML).
+              </p>
+            </div>
+
+            <div className="max-w-md">
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Margem de Lucro Padrão (%) <span className="text-rose-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  max="10000"
+                  value={defaultMarkupPercent}
+                  onChange={(e) => setDefaultMarkupPercent(e.target.value)}
+                  placeholder="85"
+                  required
+                  className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-50/50"
+                />
+                <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400 font-bold text-xs">
+                  %
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+                Utilizada no cálculo do <strong>Preço de Venda Sugerido</strong> para produtos novos na importação de NF-e: 
+                <span className="font-mono text-emerald-700 ml-1">Preço Custo × (1 + {defaultMarkupPercent || 85}%)</span>.
+              </p>
             </div>
           </div>
         </div>

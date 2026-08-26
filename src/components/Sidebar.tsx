@@ -159,225 +159,223 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <aside
         className={`hidden lg:flex ${
           isCollapsed ? 'lg:w-20' : 'lg:w-64'
-        } bg-slate-900 text-slate-300 shrink-0 border-r border-slate-800 flex-col justify-between transition-all duration-300 rounded-3xl overflow-hidden shadow-xl self-start sticky top-20 max-h-[calc(100vh-100px)]`}
+        } bg-slate-900 text-slate-300 shrink-0 border-r border-slate-800 flex-col transition-all duration-300 rounded-3xl overflow-hidden shadow-xl self-start sticky top-20 h-[calc(100vh-6rem)] max-h-[calc(100vh-6rem)]`}
       >
-        <div className="flex flex-col justify-between h-full">
-          <div className="p-3 sm:p-4 space-y-5 overflow-y-auto max-h-[calc(100vh-100px)]">
-            
-            {/* Header / Toggle Collapse */}
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              {!isCollapsed && (
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
-                  Painel de Navegação
-                </span>
-              )}
-              <button
-                onClick={toggleCollapse}
-                title={isCollapsed ? 'Expandir Menu Lateral' : 'Recolher / Minimizar Menu Lateral'}
-                className="flex items-center gap-1.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all border border-slate-700 text-xs font-semibold ml-auto"
-              >
-                {isCollapsed ? (
-                  <PanelLeftOpen className="w-4 h-4 text-rose-400" />
-                ) : (
-                  <>
-                    <PanelLeftClose className="w-4 h-4 text-rose-400" />
-                    <span className="text-[11px]">Minimizar</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Quick Actions */}
-            {(checkPermission('canRegisterMovements') || checkPermission('canTransferStock')) && (
-              <div className="space-y-2">
-                {!isCollapsed && (
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 text-left">
-                    Operações Rápidas
-                  </p>
-                )}
-
-                {onOpenSaleModal && checkPermission('canRegisterMovements') && (
-                  <button
-                    onClick={onOpenSaleModal}
-                    title="Baixa para Baleiro / Pacote Aberto"
-                    className={`w-full flex items-center justify-start gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold ${
-                      isCollapsed ? 'p-3 justify-center' : 'py-2.5 px-3'
-                    } rounded-xl text-xs shadow-md shadow-emerald-950/40 transition-all hover:scale-[1.01] active:scale-[0.99] text-left`}
-                  >
-                    <ShoppingBag className="w-4 h-4 shrink-0" />
-                    {!isCollapsed && <span className="text-left truncate">Baixa para Baleiro</span>}
-                  </button>
-                )}
-
-                {checkPermission('canTransferStock') && (
-                  <button
-                    onClick={onOpenTransferModal}
-                    title="Transferir do Depósito para a Loja"
-                    className={`w-full flex items-center justify-start gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold ${
-                      isCollapsed ? 'p-2.5 justify-center' : 'py-2 px-3'
-                    } rounded-xl text-xs transition-colors text-left`}
-                  >
-                    <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    {!isCollapsed && <span className="text-left truncate">Transferir p/ Loja</span>}
-                  </button>
-                )}
-              </div>
+        {/* Header / Toggle Collapse (Fixo no topo) */}
+        <div className="p-3 sm:p-4 pb-2.5 border-b border-slate-800 flex items-center justify-between shrink-0 bg-slate-900">
+          {!isCollapsed && (
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
+              Painel de Navegação
+            </span>
+          )}
+          <button
+            onClick={toggleCollapse}
+            title={isCollapsed ? 'Expandir Menu Lateral' : 'Recolher / Minimizar Menu Lateral'}
+            className="flex items-center gap-1.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all border border-slate-700 text-xs font-semibold ml-auto"
+          >
+            {isCollapsed ? (
+              <PanelLeftOpen className="w-4 h-4 text-rose-400" />
+            ) : (
+              <>
+                <PanelLeftClose className="w-4 h-4 text-rose-400" />
+                <span className="text-[11px]">Minimizar</span>
+              </>
             )}
+          </button>
+        </div>
 
-            {/* Navigation List */}
-            <div className="space-y-1">
+        {/* Área de Navegação Roolável Flexível */}
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4 custom-scrollbar">
+          {/* Quick Actions */}
+          {(checkPermission('canRegisterMovements') || checkPermission('canTransferStock')) && (
+            <div className="space-y-2">
               {!isCollapsed && (
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-2 text-left">
-                  Navegação Principal
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 text-left">
+                  Operações Rápidas
                 </p>
               )}
 
-              {mainNavItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeTab === item.id;
-
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => handleTabClick(item.id as ActiveTab)}
-                    title={isCollapsed ? item.label : undefined}
-                    className={`w-full flex items-center ${
-                      isCollapsed ? 'justify-center p-3' : 'justify-between px-3 py-2.5'
-                    } rounded-xl text-xs font-semibold transition-all ${
-                      isActive
-                        ? 'bg-rose-600/20 text-rose-400 border border-rose-500/30 font-bold'
-                        : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 text-left">
-                      <Icon
-                        className={`w-4 h-4 shrink-0 ${
-                          isActive ? 'text-rose-400' : 'text-slate-400'
-                        }`}
-                      />
-                      {!isCollapsed && <span className="text-left truncate">{item.label}</span>}
-                    </div>
-
-                    {!isCollapsed && item.badge && (
-                      <span
-                        className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase shrink-0 ${
-                          isActive
-                            ? 'bg-rose-500 text-white'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-
-              {/* Configurações Accordion Submenu at the bottom */}
-              <div className="pt-2 border-t border-slate-800/80 mt-2 space-y-1">
+              {onOpenSaleModal && checkPermission('canRegisterMovements') && (
                 <button
-                  onClick={() => {
-                    if (isCollapsed) toggleCollapse();
-                    setIsConfigOpen((prev) => !prev);
-                  }}
-                  title={isCollapsed ? 'Configurações' : undefined}
+                  onClick={onOpenSaleModal}
+                  title="Baixa para Baleiro / Pacote Aberto"
+                  className={`w-full flex items-center justify-start gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold ${
+                    isCollapsed ? 'p-3 justify-center' : 'py-2.5 px-3'
+                  } rounded-xl text-xs shadow-md shadow-emerald-950/40 transition-all hover:scale-[1.01] active:scale-[0.99] text-left`}
+                >
+                  <ShoppingBag className="w-4 h-4 shrink-0" />
+                  {!isCollapsed && <span className="text-left truncate">Baixa para Baleiro</span>}
+                </button>
+              )}
+
+              {checkPermission('canTransferStock') && (
+                <button
+                  onClick={onOpenTransferModal}
+                  title="Transferir do Depósito para a Loja"
+                  className={`w-full flex items-center justify-start gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold ${
+                    isCollapsed ? 'p-2.5 justify-center' : 'py-2 px-3'
+                  } rounded-xl text-xs transition-colors text-left`}
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  {!isCollapsed && <span className="text-left truncate">Transferir p/ Loja</span>}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Navigation List */}
+          <div className="space-y-1">
+            {!isCollapsed && (
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-2 text-left">
+                Navegação Principal
+              </p>
+            )}
+
+            {mainNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleTabClick(item.id as ActiveTab)}
+                  title={isCollapsed ? item.label : undefined}
                   className={`w-full flex items-center ${
                     isCollapsed ? 'justify-center p-3' : 'justify-between px-3 py-2.5'
-                  } rounded-xl text-xs font-bold transition-all text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-800 border border-slate-800/60`}
+                  } rounded-xl text-xs font-semibold transition-all ${
+                    isActive
+                      ? 'bg-rose-600/20 text-rose-400 border border-rose-500/30 font-bold'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                  }`}
                 >
                   <div className="flex items-center gap-3 text-left">
-                    <Settings className="w-4 h-4 text-slate-400 shrink-0" />
-                    {!isCollapsed && <span className="text-left font-bold truncate">Configurações</span>}
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        isActive ? 'text-rose-400' : 'text-slate-400'
+                      }`}
+                    />
+                    {!isCollapsed && <span className="text-left truncate">{item.label}</span>}
                   </div>
-                  {!isCollapsed && (
-                    isConfigOpen ? (
-                      <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                    )
+
+                  {!isCollapsed && item.badge && (
+                    <span
+                      className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase shrink-0 ${
+                        isActive
+                          ? 'bg-rose-500 text-white'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
                   )}
                 </button>
+              );
+            })}
 
-                {/* Submenu Items */}
-                {(isConfigOpen || isCollapsed) && (
-                  <div className={`${isCollapsed ? 'space-y-1' : 'pl-3 border-l-2 border-rose-500/40 ml-4 space-y-1 my-1'}`}>
-                    {configNavItems.map((item) => {
-                      const Icon = item.icon;
-                      const isActive = activeTab === item.id;
-
-                      return (
-                        <button
-                          key={item.id}
-                          onClick={() => handleTabClick(item.id as ActiveTab)}
-                          title={isCollapsed ? item.label : undefined}
-                          className={`w-full flex items-center ${
-                            isCollapsed ? 'justify-center p-2.5' : 'justify-between px-3 py-2'
-                          } rounded-xl text-xs font-semibold transition-all ${
-                            isActive
-                              ? 'bg-rose-600/20 text-rose-300 border border-rose-500/30 font-bold'
-                              : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 text-left">
-                            <Icon
-                              className={`w-3.5 h-3.5 shrink-0 ${
-                                isActive ? 'text-rose-400' : 'text-slate-400'
-                              }`}
-                            />
-                            {!isCollapsed && <span className="text-left truncate">{item.label}</span>}
-                          </div>
-
-                          {!isCollapsed && item.badge && (
-                            <span
-                              className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase shrink-0 ${
-                                isActive
-                                  ? 'bg-rose-500 text-white'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}
-                            >
-                              {item.badge}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+            {/* Configurações Accordion Submenu at the bottom */}
+            <div className="pt-2 border-t border-slate-800/80 mt-2 space-y-1">
+              <button
+                onClick={() => {
+                  if (isCollapsed) toggleCollapse();
+                  setIsConfigOpen((prev) => !prev);
+                }}
+                title={isCollapsed ? 'Configurações' : undefined}
+                className={`w-full flex items-center ${
+                  isCollapsed ? 'justify-center p-3' : 'justify-between px-3 py-2.5'
+                } rounded-xl text-xs font-bold transition-all text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-800 border border-slate-800/60`}
+              >
+                <div className="flex items-center gap-3 text-left">
+                  <Settings className="w-4 h-4 text-slate-400 shrink-0" />
+                  {!isCollapsed && <span className="text-left font-bold truncate">Configurações</span>}
+                </div>
+                {!isCollapsed && (
+                  isConfigOpen ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                  )
                 )}
-              </div>
+              </button>
+
+              {/* Submenu Items */}
+              {(isConfigOpen || isCollapsed) && (
+                <div className={`${isCollapsed ? 'space-y-1' : 'pl-3 border-l-2 border-rose-500/40 ml-4 space-y-1 my-1'}`}>
+                  {configNavItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = activeTab === item.id;
+
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleTabClick(item.id as ActiveTab)}
+                        title={isCollapsed ? item.label : undefined}
+                        className={`w-full flex items-center ${
+                          isCollapsed ? 'justify-center p-2.5' : 'justify-between px-3 py-2'
+                        } rounded-xl text-xs font-semibold transition-all ${
+                          isActive
+                            ? 'bg-rose-600/20 text-rose-300 border border-rose-500/30 font-bold'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 text-left">
+                          <Icon
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isActive ? 'text-rose-400' : 'text-slate-400'
+                            }`}
+                          />
+                          {!isCollapsed && <span className="text-left truncate">{item.label}</span>}
+                        </div>
+
+                        {!isCollapsed && item.badge && (
+                          <span
+                            className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase shrink-0 ${
+                              isActive
+                                ? 'bg-rose-500 text-white'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
+        </div>
 
-          {/* Desktop Footer */}
-          <div className="p-3 border-t border-slate-800 text-[11px] text-slate-500 space-y-2 text-left">
-            <button
-              onClick={openSwitchUserModal}
-              title="Trocar Operador ou Bloquear com PIN"
-              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 font-bold border border-slate-700 transition-colors text-xs text-left"
-            >
-              <KeyRound className="w-4 h-4 text-rose-400 shrink-0" />
-              {!isCollapsed && <span>Trocar Operador (PIN)</span>}
-            </button>
+        {/* Desktop Footer (Fixo no rodapé) */}
+        <div className="p-3 border-t border-slate-800 text-[11px] text-slate-500 space-y-2 text-left shrink-0 bg-slate-900">
+          <button
+            onClick={openSwitchUserModal}
+            title="Trocar Operador ou Bloquear com PIN"
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 font-bold border border-slate-700 transition-colors text-xs text-left"
+          >
+            <KeyRound className="w-4 h-4 text-rose-400 shrink-0" />
+            {!isCollapsed && <span>Trocar Operador (PIN)</span>}
+          </button>
 
-            {!isCollapsed ? (
-              <>
-                <div className="flex items-center justify-between pt-1">
-                  <span className="font-semibold text-slate-400">GummyStock</span>
-                  <span className="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded text-emerald-400 border border-slate-700 font-bold">
-                    v1.4 PIN System
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-500 text-left truncate">
-                  Ativo: <strong className="text-slate-300">{currentUser.name}</strong>
-                </p>
-              </>
-            ) : (
-              <div className="flex justify-center" title={`GummyStock - Perfil: ${currentUser.name}`}>
-                <div className="w-8 h-8 rounded-lg bg-rose-950/60 text-rose-400 flex items-center justify-center font-bold text-xs border border-rose-800/50">
-                  {currentUser.name.charAt(0)}
-                </div>
+          {!isCollapsed ? (
+            <>
+              <div className="flex items-center justify-between pt-1">
+                <span className="font-semibold text-slate-400">GummyStock</span>
+                <span className="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded text-emerald-400 border border-slate-700 font-bold">
+                  v1.4 PIN System
+                </span>
               </div>
-            )}
-          </div>
+              <p className="text-[10px] text-slate-500 text-left truncate">
+                Ativo: <strong className="text-slate-300">{currentUser.name}</strong>
+              </p>
+            </>
+          ) : (
+            <div className="flex justify-center" title={`GummyStock - Perfil: ${currentUser.name}`}>
+              <div className="w-8 h-8 rounded-lg bg-rose-950/60 text-rose-400 flex items-center justify-center font-bold text-xs border border-rose-800/50">
+                {currentUser.name.charAt(0)}
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -417,7 +415,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* Drawer Scrollable Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
               
               {/* Quick Actions Card Block */}
               {(checkPermission('canRegisterMovements') || checkPermission('canTransferStock')) && (

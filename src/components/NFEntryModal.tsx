@@ -233,11 +233,21 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         notes: parsedData.notes,
       });
 
+      // Margem de lucro configurada pela empresa (padrão 85% se não definida)
+      const markupPercent =
+        companyInfo?.defaultMarkupPercent !== undefined &&
+        !isNaN(Number(companyInfo.defaultMarkupPercent)) &&
+        Number(companyInfo.defaultMarkupPercent) >= 0
+          ? Number(companyInfo.defaultMarkupPercent)
+          : 85;
+
       // Mapeia os itens do XML com verificação de vínculo a produtos existentes
       const mapped: ImportedNFItem[] = parsedData.items.map((raw: ParsedNFItem) => {
         const matched = findMatchingProduct(raw.description, raw.codeEAN);
         const standardUnit = mapUnitToStandard(raw.unit);
         const detectedCat = detectCategory(raw.description);
+        const suggestedSellPrice =
+          Math.round(raw.costPrice * (1 + markupPercent / 100) * 100) / 100;
 
         return {
           id: raw.id,
@@ -257,7 +267,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
             name: raw.description,
             category: detectedCat,
             unit: standardUnit,
-            sellPrice: Math.round(raw.costPrice * 1.85 * 100) / 100, // Margem sugerida padrão de 85%
+            sellPrice: suggestedSellPrice,
             minStockDeposito: 30,
             minStockLoja: 10,
           },
@@ -915,6 +925,9 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                                     }
                                     className="w-full text-xs p-2 rounded-lg border border-slate-200 bg-white"
                                   >
+                                    {!['Pacote 100g', 'Pacote 500g', 'Caixa 1kg', 'Display 12un', 'Unidade'].includes(item.newProductData.unit) && (
+                                      <option value={item.newProductData.unit}>{item.newProductData.unit}</option>
+                                    )}
                                     <option value="Pacote 100g">Pacote 100g</option>
                                     <option value="Pacote 500g">Pacote 500g</option>
                                     <option value="Caixa 1kg">Caixa 1kg</option>

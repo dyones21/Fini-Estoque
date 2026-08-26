@@ -14,6 +14,7 @@ export interface CompanyInfo {
   address?: string;    // Endereço
   city: string;        // Cidade
   state: string;       // Estado
+  defaultMarkupPercent?: number; // Margem de Lucro Padrão (%) para sugestão de preço na importação de NF-e (ex: 85)
   isConfigured?: boolean; // Se os dados reais foram cadastrados no banco
   active?: boolean;
   isMaster?: boolean;
@@ -28,6 +29,7 @@ export interface UserPermissions {
   canViewStock: boolean;
   canManageProducts: boolean; // Criar, editar, excluir produtos
   canAddNFEntries: boolean;   // Entrada por Nota Fiscal
+  canDeleteNFEntries?: boolean; // Excluir Nota Fiscal com reversão de estoque
   canTransferStock: boolean;  // Transferência Depósito -> Loja
   canRegisterMovements: boolean; // Vendas na Loja, Ajustes e Perdas
   canManageUsers: boolean;   // Gerenciar Usuários, Permissões e PINs (Admin)
@@ -55,7 +57,7 @@ export interface Product {
   codeEAN?: string;
   name: string;
   category: ProductCategory;
-  unit: 'Pacote 100g' | 'Pacote 500g' | 'Caixa 1kg' | 'Display 12un' | 'Unidade';
+  unit: 'Pacote 100g' | 'Pacote 500g' | 'Caixa 1kg' | 'Display 12un' | 'Unidade' | (string & {});
   stockDeposito: number;
   stockLoja: number;
   minStockDeposito: number;
@@ -121,6 +123,7 @@ export interface StockMovement {
   totalValue?: number;
   reason?: string;
   userName: string;
+  nfEntryId?: string;
 }
 
 export interface ABCAnalysisItem {

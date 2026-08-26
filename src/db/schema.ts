@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
   integer,
   pgTable,
@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   doublePrecision,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -24,6 +25,7 @@ export const companyInfo = pgTable('company_info', {
   address: text('address').default(''),
   city: text('city').notNull(),
   state: text('state').notNull(),
+  defaultMarkupPercent: doublePrecision('default_markup_percent').notNull().default(85),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
@@ -77,21 +79,30 @@ export const stockMovements = pgTable('stock_movements', {
   reason: text('reason').notNull(),
   createdBy: text('created_by').notNull(),
   timestamp: text('timestamp').notNull(),
+  nfEntryId: text('nf_entry_id'),
 });
 
 // NF Entries Table
-export const nfEntries = pgTable('nf_entries', {
-  id: text('id').primaryKey(),
-  numberNF: text('number_nf').notNull(),
-  accessKey: text('access_key').default(''),
-  supplier: text('supplier').notNull(),
-  cnpjSupplier: text('cnpj_supplier').notNull(),
-  issueDate: text('issue_date').notNull(),
-  totalValue: doublePrecision('total_value').notNull(),
-  notes: text('notes').default(''),
-  createdBy: text('created_by').notNull(),
-  createdAt: text('created_at').notNull(),
-});
+export const nfEntries = pgTable(
+  'nf_entries',
+  {
+    id: text('id').primaryKey(),
+    numberNF: text('number_nf').notNull(),
+    accessKey: text('access_key').default(''),
+    supplier: text('supplier').notNull(),
+    cnpjSupplier: text('cnpj_supplier').notNull(),
+    issueDate: text('issue_date').notNull(),
+    totalValue: doublePrecision('total_value').notNull(),
+    notes: text('notes').default(''),
+    createdBy: text('created_by').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('nf_entries_access_key_unique_idx')
+      .on(table.accessKey)
+      .where(sql`${table.accessKey} != '' AND ${table.accessKey} IS NOT NULL`),
+  ]
+);
 
 // NF Items Table
 export const nfItems = pgTable('nf_items', {
@@ -131,6 +142,10 @@ export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
   product: one(products, {
     fields: [stockMovements.productId],
     references: [products.id],
+  }),
+  nfEntry: one(nfEntries, {
+    fields: [stockMovements.nfEntryId],
+    references: [nfEntries.id],
   }),
 }));
 

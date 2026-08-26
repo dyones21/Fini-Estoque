@@ -1,0 +1,2 @@
+ALTER TABLE "stock_movements" ADD COLUMN "nf_entry_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "nf_entries_access_key_unique_idx" ON "nf_entries" USING btree ("access_key") WHERE "nf_entries"."access_key" != '' AND "nf_entries"."access_key" IS NOT NULL;

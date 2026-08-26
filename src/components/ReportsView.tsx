@@ -23,6 +23,10 @@ import {
   SlidersHorizontal,
   Layers,
   ChevronDown,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory, StockMovement, NFEntry, StockTransfer } from '../types';
@@ -38,10 +42,36 @@ export type ReportType =
   | 'curva_abc';
 
 export const ReportsView: React.FC = () => {
-  const { products, movements, nfEntries, transfers, currentUser } = useStock();
+  const { products, movements, nfEntries, transfers, currentUser, deleteNFEntry, checkPermission } = useStock();
+  const canDeleteNF = checkPermission ? checkPermission('canDeleteNFEntries') : false;
 
   // Selected Report Type
   const [reportType, setReportType] = useState<ReportType>('posicao_estoque');
+
+  // NF Deletion Modal State
+  const [nfToDelete, setNfToDelete] = useState<NFEntry | null>(null);
+  const [isDeletingNF, setIsDeletingNF] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+
+  const handleConfirmDeleteNF = async () => {
+    if (!nfToDelete) return;
+    setIsDeletingNF(true);
+    setDeleteError(null);
+    setDeleteSuccess(null);
+    try {
+      const res = await deleteNFEntry(nfToDelete.id);
+      setDeleteSuccess(res.message || 'Nota Fiscal excluída e estoque revertido com sucesso.');
+      setTimeout(() => {
+        setDeleteSuccess(null);
+        setNfToDelete(null);
+      }, 1200);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Falha ao excluir Nota Fiscal.');
+    } finally {
+      setIsDeletingNF(false);
+    }
+  };
 
   // Filters State
   const [locationFilter, setLocationFilter] = useState<'geral' | 'loja' | 'deposito'>('geral');
@@ -1167,12 +1197,13 @@ export const ReportsView: React.FC = () => {
                   <th className="py-3 px-3 text-center">Qtd Itens</th>
                   <th className="py-3 px-3 text-right">Valor Total NF</th>
                   <th className="py-3 px-3">Responsável</th>
+                  <th className="py-3 px-3 text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredNFs.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400 font-semibold">
+                    <td colSpan={8} className="py-8 text-center text-slate-400 font-semibold">
                       Nenhuma Nota Fiscal encontrada no período.
                     </td>
                   </tr>
@@ -1200,6 +1231,25 @@ export const ReportsView: React.FC = () => {
                       </td>
                       <td className="py-2.5 px-3 text-slate-700 font-medium">
                         {nf.createdBy}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        {canDeleteNF ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNfToDelete(nf);
+                              setDeleteError(null);
+                              setDeleteSuccess(null);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 hover:text-rose-800 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                            title="Excluir Nota Fiscal e reverter estoque"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Excluir</span>
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 font-medium">—</span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -1284,6 +1334,127 @@ export const ReportsView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* ================= MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE NF ================= */}
+      {nfToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
+            {/* Header */}
+            <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-700">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">Excluir Nota Fiscal</h3>
+                  <p className="text-xs text-rose-700 font-medium">Reversão de estoque no Depósito Central</p>
+                </div>
+              </div>
+              {!isDeletingNF && (
+                <button
+                  onClick={() => {
+                    setNfToDelete(null);
+                    setDeleteError(null);
+                    setDeleteSuccess(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 rounded-lg p-1.5 hover:bg-white/60 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-semibold">Número da NF:</span>
+                  <span className="font-extrabold text-rose-700 font-mono text-sm">{nfToDelete.numberNF}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-semibold">Fornecedor:</span>
+                  <span className="font-bold text-slate-900">{nfToDelete.supplier}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-semibold">Valor Total:</span>
+                  <span className="font-bold text-emerald-700">{formatCurrency(nfToDelete.totalValue)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-semibold">Total de Itens:</span>
+                  <span className="font-bold text-slate-800">
+                    {nfToDelete.items.length} produto(s) ({nfToDelete.items.reduce((s, i) => s + i.quantity, 0)} un)
+                  </span>
+                </div>
+              </div>
+
+              {/* Notice */}
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-amber-950">Atenção à reversão de estoque:</p>
+                  <p className="text-amber-800 leading-relaxed">
+                    Ao confirmar, a quantidade de cada produto desta nota será subtraída do estoque do <strong>Depósito Central</strong>.
+                    Se algum produto já foi vendido ou transferido e o saldo atual for insuficiente, a exclusão será bloqueada para impedir saldo negativo.
+                  </p>
+                </div>
+              </div>
+
+              {/* Error Message if any */}
+              {deleteError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-rose-950">Não foi possível excluir:</p>
+                    <p className="text-rose-800 mt-0.5 leading-relaxed">{deleteError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Success Message if any */}
+              {deleteSuccess && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <p className="font-bold text-emerald-900">{deleteSuccess}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={isDeletingNF}
+                onClick={() => {
+                  setNfToDelete(null);
+                  setDeleteError(null);
+                  setDeleteSuccess(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingNF || Boolean(deleteSuccess)}
+                onClick={handleConfirmDeleteNF}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:bg-rose-800 rounded-xl shadow-xs disabled:opacity-50 transition-colors"
+              >
+                {isDeletingNF ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Revertendo estoque...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirmar Exclusão</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

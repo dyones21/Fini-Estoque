@@ -85,6 +85,7 @@ interface StockContextType {
 
   // Inventory Operations
   addNFEntry: (nf: Omit<NFEntry, 'id' | 'receiveDate'>) => Promise<void>;
+  deleteNFEntry: (id: string) => Promise<{ success: boolean; message: string }>;
   transferStock: (productId: string, quantity: number, notes?: string) => Promise<{ success: boolean; message: string }>;
   registerMovement: (
     productId: string,
@@ -130,6 +131,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     address: '',
     city: '',
     state: '',
+    defaultMarkupPercent: 85,
     isConfigured: false,
     active: true,
     isMaster: true,
@@ -555,6 +557,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           address: dataComp.address || '',
           city: dataComp.city || '',
           state: dataComp.state || 'RJ',
+          defaultMarkupPercent:
+            dataComp.defaultMarkupPercent !== undefined && dataComp.defaultMarkupPercent !== null
+              ? Number(dataComp.defaultMarkupPercent)
+              : 85,
           isConfigured: Boolean(dataComp.isConfigured || (dataComp.name && dataComp.cnpj)),
           active: dataComp.active ?? true,
           isMaster: true,
@@ -906,6 +912,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       receiveDate: new Date().toISOString().slice(0, 10),
     };
 
+    // Salva estados anteriores para rollback em caso de falha
+    const prevNfEntries = [...allNfEntries];
+    const prevProducts = [...allProducts];
+    const prevMovements = [...allMovements];
+
+    // Atualização otimista imediata na interface
     setAllNfEntries((prev) => [newEntry, ...prev]);
 
     setAllProducts((prev) =>
@@ -915,7 +927,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           return {
             ...p,
             stockDeposito: p.stockDeposito + item.quantity,
-            costPrice: item.costPrice || p.costPrice,
+            costPrice: item.costPrice > 0 ? item.costPrice : p.costPrice,
             lastUpdated: new Date().toISOString(),
           };
         }
@@ -924,16 +936,17 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     );
 
     const newMovements: StockMovement[] = newEntry.items.map((item) => ({
-      id: `mov-nf-${Date.now()}-${item.productId}`,
+      id: `mov-nf-${newEntry.id}-${item.productId}-${Date.now()}`,
       productId: item.productId,
       productName: item.productName,
       type: 'entrada_nf',
       quantity: item.quantity,
       location: 'deposito',
-      date: new Date().toISOString(),
+      date: newEntry.receiveDate || new Date().toISOString(),
       userName: currentUser.name,
       reason: `Entrada por NF ${newEntry.numberNF} (${newEntry.supplier})`,
       unitPrice: item.costPrice,
+      nfEntryId: newEntry.id,
     }));
 
     setAllMovements((prev) => [...newMovements, ...prev]);
@@ -946,6 +959,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
 
       if (!response.ok) {
+        // Rollback dos estados locais
+        setAllNfEntries(prevNfEntries);
+        setAllProducts(prevProducts);
+        setAllMovements(prevMovements);
+
         if (response.status === 403) {
           handle403PermissionDenied('Dar Entrada em Nota Fiscal');
           throw new Error('Você não tem permissão para lançar notas fiscais de entrada.');
@@ -954,6 +972,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao registrar NF no servidor.`);
       }
 
+      // Re-sincroniza com os dados oficiais salvos e confirmados no banco de dados
+      await fetchServerData();
+
       await notifyNewNFEntry(
         newEntry.numberNF,
         newEntry.supplier,
@@ -961,7 +982,43 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         newEntry.totalValue
       );
     } catch (error) {
+      // Garante rollback em caso de falha de rede ou exceção
+      setAllNfEntries(prevNfEntries);
+      setAllProducts(prevProducts);
+      setAllMovements(prevMovements);
       console.error('Falha ao sincronizar entrada de NF no servidor PostgreSQL:', error);
+      throw error;
+    }
+  };
+
+  const deleteNFEntry = async (id: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const response = await authFetch(`/api/nf-entries/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          handle403PermissionDenied('Excluir Nota Fiscal');
+          throw new Error('Você não tem permissão para excluir notas fiscais.');
+        }
+        const errData = await safeParseJson<{ error?: string }>(response);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao excluir Nota Fiscal.`);
+      }
+
+      const result = await safeParseJson<{ success: boolean; message: string }>(response);
+
+      setAllNfEntries((prev) => prev.filter((nf) => nf.id !== id));
+      setAllMovements((prev) => prev.filter((m) => m.nfEntryId !== id));
+
+      await fetchServerData();
+
+      return {
+        success: true,
+        message: result?.message || 'Nota Fiscal excluída e estoque revertido com sucesso.',
+      };
+    } catch (error) {
+      console.error('Erro ao excluir Nota Fiscal:', error);
       throw error;
     }
   };
@@ -1290,6 +1347,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         updateProduct,
         deleteProduct,
         addNFEntry,
+        deleteNFEntry,
         transferStock,
         registerMovement,
         markNotificationRead,

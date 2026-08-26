@@ -13,6 +13,32 @@ export const DEFAULT_CATEGORIES = [
   'Linha Importada & Especiais',
 ];
 
+let schemaCheckPromise: Promise<void> | null = null;
+
+/**
+ * Garante automaticamente a criação/migração de colunas e índices essenciais no PostgreSQL em runtime.
+ */
+export async function ensureDbSchema(): Promise<void> {
+  if (!isPostgresConfigured || !pool) return;
+  if (schemaCheckPromise) return schemaCheckPromise;
+
+  schemaCheckPromise = (async () => {
+    try {
+      await pool.query(`
+        ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS nf_entry_id TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS nf_entries_access_key_unique_idx 
+          ON nf_entries (access_key) 
+          WHERE access_key != '' AND access_key IS NOT NULL;
+        ALTER TABLE company_info ADD COLUMN IF NOT EXISTS default_markup_percent DOUBLE PRECISION DEFAULT 85;
+      `);
+    } catch (err: any) {
+      console.warn('Auto-schema check notice:', err.message);
+    }
+  })();
+
+  return schemaCheckPromise;
+}
+
 function checkDbConnection() {
   if (!isPostgresConfigured || !db) {
     throw new Error('Banco de dados PostgreSQL / Supabase não está configurado ou acessível.');
@@ -160,6 +186,7 @@ export async function getAllMovements(): Promise<StockMovement[]> {
       location: (r.destination === 'Loja Nova Friburgo' || r.destination === 'Loja' ? 'loja' : 'deposito') as any,
       reason: r.reason || undefined,
       userName: r.createdBy,
+      nfEntryId: r.nfEntryId || undefined,
     }));
   });
 }
@@ -289,6 +316,7 @@ export async function insertMovement(m: StockMovement): Promise<StockMovement> {
         reason: m.reason || 'Movimentação de estoque',
         createdBy: m.userName || 'Sistema',
         timestamp: m.date || new Date().toISOString(),
+        nfEntryId: m.nfEntryId || null,
       })
       .onConflictDoNothing();
   });
@@ -342,20 +370,57 @@ export async function getAllNFEntries(): Promise<NFEntry[]> {
 }
 
 /**
- * Insere ou atualiza nota fiscal e seus itens no PostgreSQL em transação.
- * Lança erro se o banco falhar.
+ * Busca uma nota fiscal pela chave de acesso (accessKey).
  */
-export async function insertNFEntry(nf: NFEntry): Promise<NFEntry> {
+export async function getNFEntryByAccessKey(accessKey: string): Promise<NFEntry | null> {
+  checkDbConnection();
+  const cleanKey = (accessKey || '').trim();
+  if (!cleanKey) return null;
+
+  return await withRetry(async () => {
+    const rows = await db
+      .select()
+      .from(nfEntries)
+      .where(eq(nfEntries.accessKey, cleanKey))
+      .limit(1);
+
+    if (!rows || rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      numberNF: r.numberNF,
+      accessKey: r.accessKey || undefined,
+      supplier: r.supplier,
+      cnpjSupplier: r.cnpjSupplier,
+      issueDate: r.issueDate,
+      receiveDate: r.createdAt,
+      totalValue: r.totalValue,
+      notes: r.notes || undefined,
+      createdBy: r.createdBy,
+      items: [],
+    };
+  });
+}
+
+/**
+ * Processa a entrada de Nota Fiscal e seus itens no PostgreSQL em transação atômica rigorosa.
+ * Persiste a NF em nf_entries, os itens em nf_items, atualiza o stockDeposito dos produtos e
+ * registra as movimentações em stock_movements com vínculo nfEntryId.
+ * Se qualquer etapa falhar, toda a transação é revertida.
+ */
+export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
   checkDbConnection();
 
-  await withRetry(async () => {
-    await db.transaction(async (tx: any) => {
+  return await withRetry(async () => {
+    return await db.transaction(async (tx: any) => {
+      const cleanAccessKey = (nf.accessKey || '').trim();
+
       await tx
         .insert(nfEntries)
         .values({
           id: nf.id,
           numberNF: nf.numberNF,
-          accessKey: nf.accessKey || '',
+          accessKey: cleanAccessKey,
           supplier: nf.supplier,
           cnpjSupplier: nf.cnpjSupplier,
           issueDate: nf.issueDate,
@@ -368,7 +433,7 @@ export async function insertNFEntry(nf: NFEntry): Promise<NFEntry> {
           target: nfEntries.id,
           set: {
             numberNF: nf.numberNF,
-            accessKey: nf.accessKey || '',
+            accessKey: cleanAccessKey,
             supplier: nf.supplier,
             cnpjSupplier: nf.cnpjSupplier,
             issueDate: nf.issueDate,
@@ -379,12 +444,14 @@ export async function insertNFEntry(nf: NFEntry): Promise<NFEntry> {
           },
         });
 
-      // Remove itens anteriores da NF para evitar duplicidade
+      // Remove itens e movimentações anteriores da NF para evitar duplicidade em updates
       await tx.delete(nfItems).where(eq(nfItems.nfId, nf.id));
+      await tx.delete(stockMovements).where(eq(stockMovements.nfEntryId, nf.id));
 
-      // Insere os novos itens da NF
+      // Insere os novos itens da NF, atualiza estoque do produto e cria movimentações
       if (nf.items && nf.items.length > 0) {
         for (const item of nf.items) {
+          // 1. Insere item da NF
           await tx.insert(nfItems).values({
             nfId: nf.id,
             productId: item.productId,
@@ -395,12 +462,141 @@ export async function insertNFEntry(nf: NFEntry): Promise<NFEntry> {
             batchNumber: item.batchNumber || 'LOTE-PADRAO',
             expirationDate: item.expirationDate || new Date().toISOString().slice(0, 10),
           });
+
+          // 2. Atualiza estoque no Depósito Central e preço de custo no cadastro do produto
+          const prodRows = await tx.select().from(products).where(eq(products.id, item.productId));
+          if (prodRows && prodRows.length > 0) {
+            const currentProd = prodRows[0];
+            await tx
+              .update(products)
+              .set({
+                stockDeposito: currentProd.stockDeposito + item.quantity,
+                costPrice: item.costPrice > 0 ? item.costPrice : currentProd.costPrice,
+                batchNumber: item.batchNumber || currentProd.batchNumber,
+                expirationDate: item.expirationDate || currentProd.expirationDate,
+                updatedAt: new Date(),
+              })
+              .where(eq(products.id, item.productId));
+          } else {
+            throw new Error(
+              `Produto "${item.productName}" (ID: ${item.productId}) não foi encontrado no banco de dados para atualização de estoque.`
+            );
+          }
+
+          // 3. Registra movimentação de entrada vinculada à NF (nfEntryId)
+          const movementId = `mov-nf-${nf.id}-${item.productId}-${Date.now()}`;
+          await tx.insert(stockMovements).values({
+            id: movementId,
+            productId: item.productId,
+            productName: item.productName,
+            type: 'entrada_nf',
+            origin: nf.supplier || 'Fornecedor NF',
+            destination: 'Depósito Central',
+            quantity: item.quantity,
+            batchNumber: item.batchNumber || 'LOTE-PADRAO',
+            reason: `Entrada por NF ${nf.numberNF} (${nf.supplier || 'Fornecedor'})`,
+            createdBy: nf.createdBy || 'Operador',
+            timestamp: nf.receiveDate || new Date().toISOString(),
+            nfEntryId: nf.id,
+          });
         }
       }
+
+      return nf;
     });
   });
+}
 
-  return nf;
+/**
+ * Alias de retrocompatibilidade para processNFEntry.
+ */
+export const insertNFEntry = processNFEntry;
+
+/**
+ * Exclui uma Nota Fiscal lançada e reverte o estoque adicionado no Depósito Central.
+ * Executado em transação atômica rigorosa. Se o saldo for insuficiente (estoque já movimentado/vendido),
+ * a exclusão é abortada para impedir qualquer estoque negativo.
+ */
+export async function deleteNFEntryById(id: string): Promise<{ success: boolean; message: string }> {
+  checkDbConnection();
+
+  return await withRetry(async () => {
+    return await db.transaction(async (tx: any) => {
+      // 1. Busca os dados da NF
+      const nfRows = await tx.select().from(nfEntries).where(eq(nfEntries.id, id));
+      if (!nfRows || nfRows.length === 0) {
+        throw new Error('Nota Fiscal não encontrada no banco de dados.');
+      }
+      const nf = nfRows[0];
+
+      // 2. Busca todas as movimentações de estoque vinculadas a essa NF (nfEntryId)
+      const linkedMovements = await tx
+        .select()
+        .from(stockMovements)
+        .where(eq(stockMovements.nfEntryId, id));
+
+      if (!linkedMovements || linkedMovements.length === 0) {
+        throw new Error(
+          'Esta nota fiscal é antiga e não possui movimentações vinculadas para reversão automática de estoque. A correção deve ser realizada manualmente através do ajuste de estoque.'
+        );
+      }
+
+      // 3. Agrupa a quantidade a subtrair por produto no Depósito Central
+      const qtyToSubtractByProduct: Record<string, { quantity: number; productName: string }> = {};
+      for (const mov of linkedMovements) {
+        if (!qtyToSubtractByProduct[mov.productId]) {
+          qtyToSubtractByProduct[mov.productId] = { quantity: 0, productName: mov.productName };
+        }
+        qtyToSubtractByProduct[mov.productId].quantity += mov.quantity;
+      }
+
+      // 4. Verifica se cada produto possui saldo suficiente no estoque do depósito para subtrair
+      for (const [productId, info] of Object.entries(qtyToSubtractByProduct)) {
+        const prodRows = await tx.select().from(products).where(eq(products.id, productId));
+        if (!prodRows || prodRows.length === 0) {
+          throw new Error(
+            `Produto "${info.productName}" não foi localizado no cadastro para reversão de estoque.`
+          );
+        }
+        const prod = prodRows[0];
+
+        if (prod.stockDeposito < info.quantity) {
+          throw new Error(
+            'Não é possível excluir: parte do estoque desta nota já foi movimentado (vendido ou transferido). Ajuste o estoque manualmente em vez de excluir.'
+          );
+        }
+      }
+
+      // 5. Aplica a reversão de estoque no depósito para todos os produtos
+      for (const [productId, info] of Object.entries(qtyToSubtractByProduct)) {
+        const prodRows = await tx.select().from(products).where(eq(products.id, productId));
+        const prod = prodRows[0];
+        const newStockDeposito = prod.stockDeposito - info.quantity;
+
+        await tx
+          .update(products)
+          .set({
+            stockDeposito: newStockDeposito,
+            updatedAt: new Date(),
+          })
+          .where(eq(products.id, productId));
+      }
+
+      // 6. Apaga movimentações vinculadas
+      await tx.delete(stockMovements).where(eq(stockMovements.nfEntryId, id));
+
+      // 7. Apaga itens da NF
+      await tx.delete(nfItems).where(eq(nfItems.nfId, id));
+
+      // 8. Apaga a própria NF
+      await tx.delete(nfEntries).where(eq(nfEntries.id, id));
+
+      return {
+        success: true,
+        message: `Nota Fiscal nº ${nf.numberNF} excluída e estoque do depósito revertido com sucesso.`,
+      };
+    });
+  });
 }
 
 /**
@@ -498,6 +694,7 @@ export async function getCompanyInfo(): Promise<CompanyInfo> {
         address: '',
         city: '',
         state: '',
+        defaultMarkupPercent: 85,
         isConfigured: false,
         active: true,
         isMaster: true,
@@ -505,6 +702,11 @@ export async function getCompanyInfo(): Promise<CompanyInfo> {
     }
 
     const r = rows[0];
+    const markup =
+      r.defaultMarkupPercent !== null && r.defaultMarkupPercent !== undefined
+        ? Number(r.defaultMarkupPercent)
+        : 85;
+
     return {
       id: r.id,
       name: r.name || '',
@@ -513,6 +715,7 @@ export async function getCompanyInfo(): Promise<CompanyInfo> {
       address: r.address || '',
       city: r.city || '',
       state: r.state || '',
+      defaultMarkupPercent: isNaN(markup) || markup < 0 ? 85 : markup,
       isConfigured: Boolean(r.name && r.cnpj),
       active: true,
       isMaster: true,
@@ -534,6 +737,13 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
   const address = info.address?.trim() || '';
   const city = info.city?.trim() || '';
   const state = info.state?.trim().toUpperCase() || '';
+  const rawMarkup = info.defaultMarkupPercent;
+  const defaultMarkupPercent =
+    typeof rawMarkup === 'number' && !isNaN(rawMarkup) && rawMarkup >= 0
+      ? rawMarkup
+      : rawMarkup !== undefined && !isNaN(Number(rawMarkup)) && Number(rawMarkup) >= 0
+      ? Number(rawMarkup)
+      : 85;
 
   return await withRetry(async () => {
     await db
@@ -546,6 +756,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
         address,
         city,
         state,
+        defaultMarkupPercent,
       })
       .onConflictDoUpdate({
         target: companyInfo.id,
@@ -556,6 +767,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
           address,
           city,
           state,
+          defaultMarkupPercent,
           updatedAt: new Date(),
         },
       });
@@ -568,6 +780,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
       address,
       city,
       state,
+      defaultMarkupPercent,
       isConfigured: true,
       active: true,
       isMaster: true,
