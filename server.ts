@@ -416,26 +416,9 @@ async function startServer() {
     }
   });
 
-  // Atualização dos Dados da Empresa
-  app.put('/api/company', requireAuth, async (req: AuthRequest, res) => {
+  // Atualização dos Dados da Empresa: Exige canManageBackup
+  app.put('/api/company', requireAuth, requirePermission('canManageBackup'), async (req: AuthRequest, res) => {
     try {
-      const user = req.user;
-      if (!user) {
-        return res.status(401).json({ error: 'Não autenticado' });
-      }
-
-      const p = user.permissions;
-      const hasPermission =
-        user.role === 'super_admin' ||
-        user.role === 'admin' ||
-        p?.canManageUsers ||
-        p?.canManageBackup ||
-        p?.canManageCompany;
-
-      if (!hasPermission) {
-        return res.status(403).json({ error: 'Acesso negado: você não possui permissão para editar os dados da empresa.' });
-      }
-
       const saved = await saveCompanyInfo(req.body);
       res.json(saved);
     } catch (error: any) {
@@ -559,8 +542,8 @@ async function startServer() {
     }
   });
 
-  // ZERAR TODO O SISTEMA: Exige requireAuth + requirePermission('canManageBackup') + Validação de PIN no servidor
-  app.delete('/api/system/wipe', requireAuth, requirePermission('canManageBackup'), async (req: AuthRequest, res) => {
+  // ZERAR TODO O SISTEMA: Exige requireAuth + requirePermission('canWipeSystem') (Exclusivo Super Admin/Admin) + Validação de PIN
+  app.delete('/api/system/wipe', requireAuth, requirePermission('canWipeSystem'), async (req: AuthRequest, res) => {
     try {
       const { pin } = req.body || {};
       const dbUser = (req as any).dbUser;
@@ -577,11 +560,11 @@ async function startServer() {
       if (userPin && inputPin === userPin) {
         isPinValid = true;
       } else {
-        // 2. Se o usuário logado não tiver PIN definido ou digitou outro PIN de gestão, verifica se coincide com o PIN cadastrado de outro super_admin / admin / gerente
+        // 2. Se o usuário logado não tiver PIN definido ou digitou outro PIN de gestão, verifica se coincide com o PIN cadastrado de outro super_admin / admin
         const allDbUsers = await getAllUsersFromDb();
         isPinValid = allDbUsers.some(
           (u) =>
-            (u.role === 'super_admin' || u.role === 'admin' || u.role?.toLowerCase().includes('gerente')) &&
+            (u.role === 'super_admin' || u.role === 'admin') &&
             u.pin &&
             u.pin.trim() !== '' &&
             u.pin.trim() === inputPin
@@ -590,7 +573,7 @@ async function startServer() {
 
       if (!isPinValid) {
         console.warn(`[Segurança] Tentativa de wipe do sistema com PIN incorreto pelo usuário UID=${req.user?.uid} (${req.user?.email})`);
-        return res.status(403).json({ error: 'PIN de administrador incorreto. Digite o PIN real cadastrado no seu perfil.' });
+        return res.status(403).json({ error: 'PIN de administrador incorreto. Digite o PIN real cadastrado no seu perfil de administrador.' });
       }
 
       const result = await wipeAllStockData();

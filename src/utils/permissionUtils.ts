@@ -20,6 +20,7 @@ export function getRolePermissions(role?: string | UserRole | null): UserPermiss
         canRegisterMovements: true,
         canManageUsers: true,
         canManageBackup: true,
+        canWipeSystem: true,
       };
 
     case 'gerente_loja':
@@ -35,6 +36,7 @@ export function getRolePermissions(role?: string | UserRole | null): UserPermiss
         canRegisterMovements: true,
         canManageUsers: false,
         canManageBackup: true,
+        canWipeSystem: false,
       };
 
     case 'operador_deposito':
@@ -51,6 +53,7 @@ export function getRolePermissions(role?: string | UserRole | null): UserPermiss
         canRegisterMovements: true,
         canManageUsers: false,
         canManageBackup: false,
+        canWipeSystem: false,
       };
 
     case 'caixa':
@@ -64,6 +67,7 @@ export function getRolePermissions(role?: string | UserRole | null): UserPermiss
         canRegisterMovements: true,
         canManageUsers: false,
         canManageBackup: false,
+        canWipeSystem: false,
       };
 
     case 'auditor':
@@ -77,6 +81,7 @@ export function getRolePermissions(role?: string | UserRole | null): UserPermiss
         canRegisterMovements: false,
         canManageUsers: false,
         canManageBackup: false,
+        canWipeSystem: false,
       };
 
     default:
@@ -90,6 +95,7 @@ export function getRolePermissions(role?: string | UserRole | null): UserPermiss
         canRegisterMovements: false,
         canManageUsers: false,
         canManageBackup: false,
+        canWipeSystem: false,
       };
   }
 }

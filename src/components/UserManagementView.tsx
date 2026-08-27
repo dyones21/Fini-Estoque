@@ -126,6 +126,7 @@ export const UserManagementView: React.FC = () => {
     canRegisterMovements: true,
     canManageUsers: false,
     canManageBackup: false,
+    canWipeSystem: false,
   });
 
   const handleSelectUser = (u: UserProfile) => {

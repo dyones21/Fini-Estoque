@@ -263,35 +263,37 @@ export const CloudBackupModal: React.FC = () => {
 
         </div>
 
-        {/* Reset / Wipe System Zone */}
-        <div className="pt-5 border-t border-rose-100 bg-rose-50/50 p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="p-2.5 rounded-xl bg-rose-100 text-rose-700 shrink-0 mt-0.5">
-              <Trash2 className="w-5 h-5" />
+        {/* Reset / Wipe System Zone (Exclusivo Super Admin / Admin) */}
+        {checkPermission('canWipeSystem') && (
+          <div className="pt-5 border-t border-rose-100 bg-rose-50/50 p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-rose-100 text-rose-700 shrink-0 mt-0.5">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-black text-rose-900 uppercase tracking-wide">
+                  Zerar o Sistema (Apagar Todas as Informações)
+                </p>
+                <p className="text-[11px] text-rose-700 font-medium mt-0.5">
+                  Exclui permanentemente todos os produtos, movimentações, notas fiscais e histórico.
+                  Requer confirmação e autorização por PIN do administrador.
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-black text-rose-900 uppercase tracking-wide">
-                Zerar o Sistema (Apagar Todas as Informações)
-              </p>
-              <p className="text-[11px] text-rose-700 font-medium mt-0.5">
-                Exclui permanentemente todos os produtos, movimentações, notas fiscais e histórico.
-                Requer confirmação e autorização por PIN do administrador.
-              </p>
-            </div>
-          </div>
 
-          <button
-            onClick={() => {
-              setPinError('');
-              setAdminPin('');
-              setIsWipeModalOpen(true);
-            }}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-950/20 transition-all shrink-0 hover:scale-[1.01]"
-          >
-            <Trash2 className="w-4 h-4 text-amber-300" />
-            <span>Zerar Todo o Sistema</span>
-          </button>
-        </div>
+            <button
+              onClick={() => {
+                setPinError('');
+                setAdminPin('');
+                setIsWipeModalOpen(true);
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-950/20 transition-all shrink-0 hover:scale-[1.01]"
+            >
+              <Trash2 className="w-4 h-4 text-amber-300" />
+              <span>Zerar Todo o Sistema</span>
+            </button>
+          </div>
+        )}
 
       </div>
 

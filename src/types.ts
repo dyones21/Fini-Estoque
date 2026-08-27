@@ -35,6 +35,7 @@ export interface UserPermissions {
   canManageUsers: boolean;   // Gerenciar Usuários, Permissões e PINs (Admin)
   canManageBackup: boolean;  // Gerenciar Backup e Sincronização
   canManageCompany?: boolean; // Gerenciar Dados da Empresa
+  canWipeSystem?: boolean;   // Permissão exclusiva para zerar/apagar todo o banco de dados
 }
 
 export interface UserProfile {
