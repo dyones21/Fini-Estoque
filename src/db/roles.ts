@@ -107,7 +107,8 @@ export const INITIAL_ROLES: Role[] = [
 let rolesSchemaInitPromise: Promise<void> | null = null;
 
 /**
- * Cria a tabela roles e migra os dados / usuários existentes caso necessário.
+ * Garante o seed dos cargos padrão e a migração de roleId para usuários existentes se necessário.
+ * A estrutura das tabelas (DDL) é gerenciada exclusivamente pelas migrations formais do Drizzle.
  */
 export async function ensureRolesTableAndSeed(): Promise<void> {
   if (!isPostgresConfigured || !pool) return;
@@ -115,31 +116,7 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
 
   rolesSchemaInitPromise = (async () => {
     try {
-      // 1. Cria a tabela roles com todas as colunas necessárias
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS roles (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL UNIQUE,
-          is_system_role BOOLEAN NOT NULL DEFAULT FALSE,
-          can_view_dashboard BOOLEAN NOT NULL DEFAULT FALSE,
-          can_view_stock BOOLEAN NOT NULL DEFAULT FALSE,
-          can_manage_products BOOLEAN NOT NULL DEFAULT FALSE,
-          can_add_nf_entries BOOLEAN NOT NULL DEFAULT FALSE,
-          can_delete_nf_entries BOOLEAN NOT NULL DEFAULT FALSE,
-          can_transfer_stock BOOLEAN NOT NULL DEFAULT FALSE,
-          can_register_movements BOOLEAN NOT NULL DEFAULT FALSE,
-          can_manage_users BOOLEAN NOT NULL DEFAULT FALSE,
-          can_manage_backup BOOLEAN NOT NULL DEFAULT FALSE,
-          can_manage_company BOOLEAN NOT NULL DEFAULT FALSE,
-          can_wipe_system BOOLEAN NOT NULL DEFAULT FALSE,
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-
-        ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_manage_company BOOLEAN NOT NULL DEFAULT FALSE;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id TEXT;
-      `);
-
-      // 2. Garante a existência do ADMIN fixo e dos cargos iniciais
+      // 1. Garante a existência do ADMIN fixo e dos cargos iniciais (Seed de dados)
       for (const r of INITIAL_ROLES) {
         await pool.query(
           `
@@ -151,8 +128,7 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
             can_manage_company, can_wipe_system, created_at
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
           ON CONFLICT (id) DO UPDATE SET
-            is_system_role = CASE WHEN roles.id = 'role_admin' THEN TRUE ELSE roles.is_system_role END
-          ON CONFLICT (name) DO NOTHING;
+            is_system_role = CASE WHEN roles.id = 'role_admin' THEN TRUE ELSE roles.is_system_role END;
         `,
           [
             r.id,
@@ -173,7 +149,7 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
         );
       }
 
-      // 3. Migração dos usuários existentes: preenche role_id com base no valor atual de role
+      // 2. Migração dos usuários existentes: preenche role_id com base no valor atual de role
       await pool.query(`
         -- Super Admin / Admin -> role_admin
         UPDATE users 
@@ -205,9 +181,9 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
         WHERE (role_id IS NULL OR role_id = '');
       `);
 
-      console.log('✅ [RBAC Dinâmico] Tabela roles sincronizada e usuários migrados com sucesso.');
+      console.log('✅ [RBAC Dinâmico] Seed de cargos verificado e usuários vinculados aos cargos com sucesso.');
     } catch (err: any) {
-      console.warn('⚠️ [ensureRolesTableAndSeed] Aviso ao verificar schema de roles:', err.message);
+      console.warn('⚠️ [ensureRolesTableAndSeed] Aviso ao executar seed de roles:', err.message);
     }
   })();
 

@@ -1,1 +1,1 @@
-ALTER TABLE "company_info" ADD COLUMN "default_markup_percent" double precision DEFAULT 85 NOT NULL;
+ALTER TABLE "company_info" ADD COLUMN IF NOT EXISTS "default_markup_percent" double precision DEFAULT 85 NOT NULL;

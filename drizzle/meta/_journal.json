@@ -43,6 +43,13 @@
       "when": 1787770588485,
       "tag": "0005_chilly_supreme_intelligence",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787868969992,
+      "tag": "0006_remarkable_red_ghost",
+      "breakpoints": true
     }
   ]
 }

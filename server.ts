@@ -23,7 +23,6 @@ import {
   getCompanyCnpj,
   getAllCategories,
   insertCategory,
-  ensureDbSchema,
 } from './src/db/dbService.ts';
 import {
   getOrCreateUser,
@@ -40,15 +39,17 @@ import {
   updateRoleInDb,
   deleteRoleFromDb,
 } from './src/db/roles.ts';
+import { runDrizzleMigrations } from './src/db/migrate.ts';
 import { adminAuth } from './src/lib/firebase-admin.ts';
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { requirePermission, requireSystemAdmin } from './src/middleware/requirePermission.ts';
 import { parseNFeXml } from './src/utils/nfeXmlParser.ts';
 
 async function startServer() {
-  // Garante a migração de esquema/colunas em runtime
-  await ensureDbSchema().catch((e) => console.warn('Database auto-migrate notice:', e.message));
-  await ensureRolesTableAndSeed().catch((e) => console.warn('Roles auto-migrate notice:', e.message));
+  // 1. Aplica migrations formais do Drizzle
+  await runDrizzleMigrations().catch((e) => console.warn('Drizzle migrations notice:', e.message));
+  // 2. Garante o seed de dados dos cargos e sincronização dos usuários existentes
+  await ensureRolesTableAndSeed().catch((e) => console.warn('Roles seed notice:', e.message));
 
   const app = express();
   const PORT = 3000;

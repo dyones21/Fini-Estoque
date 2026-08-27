@@ -1,4 +1,4 @@
-CREATE TABLE "company_info" (
+CREATE TABLE IF NOT EXISTS "company_info" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"trade_name" text DEFAULT '',
