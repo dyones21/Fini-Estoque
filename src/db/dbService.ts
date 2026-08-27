@@ -151,6 +151,78 @@ export async function saveProduct(p: Product): Promise<Product> {
 }
 
 /**
+ * Atualiza campos parciais de um produto existente no PostgreSQL por ID.
+ * Mescla os campos alterados com o produto existente sem apagar dados não enviados.
+ * Retorna null caso o produto não seja encontrado.
+ */
+export async function updateProductById(id: string, updates: Partial<Product>): Promise<Product | null> {
+  checkDbConnection();
+
+  return await withRetry(async () => {
+    const existing = await db.select().from(products).where(eq(products.id, id));
+    
+    if (!existing || existing.length === 0) {
+      return null;
+    }
+
+    const current = existing[0];
+    const eanVal = updates.ean !== undefined ? String(updates.ean) : (updates as any)?.codeEAN !== undefined ? String((updates as any)?.codeEAN) : current.ean;
+    const skuVal = updates.sku !== undefined ? String(updates.sku) : current.sku;
+    const nameVal = updates.name !== undefined ? String(updates.name) : current.name;
+    const categoryVal = updates.category !== undefined ? String(updates.category) : current.category;
+    const unitVal = updates.unit !== undefined ? String(updates.unit) : current.unit;
+    const depStock = updates.stockDeposito !== undefined ? Math.round(Number(updates.stockDeposito) || 0) : current.stockDeposito;
+    const lojStock = updates.stockLoja !== undefined ? Math.round(Number(updates.stockLoja) || 0) : current.stockLoja;
+    const minDep = updates.minStockDeposito !== undefined ? Math.round(Number(updates.minStockDeposito) || 0) : current.minStockDeposito;
+    const minLoj = updates.minStockLoja !== undefined ? Math.round(Number(updates.minStockLoja) || 0) : current.minStockLoja;
+    const cost = updates.costPrice !== undefined ? Number(updates.costPrice) || 0 : current.costPrice;
+    const sell = updates.sellPrice !== undefined ? Number(updates.sellPrice) || 0 : current.sellPrice;
+    const expVal = updates.expirationDate !== undefined ? String(updates.expirationDate) : current.expirationDate;
+    const batchVal = updates.batchNumber !== undefined ? String(updates.batchNumber) : current.batchNumber;
+
+    await db
+      .update(products)
+      .set({
+        sku: skuVal,
+        ean: eanVal,
+        name: nameVal,
+        category: categoryVal,
+        unit: unitVal,
+        stockDeposito: depStock,
+        stockLoja: lojStock,
+        minStockDeposito: minDep,
+        minStockLoja: minLoj,
+        costPrice: cost,
+        sellPrice: sell,
+        expirationDate: expVal,
+        batchNumber: batchVal,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, id));
+
+    return {
+      id,
+      sku: skuVal,
+      ean: eanVal,
+      name: nameVal,
+      category: categoryVal as any,
+      unit: unitVal as any,
+      stockDeposito: depStock,
+      stockLoja: lojStock,
+      minStockDeposito: minDep,
+      minStockLoja: minLoj,
+      costPrice: cost,
+      sellPrice: sell,
+      expirationDate: expVal,
+      batchNumber: batchVal,
+      lastUpdated: new Date().toISOString(),
+      totalSalesQuantity: 0,
+      totalSalesValue: 0,
+    };
+  });
+}
+
+/**
  * Remove um produto por ID diretamente do PostgreSQL.
  * Lança erro caso a query falhe.
  */

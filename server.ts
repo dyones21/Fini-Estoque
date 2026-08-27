@@ -5,6 +5,7 @@ import { createServer as createViteServer } from 'vite';
 import {
   getAllProducts,
   saveProduct,
+  updateProductById,
   deleteProductById,
   getAllMovements,
   insertMovement,
@@ -261,7 +262,7 @@ async function startServer() {
     }
   });
 
-  // Criação/Edição de Produtos: Exige canManageProducts
+  // Criação de Produtos: Exige canManageProducts
   app.post('/api/products', requireAuth, requirePermission('canManageProducts'), async (req, res) => {
     try {
       const productData = req.body;
@@ -269,7 +270,29 @@ async function startServer() {
       res.json(saved);
     } catch (error: any) {
       console.error('API Error POST /api/products:', error);
-      res.status(500).json({ error: error.message || 'Erro ao salvar produto no Supabase' });
+      res.status(500).json({ error: error.message || 'Erro ao salvar produto no banco de dados' });
+    }
+  });
+
+  // Atualização de Produtos por ID: Exige canManageProducts
+  app.put('/api/products/:id', requireAuth, requirePermission('canManageProducts'), async (req, res) => {
+    try {
+      const id = req.params.id;
+      const updates = req.body;
+
+      if (!id) {
+        return res.status(400).json({ error: 'ID do produto é obrigatório.' });
+      }
+
+      const updated = await updateProductById(id, updates);
+      if (!updated) {
+        return res.status(404).json({ error: `Produto com ID '${id}' não foi encontrado no banco de dados.` });
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error(`API Error PUT /api/products/${req.params.id}:`, error);
+      res.status(500).json({ error: error.message || 'Erro ao atualizar produto no banco de dados' });
     }
   });
 
