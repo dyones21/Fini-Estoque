@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search,
   Filter,
@@ -18,6 +18,12 @@ import {
   History,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
+  MoreVertical,
+  DollarSign,
+  Tag,
+  TrendingUp,
+  Package,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory, LocationType } from '../types';
@@ -70,6 +76,28 @@ export const StockTable: React.FC<StockTableProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory);
   const [selectedStatus, setSelectedStatus] = useState<string>(initialStatus);
   const [groupBy, setGroupBy] = useState<'nenhum' | 'categoria' | 'curva_abc'>('nenhum');
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
+  const [activeMenuProductId, setActiveMenuProductId] = useState<string | null>(null);
+  const activeMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Click outside listener for the action dropdown menu
+  useEffect(() => {
+    if (!activeMenuProductId) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        activeMenuRef.current &&
+        !activeMenuRef.current.contains(event.target as Node)
+      ) {
+        setActiveMenuProductId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [activeMenuProductId]);
   const [isFiltersOpen, setIsFiltersOpen] = useState(
     initialIsFiltersOpen ||
       !!initialSearchQuery ||
@@ -476,9 +504,9 @@ export const StockTable: React.FC<StockTableProps> = ({
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200 text-[10px]">
                   <tr>
+                    <th className="py-3 px-3 w-10 text-center" title="Expandir detalhes"></th>
                     <th className="py-3 px-4">SKU / EAN</th>
                     <th className="py-3 px-4">Produto & Categoria</th>
-                    <th className="py-3 px-4">Lote / Validade</th>
                     <th className="py-3 px-4 text-center text-sky-700 bg-sky-50/50">
                       Saldo Depósito
                     </th>
@@ -488,17 +516,14 @@ export const StockTable: React.FC<StockTableProps> = ({
                     <th className="py-3 px-4 text-center font-extrabold text-slate-900 bg-slate-100/60">
                       Soma Geral
                     </th>
-                    <th className="py-3 px-4 text-right">Custo / Venda</th>
-                    <th className="py-3 px-4 text-right">Valor Total</th>
-                    <th className="py-3 px-4 text-center">ABC</th>
-                    <th className="py-3 px-4 text-center">Ações Operacionais</th>
+                    <th className="py-3 px-3 w-14 text-center">Ações</th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-slate-100">
                   {itemsList.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="py-8 text-center text-slate-400 text-xs">
+                      <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
                         Nenhum produto encontrado com os filtros selecionados.
                       </td>
                     </tr>
@@ -509,9 +534,13 @@ export const StockTable: React.FC<StockTableProps> = ({
                       const isLojLow = product.stockLoja <= product.minStockLoja;
                       const daysExp = getDaysToExpiration(product.expirationDate);
                       const abcClass = abcMap.get(product.id) || 'C';
+                      const isExpanded = expandedProductId === product.id;
+                      const isMenuOpen = activeMenuProductId === product.id;
 
-                      const displayStock = getProductStock(product, locationMode);
-                      const totalCostValue = displayStock * product.costPrice;
+                      const marginPercent =
+                        product.sellPrice > 0
+                          ? (((product.sellPrice - product.costPrice) / product.sellPrice) * 100).toFixed(1)
+                          : '0.0';
 
                       const isDirectlySearched =
                         searchQuery.trim().length > 0 &&
@@ -519,208 +548,346 @@ export const StockTable: React.FC<StockTableProps> = ({
                           product.sku.toLowerCase().includes(searchQuery.toLowerCase().trim()));
 
                       return (
-                        <tr
-                          key={product.id}
-                          className={`transition-colors ${
-                            isDirectlySearched
-                              ? 'bg-rose-50/80 hover:bg-rose-100/80 ring-2 ring-rose-400/60'
-                              : 'hover:bg-slate-50/80'
-                          }`}
-                        >
-                          {/* SKU & EAN */}
-                          <td className="py-3 px-4 font-mono text-[11px] text-slate-500">
-                            <p className="font-bold text-slate-800">{product.sku}</p>
-                            <p className="text-[10px] text-slate-400">{product.ean}</p>
-                          </td>
+                        <React.Fragment key={product.id}>
+                          {/* Main Row */}
+                          <tr
+                            onClick={() => setExpandedProductId(isExpanded ? null : product.id)}
+                            className={`cursor-pointer transition-colors ${
+                              isDirectlySearched
+                                ? 'bg-rose-50/80 hover:bg-rose-100/80 ring-2 ring-rose-400/60'
+                                : isExpanded
+                                ? 'bg-slate-50/90 font-medium'
+                                : 'hover:bg-slate-50/80'
+                            }`}
+                          >
+                            {/* Expand / Collapse Chevron */}
+                            <td className="py-3 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedProductId(isExpanded ? null : product.id);
+                                }}
+                                className="p-1 rounded hover:bg-slate-200/70 text-slate-400 hover:text-slate-700 transition-all inline-flex items-center justify-center"
+                                title={isExpanded ? 'Recolher detalhes' : 'Ver detalhes (Lote, Preços, Valor Total, Curva ABC)'}
+                                aria-label="Expandir ou recolher detalhes"
+                              >
+                                <ChevronRight
+                                  className={`w-4 h-4 transition-transform duration-200 ${
+                                    isExpanded ? 'rotate-90 text-rose-600 font-bold' : 'text-slate-400'
+                                  }`}
+                                />
+                              </button>
+                            </td>
 
-                          {/* Name & Category */}
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-1.5">
-                              <p className="font-bold text-slate-900 text-xs">{product.name}</p>
-                              {isDirectlySearched && (
-                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-rose-600 text-white uppercase tracking-wider">
-                                  Localizado
+                            {/* SKU & EAN */}
+                            <td className="py-3 px-4 font-mono text-[11px] text-slate-500">
+                              <p className="font-bold text-slate-800">{product.sku}</p>
+                              <p className="text-[10px] text-slate-400">{product.ean || '—'}</p>
+                            </td>
+
+                            {/* Name & Category */}
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-1.5">
+                                <p className="font-bold text-slate-900 text-xs">{product.name}</p>
+                                {isDirectlySearched && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-rose-600 text-white uppercase tracking-wider">
+                                    Localizado
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                                  {product.category}
+                                </span>
+                                <span className="text-[10px] text-slate-400">• {product.unit}</span>
+                              </div>
+                            </td>
+
+                            {/* Depósito Stock */}
+                            <td
+                              className={`py-3 px-4 text-center font-bold text-sky-800 bg-sky-50/20 ${
+                                isDepLow ? 'bg-rose-50 text-rose-700' : ''
+                              }`}
+                            >
+                              <span className="text-sm">{product.stockDeposito}</span>
+                              {isDepLow && (
+                                <span className="block text-[9px] font-extrabold text-rose-600 uppercase">
+                                  Baixo (Min: {product.minStockDeposito})
                                 </span>
                               )}
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
-                                {product.category}
-                              </span>
-                              <span className="text-[10px] text-slate-400">• {product.unit}</span>
-                            </div>
-                          </td>
+                            </td>
 
-                          {/* Expiration & Batch */}
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-slate-400" />
-                              <span
-                                className={`font-semibold text-xs ${
-                                  daysExp < 0
-                                    ? 'text-rose-600 font-bold'
-                                    : daysExp <= 30
-                                    ? 'text-amber-600 font-bold'
-                                    : 'text-slate-700'
-                                }`}
-                              >
-                                {formatDate(product.expirationDate)}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                              Lote: {product.batchNumber}
-                            </p>
-                          </td>
-
-                          {/* Depósito Stock */}
-                          <td className={`py-3 px-4 text-center font-bold text-sky-800 bg-sky-50/20 ${
-                            isDepLow ? 'bg-rose-50 text-rose-700' : ''
-                          }`}>
-                            <span className="text-sm">{product.stockDeposito}</span>
-                            {isDepLow && (
-                              <span className="block text-[9px] font-extrabold text-rose-600 uppercase">
-                                Baixo (Min: {product.minStockDeposito})
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Loja Stock */}
-                          <td className={`py-3 px-4 text-center font-bold text-amber-800 bg-amber-50/20 ${
-                            isLojLow ? 'bg-rose-50 text-rose-700' : ''
-                          }`}>
-                            <span className="text-sm">{product.stockLoja}</span>
-                            {isLojLow && (
-                              <span className="block text-[9px] font-extrabold text-rose-600 uppercase">
-                                Repor (Min: {product.minStockLoja})
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Soma Geral */}
-                          <td className="py-3 px-4 text-center font-extrabold text-slate-900 bg-slate-50 text-sm">
-                            {totalStock}
-                          </td>
-
-                          {/* Unit Prices */}
-                          <td className="py-3 px-4 text-right">
-                            <p className="font-semibold text-slate-800">
-                              {formatCurrency(product.costPrice)}{' '}
-                              <span className="text-[10px] text-slate-400">(custo)</span>
-                            </p>
-                            <p className="text-[11px] font-bold text-rose-600">
-                              {formatCurrency(product.sellPrice)}{' '}
-                              <span className="text-[10px] text-rose-400">(venda)</span>
-                            </p>
-                          </td>
-
-                          {/* Total Valuation */}
-                          <td className="py-3 px-4 text-right font-bold text-slate-900 text-xs">
-                            {formatCurrency(totalCostValue)}
-                          </td>
-
-                          {/* ABC Class Badge */}
-                          <td className="py-3 px-4 text-center">
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded font-black text-xs ${
-                                abcClass === 'A'
-                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                  : abcClass === 'B'
-                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                  : 'bg-slate-100 text-slate-600 border border-slate-300'
+                            {/* Loja Stock */}
+                            <td
+                              className={`py-3 px-4 text-center font-bold text-amber-800 bg-amber-50/20 ${
+                                isLojLow ? 'bg-rose-50 text-rose-700' : ''
                               }`}
-                              title={`Classe ${abcClass} na curva ABC de faturamento`}
                             >
-                              {abcClass}
-                            </span>
-                          </td>
-
-                          {/* Action Buttons */}
-                          <td className="py-3 px-4">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {/* View Product History */}
-                              {onOpenHistoryModalForProduct && (
-                                <button
-                                  onClick={() => onOpenHistoryModalForProduct(product)}
-                                  title="Ver Linha do Tempo e Histórico de Movimentações"
-                                  className="p-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition-colors flex items-center gap-1 font-semibold text-[11px]"
-                                >
-                                  <History className="w-3.5 h-3.5 text-slate-600" />
-                                  <span className="hidden xl:inline">Histórico</span>
-                                </button>
+                              <span className="text-sm">{product.stockLoja}</span>
+                              {isLojLow && (
+                                <span className="block text-[9px] font-extrabold text-rose-600 uppercase">
+                                  Repor (Min: {product.minStockLoja})
+                                </span>
                               )}
+                            </td>
 
-                              {/* Direct Store Sale / Baixa para Baleiro */}
-                              {onOpenSaleModalForProduct && checkPermission('canRegisterMovements') && (
+                            {/* Soma Geral */}
+                            <td className="py-3 px-4 text-center font-extrabold text-slate-900 bg-slate-50 text-sm">
+                              {totalStock}
+                            </td>
+
+                            {/* Single Action Menu (⋮) */}
+                            <td className="py-3 px-3 text-center">
+                              <div
+                                className="relative inline-block text-left"
+                                ref={isMenuOpen ? activeMenuRef : null}
+                              >
                                 <button
-                                  onClick={() => onOpenSaleModalForProduct(product)}
-                                  title="Baixa para Baleiro (Pacote Aberto)"
-                                  className="p-1.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 transition-colors flex items-center gap-1 font-semibold text-[11px]"
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveMenuProductId((prev) => (prev === product.id ? null : product.id));
+                                  }}
+                                  className={`p-1.5 rounded-lg border transition-colors ${
+                                    isMenuOpen
+                                      ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200'
+                                  }`}
+                                  title="Opções do Produto"
+                                  aria-label="Abrir menu de ações"
                                 >
-                                  <ShoppingBag className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span className="hidden xl:inline">Baixa para Baleiro</span>
+                                  <MoreVertical className="w-4 h-4" />
                                 </button>
-                              )}
 
-                              {/* Transfer Button Depósito -> Loja */}
-                              {checkPermission('canTransferStock') && (
-                                <button
-                                  onClick={() => onOpenTransferModalForProduct(product)}
-                                  title="Transferir do Depósito para a Loja"
-                                  className="p-1.5 rounded-lg bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition-colors flex items-center gap-1 font-semibold text-[11px]"
-                                >
-                                  <ArrowRightLeft className="w-3.5 h-3.5" />
-                                  <span className="hidden xl:inline">Transferir</span>
-                                </button>
-                              )}
-
-                              {/* Register Sale or Loss */}
-                              {checkPermission('canRegisterMovements') && (
-                                <button
-                                  onClick={() => onOpenMovementModalForProduct(product)}
-                                  title="Ajuste / Perda / Outras Baixas"
-                                  className="p-1.5 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1 font-semibold text-[11px]"
-                                >
-                                  <MinusCircle className="w-3.5 h-3.5" />
-                                  <span className="hidden xl:inline">Ajuste</span>
-                                </button>
-                              )}
-
-                              {/* Edit / Delete Product Metadata */}
-                              {checkPermission('canManageProducts') && (
-                                <>
-                                  <button
-                                    onClick={() => onOpenEditProductModal(product)}
-                                    title="Editar Produto"
-                                    className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                                {isMenuOpen && (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="absolute right-0 top-full mt-1.5 z-50 min-w-[210px] bg-white border border-slate-200 rounded-xl shadow-xl py-1 text-xs font-semibold text-slate-700 divide-y divide-slate-100 animate-in fade-in zoom-in-95 duration-100 text-left"
                                   >
-                                    <Edit className="w-3.5 h-3.5" />
-                                  </button>
+                                    <div className="py-1">
+                                      {/* Histórico */}
+                                      {onOpenHistoryModalForProduct && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuProductId(null);
+                                            onOpenHistoryModalForProduct(product);
+                                          }}
+                                          className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 transition-colors text-slate-700"
+                                        >
+                                          <History className="w-4 h-4 text-slate-500 shrink-0" />
+                                          <span>Histórico de Movimentações</span>
+                                        </button>
+                                      )}
 
-                                  <button
-                                    onClick={async () => {
-                                      if (
-                                        confirm(
-                                          `Tem certeza que deseja excluir "${product.name}" do sistema?`
-                                        )
-                                      ) {
-                                        try {
-                                          await deleteProduct(product.id);
-                                          alert(`Produto "${product.name}" excluído com sucesso do banco de dados!`);
-                                        } catch (err: any) {
-                                          alert(getFriendlyErrorMessage(err, 'Falha ao excluir produto no servidor.'));
-                                        }
-                                      }
-                                    }}
-                                    title="Excluir Produto"
-                                    className="p-1.5 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
+                                      {/* Baixa para Baleiro (Loja) */}
+                                      {onOpenSaleModalForProduct && checkPermission('canRegisterMovements') && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuProductId(null);
+                                            onOpenSaleModalForProduct(product);
+                                          }}
+                                          className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-emerald-50 text-emerald-800 transition-colors"
+                                        >
+                                          <ShoppingBag className="w-4 h-4 text-emerald-600 shrink-0" />
+                                          <span>Baixa para Baleiro (Loja)</span>
+                                        </button>
+                                      )}
+
+                                      {/* Transferir do Depósito para a Loja */}
+                                      {checkPermission('canTransferStock') && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuProductId(null);
+                                            onOpenTransferModalForProduct(product);
+                                          }}
+                                          className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-sky-50 text-sky-700 transition-colors"
+                                        >
+                                          <ArrowRightLeft className="w-4 h-4 text-sky-600 shrink-0" />
+                                          <span>Transferir Depósito ➔ Loja</span>
+                                        </button>
+                                      )}
+
+                                      {/* Ajuste / Perda / Outras Baixas */}
+                                      {checkPermission('canRegisterMovements') && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuProductId(null);
+                                            onOpenMovementModalForProduct(product);
+                                          }}
+                                          className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-amber-50 text-amber-800 transition-colors"
+                                        >
+                                          <MinusCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                                          <span>Ajuste / Perda / Saída</span>
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {/* Gerenciamento (Editar / Excluir) */}
+                                    {checkPermission('canManageProducts') && (
+                                      <div className="py-1">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuProductId(null);
+                                            onOpenEditProductModal(product);
+                                          }}
+                                          className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 text-slate-700 transition-colors"
+                                        >
+                                          <Edit className="w-4 h-4 text-slate-500 shrink-0" />
+                                          <span>Editar Produto</span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuProductId(null);
+                                            if (
+                                              confirm(
+                                                `Tem certeza que deseja excluir "${product.name}" do sistema?`
+                                              )
+                                            ) {
+                                              try {
+                                                await deleteProduct(product.id);
+                                                alert(`Produto "${product.name}" excluído com sucesso!`);
+                                              } catch (err: any) {
+                                                alert(getFriendlyErrorMessage(err, 'Falha ao excluir produto no servidor.'));
+                                              }
+                                            }
+                                          }}
+                                          className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-rose-50 text-rose-600 transition-colors"
+                                        >
+                                          <Trash2 className="w-4 h-4 text-rose-500 shrink-0" />
+                                          <span>Excluir Produto</span>
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Expandable Details Row */}
+                          {isExpanded && (
+                            <tr className="bg-slate-50/90 border-b border-slate-200/80">
+                              <td colSpan={7} className="p-3.5 sm:p-4 bg-slate-50/70">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
+                                  {/* Card 1: Lote & Validade */}
+                                  <div className="p-3 bg-slate-50/80 rounded-lg border border-slate-100 space-y-1">
+                                    <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
+                                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Lote & Validade</span>
+                                    </div>
+                                    <div className="pt-1">
+                                      <p className="text-xs text-slate-800 font-semibold">
+                                        Validade: <strong className={daysExp < 0 ? 'text-rose-600' : daysExp <= 30 ? 'text-amber-600' : 'text-slate-900'}>{formatDate(product.expirationDate)}</strong>
+                                      </p>
+                                      <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                        Lote: <strong className="text-slate-700">{product.batchNumber || 'N/A'}</strong>
+                                      </p>
+                                      <span
+                                        className={`inline-block mt-1.5 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          daysExp < 0
+                                            ? 'bg-rose-100 text-rose-700'
+                                            : daysExp <= 30
+                                            ? 'bg-amber-100 text-amber-800'
+                                            : 'bg-emerald-100 text-emerald-800'
+                                        }`}
+                                      >
+                                        {daysExp < 0 ? '⚠️ Vencido' : daysExp <= 30 ? `⏰ Vence em ${daysExp} dias` : `✓ Em dia (${daysExp} dias)`}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Card 2: Custo, Venda & Margem */}
+                                  <div className="p-3 bg-slate-50/80 rounded-lg border border-slate-100 space-y-1">
+                                    <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
+                                      <Tag className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Custo & Venda</span>
+                                    </div>
+                                    <div className="pt-1 space-y-0.5">
+                                      <div className="flex justify-between items-center text-xs">
+                                        <span className="text-slate-500">Custo Unitário:</span>
+                                        <span className="font-bold text-slate-800">{formatCurrency(product.costPrice)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center text-xs">
+                                        <span className="text-slate-500">Preço de Venda:</span>
+                                        <span className="font-extrabold text-rose-600">{formatCurrency(product.sellPrice)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-200/60">
+                                        <span className="text-slate-500">Margem Bruta:</span>
+                                        <span className="font-bold text-emerald-700">{marginPercent}%</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Card 3: Valor Total em Estoque */}
+                                  <div className="p-3 bg-slate-50/80 rounded-lg border border-slate-100 space-y-1">
+                                    <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
+                                      <TrendingUp className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Valor em Estoque</span>
+                                    </div>
+                                    <div className="pt-1 space-y-0.5">
+                                      <div className="flex justify-between items-center text-xs">
+                                        <span className="text-slate-500">Total em Custo:</span>
+                                        <span className="font-black text-slate-900">{formatCurrency(totalStock * product.costPrice)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center text-[10px] text-slate-500">
+                                        <span>Depósito: {formatCurrency(product.stockDeposito * product.costPrice)}</span>
+                                        <span>Loja: {formatCurrency(product.stockLoja * product.costPrice)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-200/60">
+                                        <span className="text-slate-500">Potencial de Venda:</span>
+                                        <span className="font-bold text-slate-700">{formatCurrency(totalStock * product.sellPrice)}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Card 4: Curva ABC & Parâmetros */}
+                                  <div className="p-3 bg-slate-50/80 rounded-lg border border-slate-100 space-y-1">
+                                    <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
+                                      <Layers className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Curva ABC & Mínimos</span>
+                                    </div>
+                                    <div className="pt-1 space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <span
+                                          className={`inline-block px-2 py-0.5 rounded font-black text-xs ${
+                                            abcClass === 'A'
+                                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                              : abcClass === 'B'
+                                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                              : 'bg-slate-100 text-slate-600 border border-slate-300'
+                                          }`}
+                                        >
+                                          Classe {abcClass}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500">
+                                          {abcClass === 'A' ? 'Alto impacto' : abcClass === 'B' ? 'Médio impacto' : 'Baixo impacto'}
+                                        </span>
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 space-y-0.5 pt-0.5">
+                                        <p>Mín. Depósito: <strong className="text-slate-700">{product.minStockDeposito} {product.unit}</strong></p>
+                                        <p>Mín. Loja: <strong className="text-slate-700">{product.minStockLoja} {product.unit}</strong></p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })
                   )}
