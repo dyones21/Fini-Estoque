@@ -18,6 +18,8 @@ import { UserManagementView } from './components/UserManagementView';
 import { CompanyDataView } from './components/CompanyDataView';
 import { ProductHistoryModal } from './components/ProductHistoryModal';
 import { ReportsView } from './components/ReportsView';
+import { NFEntriesView } from './components/NFEntriesView';
+import { PurchaseSuggestionView } from './components/PurchaseSuggestionView';
 import { Product } from './types';
 import { StockFilterOptions } from './components/Dashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -202,6 +204,22 @@ const MainApp: React.FC = () => {
                   />
                 ) : (
                   <AccessDeniedMessage featureName="Entrada de Notas Fiscais" />
+                )
+              )}
+
+              {activeTab === 'notas_fiscais' && (
+                checkPermission('canAddNFEntries') || checkPermission('canDeleteNFEntries') ? (
+                  <NFEntriesView onOpenNFModal={() => setIsNFModalOpen(true)} />
+                ) : (
+                  <AccessDeniedMessage featureName="Notas Fiscais Lançadas" />
+                )
+              )}
+
+              {activeTab === 'sugestao_compra' && (
+                checkPermission('canViewDashboard') || checkPermission('canManageProducts') ? (
+                  <PurchaseSuggestionView />
+                ) : (
+                  <AccessDeniedMessage featureName="Sugestão de Compra" />
                 )
               )}
 

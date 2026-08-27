@@ -452,7 +452,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
 
               {/* Seleção do Usuário */}
-              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
                 {users.map((u) => (
                   <button
                     key={u.id}

@@ -10,6 +10,8 @@ import {
   TrendingUp,
   Cloud,
   ShoppingBag,
+  ShoppingCart,
+  Receipt,
   PanelLeftClose,
   PanelLeftOpen,
   ChevronLeft,
@@ -19,6 +21,7 @@ import {
   KeyRound,
   Settings,
   Building2,
+  Sparkles,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { LocationType } from '../types';
@@ -29,6 +32,8 @@ export type ActiveTab =
   | 'estoque_loja'
   | 'estoque_deposito'
   | 'entrada_nf'
+  | 'notas_fiscais'
+  | 'sugestao_compra'
   | 'relatorios'
   | 'curva_abc_ranking'
   | 'empresa'
@@ -98,6 +103,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
           },
         ]
       : []),
+    ...(checkPermission('canAddNFEntries') || checkPermission('canDeleteNFEntries')
+      ? [
+          {
+            id: 'notas_fiscais',
+            label: 'Notas Fiscais Lançadas',
+            icon: Receipt,
+            badge: null,
+          },
+        ]
+      : []),
+    ...(checkPermission('canViewDashboard') || checkPermission('canManageProducts')
+      ? [
+          {
+            id: 'sugestao_compra',
+            label: 'Sugestão de Compra',
+            icon: ShoppingCart,
+            badge: null,
+          },
+        ]
+      : []),
     ...(checkPermission('canViewDashboard') || checkPermission('canViewStock')
       ? [
           {
@@ -127,7 +152,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             id: 'empresa',
             label: 'Dados da Empresa',
             icon: Building2,
-            badge: 'Cadastro',
+            badge: null,
           },
         ]
       : []),
@@ -137,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             id: 'backup',
             label: 'Backup em Nuvem',
             icon: Cloud,
-            badge: 'Nuvem',
+            badge: null,
           },
         ]
       : []),
@@ -147,7 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             id: 'usuarios',
             label: 'Permissões & Usuários',
             icon: ShieldCheck,
-            badge: 'Admin',
+            badge: null,
           },
         ]
       : []),
