@@ -75,12 +75,12 @@ export const PurchaseSuggestionView: React.FC = () => {
 
       const isExit =
         m.type === 'venda_loja' ||
-        m.type === 'transferencia_deposito_loja' ||
         (m.type as any) === 'Venda Loja' ||
-        (m.type as any) === 'Transferência Interna' ||
+        (m.type as any) === 'Venda Directa Loja' ||
         m.type === 'perda_avaria' ||
         (m.type as any) === 'Saída de Estoque' ||
-        (m.type as any) === 'Baixa Manual';
+        (m.type as any) === 'Baixa Manual' ||
+        (m.type as any) === 'Ajuste / Perda';
 
       if (isExit && m.productId) {
         const currentTotal = outputMap.get(m.productId) || 0;
@@ -338,7 +338,7 @@ export const PurchaseSuggestionView: React.FC = () => {
         <div className="mt-5 p-3.5 bg-amber-50/80 rounded-2xl border border-amber-200/80 flex items-start gap-3 text-xs text-amber-900">
           <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <p className="leading-relaxed font-medium">
-            <strong>Como funciona o cálculo:</strong> A velocidade de saída é calculada somando todas as vendas e transferências para a loja dos últimos 30 dias e dividindo por 30 (média diária). Os produtos com menos de <strong>{thresholdDays} dias de estoque</strong> são sinalizados para compra cobrindo <strong>{targetCoverageDays} dias de consumo</strong>.
+            <strong>Como funciona o cálculo:</strong> A velocidade de saída é calculada somando todas as <strong>vendas na loja</strong> e <strong>perdas/avarias</strong> dos últimos 30 dias e dividindo por 30 (consumo médio diário). <em>Transferências internas entre depósito e loja não contam como saída</em>, pois a mercadoria permanece no estoque da empresa. Produtos com estoque restante inferior a <strong>{thresholdDays} dias</strong> são sugeridos para compra com meta de <strong>{targetCoverageDays} dias de cobertura</strong>.
           </p>
         </div>
 
