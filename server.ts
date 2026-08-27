@@ -33,14 +33,22 @@ import {
   deleteUserFromDb,
   isSuperAdminEmail,
 } from './src/db/users.ts';
+import {
+  ensureRolesTableAndSeed,
+  getAllRolesFromDb,
+  createRoleInDb,
+  updateRoleInDb,
+  deleteRoleFromDb,
+} from './src/db/roles.ts';
 import { adminAuth } from './src/lib/firebase-admin.ts';
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
-import { requirePermission } from './src/middleware/requirePermission.ts';
+import { requirePermission, requireSystemAdmin } from './src/middleware/requirePermission.ts';
 import { parseNFeXml } from './src/utils/nfeXmlParser.ts';
 
 async function startServer() {
   // Garante a migração de esquema/colunas em runtime
   await ensureDbSchema().catch((e) => console.warn('Database auto-migrate notice:', e.message));
+  await ensureRolesTableAndSeed().catch((e) => console.warn('Roles auto-migrate notice:', e.message));
 
   const app = express();
   const PORT = 3000;
@@ -247,6 +255,81 @@ async function startServer() {
       }
       console.error('API Error DELETE /api/users/:idOrUid:', error);
       res.status(500).json({ error: error.message || 'Erro ao excluir usuário no banco de dados' });
+    }
+  });
+
+  // ROLES API (DYNAMIC RBAC)
+  // GET /api/roles - Lista todos os cargos (disponível para usuários autenticados para popular selects/perfis)
+  app.get('/api/roles', requireAuth, async (req, res) => {
+    try {
+      const rolesList = await getAllRolesFromDb();
+      res.json(rolesList);
+    } catch (error: any) {
+      console.error('API Error GET /api/roles:', error);
+      res.status(500).json({ error: error.message || 'Erro ao listar cargos no banco de dados' });
+    }
+  });
+
+  // POST /api/roles - Cria novo cargo (Protegido EXCLUSIVAMENTE para o ADMIN fixo do sistema)
+  app.post('/api/roles', requireAuth, requireSystemAdmin, async (req: AuthRequest, res) => {
+    try {
+      const roleData = req.body;
+      if (!roleData || !roleData.name) {
+        return res.status(400).json({ error: 'Nome do cargo é obrigatório.' });
+      }
+
+      const created = await createRoleInDb(roleData);
+      res.status(201).json(created);
+    } catch (error: any) {
+      const statusCode = error.statusCode || 500;
+      if (statusCode !== 500) {
+        return res.status(statusCode).json({ error: error.message });
+      }
+      console.error('API Error POST /api/roles:', error);
+      res.status(500).json({ error: error.message || 'Erro ao criar cargo no banco de dados' });
+    }
+  });
+
+  // PUT /api/roles/:id - Edita permissões de um cargo (Protegido EXCLUSIVAMENTE para o ADMIN fixo do sistema)
+  app.put('/api/roles/:id', requireAuth, requireSystemAdmin, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+
+      if (!id) {
+        return res.status(400).json({ error: 'ID do cargo é obrigatório.' });
+      }
+
+      const updated = await updateRoleInDb(id, updates);
+      res.json(updated);
+    } catch (error: any) {
+      const statusCode = error.statusCode || 500;
+      if (statusCode !== 500) {
+        return res.status(statusCode).json({ error: error.message });
+      }
+      console.error('API Error PUT /api/roles/:id:', error);
+      res.status(500).json({ error: error.message || 'Erro ao atualizar cargo no banco de dados' });
+    }
+  });
+
+  // DELETE /api/roles/:id - Exclui um cargo (Protegido EXCLUSIVAMENTE para o ADMIN fixo do sistema)
+  app.delete('/api/roles/:id', requireAuth, requireSystemAdmin, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!id) {
+        return res.status(400).json({ error: 'ID do cargo é obrigatório.' });
+      }
+
+      const result = await deleteRoleFromDb(id);
+      res.json(result);
+    } catch (error: any) {
+      const statusCode = error.statusCode || 500;
+      if (statusCode !== 500) {
+        return res.status(statusCode).json({ error: error.message });
+      }
+      console.error('API Error DELETE /api/roles/:id:', error);
+      res.status(500).json({ error: error.message || 'Erro ao excluir cargo no banco de dados' });
     }
   });
 

@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  boolean,
   integer,
   pgTable,
   serial,
@@ -36,6 +37,25 @@ export const categories = pgTable('categories', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Roles Table (Dynamic RBAC)
+export const roles = pgTable('roles', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  isSystemRole: boolean('is_system_role').notNull().default(false),
+  canViewDashboard: boolean('can_view_dashboard').notNull().default(false),
+  canViewStock: boolean('can_view_stock').notNull().default(false),
+  canManageProducts: boolean('can_manage_products').notNull().default(false),
+  canAddNFEntries: boolean('can_add_nf_entries').notNull().default(false),
+  canDeleteNFEntries: boolean('can_delete_nf_entries').notNull().default(false),
+  canTransferStock: boolean('can_transfer_stock').notNull().default(false),
+  canRegisterMovements: boolean('can_register_movements').notNull().default(false),
+  canManageUsers: boolean('can_manage_users').notNull().default(false),
+  canManageBackup: boolean('can_manage_backup').notNull().default(false),
+  canManageCompany: boolean('can_manage_company').notNull().default(false),
+  canWipeSystem: boolean('can_wipe_system').notNull().default(false),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Users Table (Supabase Auth sync)
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -43,6 +63,7 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   name: text('name').default('Usuário Fini'),
   role: text('role').default('Operador Depósito/Loja'),
+  roleId: text('role_id').references(() => roles.id),
   pin: text('pin'),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -160,9 +181,13 @@ export const nfItemsRelations = relations(nfItems, ({ one }) => ({
   }),
 }));
 
-export const storeSalesRelations = relations(storeSales, ({ one }) => ({
-  product: one(products, {
-    fields: [storeSales.productId],
-    references: [products.id],
+export const rolesRelations = relations(roles, ({ many }) => ({
+  users: many(users),
+}));
+
+export const usersRelations = relations(users, ({ one }) => ({
+  roleDetail: one(roles, {
+    fields: [users.roleId],
+    references: [roles.id],
   }),
 }));

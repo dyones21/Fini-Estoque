@@ -11,6 +11,7 @@ import {
   UserRole,
   UserPermissions,
   CompanyInfo,
+  Role,
 } from '../types';
 import {
   INITIAL_PRODUCTS,
@@ -100,6 +101,14 @@ interface StockContextType {
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
 
+  // Roles Management (Dynamic RBAC)
+  roles: Role[];
+  isLoadingRoles: boolean;
+  fetchRoles: () => Promise<Role[]>;
+  createRole: (roleData: Omit<Role, 'id' | 'createdAt' | 'isSystemRole' | 'userCount'>) => Promise<Role>;
+  updateRole: (id: string, roleData: Partial<Role>) => Promise<Role>;
+  deleteRole: (id: string) => Promise<void>;
+
   // Cloud & Backup
   triggerCloudSync: () => Promise<void>;
   exportBackupJSON: () => void;
@@ -144,6 +153,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Users State (loaded strictly from PostgreSQL /api/users)
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
+
+  // Roles State (loaded strictly from PostgreSQL /api/roles)
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [isLoadingRoles, setIsLoadingRoles] = useState<boolean>(true);
 
   // Current logged in user (strictly set via auth / handleUserAuthenticated)
   const [currentUser, setCurrentUser] = useState<UserProfile>({
@@ -511,9 +524,108 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const checkPermission = (permissionKey: keyof UserPermissions): boolean => {
-    if (!currentUser || !currentUser.permissions) return false;
-    if (currentUser.role === 'admin' || currentUser.role === 'super_admin') return true;
-    return Boolean(currentUser.permissions[permissionKey]);
+    if (!currentUser) return false;
+    if (
+      currentUser.isSystemRole ||
+      currentUser.role === 'ADMIN' ||
+      currentUser.role === 'super_admin' ||
+      currentUser.role === 'admin' ||
+      (currentUser.email && currentUser.email.toLowerCase() === 'dyones21@gmail.com')
+    ) {
+      return true;
+    }
+    return Boolean(currentUser.permissions?.[permissionKey]);
+  };
+
+  // Fetch roles directly from Express backend
+  const fetchRoles = async (): Promise<Role[]> => {
+    try {
+      setIsLoadingRoles(true);
+      const res = await authFetch('/api/roles');
+      if (res.ok) {
+        const data = await safeParseJson<Role[]>(res);
+        if (Array.isArray(data)) {
+          setRoles(data);
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar lista de cargos:', err);
+    } finally {
+      setIsLoadingRoles(false);
+    }
+    return roles;
+  };
+
+  const createRole = async (
+    roleData: Omit<Role, 'id' | 'createdAt' | 'isSystemRole' | 'userCount'>
+  ): Promise<Role> => {
+    const res = await authFetch('/api/roles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(roleData),
+    });
+
+    if (!res.ok) {
+      if (res.status === 403) {
+        handle403PermissionDenied('Criar Cargo no Sistema');
+        throw new Error('Apenas o Administrador fixo do sistema (ADMIN) pode criar novos cargos.');
+      }
+      const errData = await safeParseJson<{ error?: string }>(res);
+      throw new Error(errData?.error || `Erro HTTP ${res.status} ao criar cargo.`);
+    }
+
+    const created = await safeParseJson<Role>(res);
+    if (!created) {
+      throw new Error('Resposta inválida do servidor ao criar cargo.');
+    }
+
+    setRoles((prev) => [...prev, created]);
+    return created;
+  };
+
+  const updateRole = async (id: string, roleData: Partial<Role>): Promise<Role> => {
+    const res = await authFetch(`/api/roles/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(roleData),
+    });
+
+    if (!res.ok) {
+      if (res.status === 403) {
+        handle403PermissionDenied('Editar Cargo no Sistema');
+        throw new Error('Apenas o Administrador fixo do sistema (ADMIN) pode alterar permissões de cargos.');
+      }
+      const errData = await safeParseJson<{ error?: string }>(res);
+      throw new Error(errData?.error || `Erro HTTP ${res.status} ao atualizar cargo.`);
+    }
+
+    const updated = await safeParseJson<Role>(res);
+    if (!updated) {
+      throw new Error('Resposta inválida do servidor ao atualizar cargo.');
+    }
+
+    setRoles((prev) => prev.map((r) => (r.id === id ? { ...r, ...updated } : r)));
+    // Atualiza também os usuários locais com as novas permissões
+    await fetchServerData();
+    return updated;
+  };
+
+  const deleteRole = async (id: string): Promise<void> => {
+    const res = await authFetch(`/api/roles/${id}`, {
+      method: 'DELETE',
+    });
+
+    if (!res.ok) {
+      if (res.status === 403) {
+        handle403PermissionDenied('Excluir Cargo do Sistema');
+        throw new Error('Apenas o Administrador fixo do sistema (ADMIN) pode excluir cargos.');
+      }
+      const errData = await safeParseJson<{ error?: string }>(res);
+      throw new Error(errData?.error || `Erro HTTP ${res.status} ao excluir cargo.`);
+    }
+
+    setRoles((prev) => prev.filter((r) => r.id !== id));
   };
 
   // Fetch initial data exclusively through Express Server API routes (/api/...)
@@ -522,7 +634,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
 
-      const [resProd, resMov, resNFs, resSales, resUsers, resComp, resCats] = await Promise.all([
+      const [resProd, resMov, resNFs, resSales, resUsers, resComp, resCats, resRoles] = await Promise.all([
         authFetch('/api/products').catch(() => null),
         authFetch('/api/movements').catch(() => null),
         authFetch('/api/nf-entries').catch(() => null),
@@ -530,6 +642,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         authFetch('/api/users').catch(() => null),
         authFetch('/api/company').catch(() => null),
         authFetch('/api/categories').catch(() => null),
+        authFetch('/api/roles').catch(() => null),
       ]);
 
       let loadedProducts: Product[] = [];
@@ -538,7 +651,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       let loadedUsers: any[] = [];
       let loadedSales: any[] = [];
 
-      const [dataProd, dataMov, dataNFs, dataSales, dataUsers, dataComp, dataCats] = await Promise.all([
+      const [dataProd, dataMov, dataNFs, dataSales, dataUsers, dataComp, dataCats, dataRoles] = await Promise.all([
         safeParseJson(resProd),
         safeParseJson(resMov),
         safeParseJson(resNFs),
@@ -546,6 +659,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         safeParseJson(resUsers),
         safeParseJson(resComp),
         safeParseJson(resCats),
+        safeParseJson(resRoles),
       ]);
 
       if (dataComp && typeof dataComp === 'object') {
@@ -571,6 +685,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (Array.isArray(dataCats)) {
         setCategories(dataCats);
       }
+
+      if (Array.isArray(dataRoles)) {
+        setRoles(dataRoles);
+      }
+      setIsLoadingRoles(false);
 
       if (Array.isArray(dataProd)) loadedProducts = dataProd;
       if (Array.isArray(dataMov)) loadedMovements = dataMov;
@@ -631,15 +750,18 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (Array.isArray(dataUsers)) {
         const mappedUsers: UserProfile[] = dataUsers.map((u: any) => {
           const role = (u.role || 'Operador Depósito/Loja') as UserRole;
+          const isSys = Boolean(u.isSystemRole || role === 'super_admin' || role === 'ADMIN' || u.roleId === 'role_admin');
           return {
             id: u.uid || `usr-${u.id}`,
             name: u.name || 'Usuário GummyStock',
             email: u.email,
             role,
+            roleId: u.roleId,
+            isSystemRole: isSys,
             pin: u.pin || '',
             active: u.active ?? true,
-            avatarUrl: role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬',
-            permissions: getRolePermissions(role),
+            avatarUrl: isSys ? 'emoji:👑' : 'emoji:🍬',
+            permissions: u.permissions || getRolePermissions(role),
           };
         });
         setAllUsers(mappedUsers);
@@ -1352,6 +1474,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         registerMovement,
         markNotificationRead,
         markAllNotificationsRead,
+        roles,
+        isLoadingRoles,
+        fetchRoles,
+        createRole,
+        updateRole,
+        deleteRole,
         triggerCloudSync,
         exportBackupJSON,
         importBackupJSON,

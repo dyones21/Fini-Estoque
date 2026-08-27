@@ -22,15 +22,26 @@ import {
   Camera,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
-import { UserProfile, UserRole, UserPermissions } from '../types';
+import { UserProfile, UserRole, UserPermissions, Role } from '../types';
 import { getRolePermissions } from '../utils/permissionUtils';
 import { UserAvatar } from './UserAvatar';
 import { AvatarPickerModal } from './AvatarPickerModal';
+import { RoleManagementModal } from './RoleManagementModal';
 import { updateUserRoleViaApi, createUserWithPasswordViaApi, setUserPasswordViaApi } from '../utils/apiAuth';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
 
 export const UserManagementView: React.FC = () => {
-  const { users, currentUser, updateUser, addUser, deleteUser, checkPermission, isLoadingUsers } = useStock();
+  const { users, currentUser, updateUser, addUser, deleteUser, checkPermission, isLoadingUsers, roles, isLoadingRoles } = useStock();
+
+  const isSystemAdmin = Boolean(
+    currentUser?.isSystemRole ||
+      currentUser?.role === 'ADMIN' ||
+      currentUser?.role === 'super_admin' ||
+      currentUser?.roleId === 'role_admin' ||
+      (currentUser?.email && currentUser.email.toLowerCase() === 'dyones21@gmail.com')
+  );
+
+  const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
 
   if (!checkPermission('canManageUsers')) {
     return (
@@ -122,6 +133,7 @@ export const UserManagementView: React.FC = () => {
     canViewStock: true,
     canManageProducts: false,
     canAddNFEntries: true,
+    canDeleteNFEntries: false,
     canTransferStock: true,
     canRegisterMovements: true,
     canManageUsers: false,
@@ -137,17 +149,37 @@ export const UserManagementView: React.FC = () => {
   };
 
   const handleOpenCreateModal = () => {
+    const defaultRole = roles.find((r) => !r.isSystemRole) || roles[0];
+    const roleName = (defaultRole ? defaultRole.name : 'operador_deposito') as UserRole;
+
     setNewUserName('');
     setNewUserEmail('');
     setNewUserPassword(generateTemporaryPassword());
     setShowModalPassword(false);
     setIsCreatingUser(false);
-    setNewUserRole('operador_deposito');
+    setNewUserRole(roleName);
     setNewUserPin(Math.floor(1000 + Math.random() * 9000).toString()); // auto-generate convenient 4-digit PIN
     setNewUserAvatarUrl('emoji:🍬');
     setModalError('');
     setShowModalPin(true);
-    setNewUserPermissions(getRolePermissions('operador_deposito'));
+
+    if (defaultRole) {
+      setNewUserPermissions({
+        canViewDashboard: Boolean(defaultRole.canViewDashboard),
+        canViewStock: Boolean(defaultRole.canViewStock),
+        canManageProducts: Boolean(defaultRole.canManageProducts),
+        canAddNFEntries: Boolean(defaultRole.canAddNFEntries),
+        canDeleteNFEntries: Boolean(defaultRole.canDeleteNFEntries),
+        canTransferStock: Boolean(defaultRole.canTransferStock),
+        canRegisterMovements: Boolean(defaultRole.canRegisterMovements),
+        canManageUsers: Boolean(defaultRole.canManageUsers),
+        canManageBackup: Boolean(defaultRole.canManageBackup),
+        canWipeSystem: Boolean(defaultRole.canWipeSystem),
+      });
+    } else {
+      setNewUserPermissions(getRolePermissions(roleName));
+    }
+
     setIsCreateModalOpen(true);
   };
 
@@ -173,17 +205,56 @@ export const UserManagementView: React.FC = () => {
     }));
   };
 
-  const handleRolePreset = (role: UserRole) => {
-    setFormData((prev) => ({
-      ...prev,
-      role,
-      permissions: getRolePermissions(role),
-    }));
+  const handleRolePreset = (roleNameOrId: string) => {
+    const matchedRole = roles.find((r) => r.id === roleNameOrId || r.name === roleNameOrId);
+    if (matchedRole) {
+      setFormData((prev) => ({
+        ...prev,
+        role: matchedRole.name as UserRole,
+        roleId: matchedRole.id,
+        isSystemRole: matchedRole.isSystemRole,
+        permissions: {
+          canViewDashboard: Boolean(matchedRole.canViewDashboard),
+          canViewStock: Boolean(matchedRole.canViewStock),
+          canManageProducts: Boolean(matchedRole.canManageProducts),
+          canAddNFEntries: Boolean(matchedRole.canAddNFEntries),
+          canDeleteNFEntries: Boolean(matchedRole.canDeleteNFEntries),
+          canTransferStock: Boolean(matchedRole.canTransferStock),
+          canRegisterMovements: Boolean(matchedRole.canRegisterMovements),
+          canManageUsers: Boolean(matchedRole.canManageUsers),
+          canManageBackup: Boolean(matchedRole.canManageBackup),
+          canWipeSystem: Boolean(matchedRole.canWipeSystem),
+        },
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        role: roleNameOrId as UserRole,
+        permissions: getRolePermissions(roleNameOrId),
+      }));
+    }
   };
 
-  const handleModalRoleChange = (role: UserRole) => {
-    setNewUserRole(role);
-    setNewUserPermissions(getRolePermissions(role));
+  const handleModalRoleChange = (roleNameOrId: string) => {
+    const matchedRole = roles.find((r) => r.id === roleNameOrId || r.name === roleNameOrId);
+    if (matchedRole) {
+      setNewUserRole(matchedRole.name as UserRole);
+      setNewUserPermissions({
+        canViewDashboard: Boolean(matchedRole.canViewDashboard),
+        canViewStock: Boolean(matchedRole.canViewStock),
+        canManageProducts: Boolean(matchedRole.canManageProducts),
+        canAddNFEntries: Boolean(matchedRole.canAddNFEntries),
+        canDeleteNFEntries: Boolean(matchedRole.canDeleteNFEntries),
+        canTransferStock: Boolean(matchedRole.canTransferStock),
+        canRegisterMovements: Boolean(matchedRole.canRegisterMovements),
+        canManageUsers: Boolean(matchedRole.canManageUsers),
+        canManageBackup: Boolean(matchedRole.canManageBackup),
+        canWipeSystem: Boolean(matchedRole.canWipeSystem),
+      });
+    } else {
+      setNewUserRole(roleNameOrId as UserRole);
+      setNewUserPermissions(getRolePermissions(roleNameOrId));
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -352,12 +423,29 @@ export const UserManagementView: React.FC = () => {
     }
   };
 
-  const getRoleBadge = (role: UserRole) => {
-    switch (role) {
-      case 'super_admin':
-        return <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[10px] font-black uppercase border border-purple-200">Super Admin</span>;
-      case 'admin':
-        return <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black uppercase border border-rose-200">Administrador</span>;
+  const getRoleBadge = (roleNameOrUser: string | UserProfile) => {
+    const roleName = typeof roleNameOrUser === 'string' ? roleNameOrUser : roleNameOrUser.role;
+    const isSys = typeof roleNameOrUser === 'object' && roleNameOrUser.isSystemRole;
+
+    if (isSys || roleName === 'ADMIN' || roleName === 'super_admin' || roleName === 'admin') {
+      return (
+        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black uppercase border border-rose-200 flex items-center gap-1">
+          <Lock className="w-2.5 h-2.5 text-rose-600" />
+          ADMIN Fixo
+        </span>
+      );
+    }
+
+    const matched = roles.find((r) => r.name.toLowerCase() === roleName.toLowerCase());
+    if (matched) {
+      return (
+        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[10px] font-bold uppercase border border-slate-200">
+          {matched.name}
+        </span>
+      );
+    }
+
+    switch (roleName) {
       case 'gerente_loja':
         return <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold uppercase border border-amber-200">Gerente de Loja</span>;
       case 'operador_deposito':
@@ -365,7 +453,7 @@ export const UserManagementView: React.FC = () => {
       case 'caixa':
         return <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase border border-emerald-200">Caixa / Vendas</span>;
       default:
-        return <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[10px] font-bold uppercase border border-slate-200">Usuário</span>;
+        return <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[10px] font-bold uppercase border border-slate-200">{roleName}</span>;
     }
   };
 
@@ -383,13 +471,26 @@ export const UserManagementView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreateModal}
-          className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 shrink-0 hover:scale-[1.02]"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>+ Cadastrar Novo Usuário</span>
-        </button>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {isSystemAdmin && (
+            <button
+              type="button"
+              onClick={() => setIsRoleModalOpen(true)}
+              className="bg-slate-800/90 hover:bg-slate-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 shrink-0 hover:scale-[1.02] border border-slate-700"
+            >
+              <Shield className="w-4 h-4 text-rose-400" />
+              <span>Gerenciar Cargos</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleOpenCreateModal}
+            className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 shrink-0 hover:scale-[1.02]"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ Cadastrar Novo Usuário</span>
+          </button>
+        </div>
       </div>
 
       {/* Toast Notification */}
@@ -599,16 +700,15 @@ export const UserManagementView: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 mb-1">Cargo / Perfil de Função:</label>
               <select
                 disabled={!isEditing}
-                value={formData.role}
-                onChange={(e) => handleRolePreset(e.target.value as UserRole)}
+                value={formData.roleId || formData.role}
+                onChange={(e) => handleRolePreset(e.target.value)}
                 className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100"
               >
-                <option value="super_admin">Super Administrador (Acesso Total)</option>
-                <option value="admin">Administrador Geral</option>
-                <option value="gerente_loja">Gerente de Loja</option>
-                <option value="operador_deposito">Operador do Depósito Central</option>
-                <option value="caixa">Operador de Caixa / Vendas</option>
-                <option value="auditor">Auditor / Visualizador Apenas</option>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} {r.isSystemRole ? '(ADMIN Fixo)' : ''}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -649,34 +749,23 @@ export const UserManagementView: React.FC = () => {
                 <span>Aplicar Permissões Padrão por Cargo:</span>
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => handleRolePreset('admin')}
-                  className="px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[11px] font-bold hover:bg-rose-700 transition-colors"
-                >
-                  Total (Admin)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRolePreset('gerente_loja')}
-                  className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 text-[11px] font-bold hover:bg-amber-400 transition-colors"
-                >
-                  Gerente Loja
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRolePreset('operador_deposito')}
-                  className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[11px] font-bold hover:bg-blue-700 transition-colors"
-                >
-                  Depósito
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRolePreset('caixa')}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-bold hover:bg-emerald-700 transition-colors"
-                >
-                  Caixa
-                </button>
+                {roles.map((r) => {
+                  const isSelected = formData.roleId === r.id || formData.role === r.name;
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => handleRolePreset(r.id)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                        isSelected
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      {r.name} {r.isSystemRole ? '(ADMIN)' : ''}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -786,6 +875,29 @@ export const UserManagementView: React.FC = () => {
                 </div>
               </label>
 
+              {/* Permission Item: Delete NF Entry */}
+              <label
+                className={`p-3 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
+                  formData.permissions.canDeleteNFEntries
+                    ? 'bg-emerald-50/60 border-emerald-300 text-emerald-950'
+                    : 'bg-slate-50 border-slate-200 text-slate-400 opacity-75'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={!isEditing}
+                  checked={Boolean(formData.permissions.canDeleteNFEntries)}
+                  onChange={() => handleTogglePermission('canDeleteNFEntries')}
+                  className="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                />
+                <div>
+                  <p className="text-xs font-bold">Excluir e Estornar Notas Fiscais</p>
+                  <p className="text-[10px] text-slate-500">
+                    Remover lançamentos de NF e reverter saldos de entrada.
+                  </p>
+                </div>
+              </label>
+
               {/* Permission Item: Stock Transfers */}
               <label
                 className={`p-3 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
@@ -874,6 +986,32 @@ export const UserManagementView: React.FC = () => {
                   <p className="text-xs font-bold">Backup e Sincronização em Nuvem</p>
                   <p className="text-[10px] text-slate-500">
                     Forçar backup manual e gerenciar banco de dados na nuvem Supabase.
+                  </p>
+                </div>
+              </label>
+
+              {/* Permission Item: Wipe System */}
+              <label
+                className={`p-3 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
+                  formData.permissions.canWipeSystem
+                    ? 'bg-rose-50/80 border-rose-400 text-rose-950'
+                    : 'bg-slate-50 border-slate-200 text-slate-400 opacity-75'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={!isEditing}
+                  checked={Boolean(formData.permissions.canWipeSystem)}
+                  onChange={() => handleTogglePermission('canWipeSystem')}
+                  className="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                />
+                <div>
+                  <p className="text-xs font-bold font-black text-rose-700 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                    Zerar Todo o Sistema (Destrutivo)
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    Autorização para apagar todo o estoque, vendas e movimentações.
                   </p>
                 </div>
               </label>
@@ -1016,14 +1154,14 @@ export const UserManagementView: React.FC = () => {
                   </label>
                   <select
                     value={newUserRole}
-                    onChange={(e) => handleModalRoleChange(e.target.value as UserRole)}
+                    onChange={(e) => handleModalRoleChange(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:bg-white focus:outline-none"
                   >
-                    <option value="admin">Administrador (Acesso Total)</option>
-                    <option value="gerente_loja">Gerente de Loja</option>
-                    <option value="operador_deposito">Operador do Depósito Central</option>
-                    <option value="caixa">Operador de Caixa / Vendas</option>
-                    <option value="auditor">Auditor / Visualizador Apenas</option>
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.name}>
+                        {r.name} {r.isSystemRole ? '(ADMIN Fixo)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1184,6 +1322,18 @@ export const UserManagementView: React.FC = () => {
                   </label>
 
                   <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${
+                    newUserPermissions.canDeleteNFEntries ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(newUserPermissions.canDeleteNFEntries)}
+                      onChange={() => handleToggleModalPermission('canDeleteNFEntries')}
+                      className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                    />
+                    <span>Excluir e Estornar Notas Fiscais</span>
+                  </label>
+
+                  <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${
                     newUserPermissions.canTransferStock ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-500'
                   }`}>
                     <input
@@ -1229,6 +1379,18 @@ export const UserManagementView: React.FC = () => {
                       className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
                     />
                     <span>Backup e Sincronização em Nuvem</span>
+                  </label>
+
+                  <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${
+                    newUserPermissions.canWipeSystem ? 'bg-rose-50 border-rose-400 text-rose-950' : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(newUserPermissions.canWipeSystem)}
+                      onChange={() => handleToggleModalPermission('canWipeSystem')}
+                      className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                    />
+                    <span className="text-rose-700 font-black">Zerar Todo o Sistema (Destrutivo)</span>
                   </label>
 
                 </div>
@@ -1369,6 +1531,12 @@ export const UserManagementView: React.FC = () => {
             setNewUserAvatarUrl(newAvatarUrl);
           }
         }}
+      />
+
+      {/* Dynamic Role Management Modal (ADMIN Only) */}
+      <RoleManagementModal
+        isOpen={isRoleModalOpen}
+        onClose={() => setIsRoleModalOpen(false)}
       />
 
     </div>

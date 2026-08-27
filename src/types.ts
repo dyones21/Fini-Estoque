@@ -4,7 +4,26 @@ export type ProductCategory = string;
 
 export type MovementType = 'entrada_nf' | 'transferencia_deposito_loja' | 'venda_loja' | 'perda_avaria' | 'ajuste_inventario';
 
-export type UserRole = 'super_admin' | 'admin' | 'gerente_loja' | 'operador_deposito' | 'caixa' | 'auditor';
+export type UserRole = string;
+
+export interface Role {
+  id: string;
+  name: string;
+  isSystemRole: boolean;
+  canViewDashboard: boolean;
+  canViewStock: boolean;
+  canManageProducts: boolean;
+  canAddNFEntries: boolean;
+  canDeleteNFEntries?: boolean;
+  canTransferStock: boolean;
+  canRegisterMovements: boolean;
+  canManageUsers: boolean;
+  canManageBackup: boolean;
+  canManageCompany?: boolean;
+  canWipeSystem?: boolean;
+  createdAt?: string;
+  userCount?: number;
+}
 
 export interface CompanyInfo {
   id: string;          // ex: 'default-company'
@@ -43,6 +62,8 @@ export interface UserProfile {
   name: string;
   email: string;
   role: UserRole;
+  roleId?: string;
+  isSystemRole?: boolean;
   pin: string; // PIN de 4 dígitos
   permissions: UserPermissions;
   avatarUrl?: string;
