@@ -260,8 +260,8 @@ async function startServer() {
   });
 
   // ROLES API (DYNAMIC RBAC)
-  // GET /api/roles - Lista todos os cargos (disponível para usuários autenticados para popular selects/perfis)
-  app.get('/api/roles', requireAuth, async (req, res) => {
+  // GET /api/roles - Lista todos os cargos (Exige permissão canManageUsers)
+  app.get('/api/roles', requireAuth, requirePermission('canManageUsers'), async (req, res) => {
     try {
       const rolesList = await getAllRolesFromDb();
       res.json(rolesList);

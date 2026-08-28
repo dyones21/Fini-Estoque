@@ -22,6 +22,12 @@ import {
   User,
   Clock,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Minus,
+  Info,
+  Truck,
+  ShieldCheck,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { NFEntry } from '../types';
@@ -43,6 +49,14 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
 
   // Selected NF for Detail Modal
   const [selectedNF, setSelectedNF] = useState<NFEntry | null>(null);
+  const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
+
+  const toggleItemExpansion = (idx: number) => {
+    setExpandedItems((prev) => ({
+      ...prev,
+      [idx]: !prev[idx],
+    }));
+  };
 
   // Copy Access Key State
   const [copiedKey, setCopiedKey] = useState(false);
@@ -59,6 +73,84 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
     setCopiedKey(true);
     setTimeout(() => setCopiedKey(false), 2000);
   };
+
+  // Calculate Consolidated Taxes and Expenses Breakdown for Selected NF
+  const nfTotals = useMemo(() => {
+    if (!selectedNF?.items || selectedNF.items.length === 0) return null;
+
+    let totalFreight = 0;
+    let totalInsurance = 0;
+    let totalOther = 0;
+    let totalDiscount = 0;
+    let totalIcmsSt = 0;
+    let totalIpi = 0;
+    let totalIi = 0;
+    let totalDifal = 0;
+    let totalRecoverableTaxes = 0;
+    let totalBaseProducts = 0;
+    let totalCalculatedCost = 0;
+
+    selectedNF.items.forEach((item) => {
+      const freight = item.freightAllocated || 0;
+      const insurance = item.insuranceAllocated || 0;
+      const other = item.otherExpensesAllocated || 0;
+      const discount = item.discountAllocated || 0;
+      const icmsSt = item.icmsStAllocated || 0;
+      const ipi = item.ipiAllocated || 0;
+      const ii = item.iiAllocated || 0;
+      const difal = item.difalAllocated || 0;
+      const recTaxes = item.recoverableTaxesAllocated || 0;
+
+      const itemTotalCost = item.totalCost || (item.quantity * item.costPrice) || 0;
+      const netAlloc = freight + insurance + other + icmsSt + ipi + ii + difal - discount - recTaxes;
+      const baseProdVal = item.itemProdValue !== undefined && item.itemProdValue > 0
+        ? item.itemProdValue
+        : Math.max(0, itemTotalCost - netAlloc);
+
+      totalFreight += freight;
+      totalInsurance += insurance;
+      totalOther += other;
+      totalDiscount += discount;
+      totalIcmsSt += icmsSt;
+      totalIpi += ipi;
+      totalIi += ii;
+      totalDifal += difal;
+      totalRecoverableTaxes += recTaxes;
+      totalBaseProducts += baseProdVal;
+      totalCalculatedCost += itemTotalCost;
+    });
+
+    const totalTaxes = totalIcmsSt + totalIpi + totalIi + totalDifal;
+    const totalDeductions = totalDiscount + totalRecoverableTaxes;
+    const totalAdditionalExpenses = totalFreight + totalInsurance + totalOther;
+
+    // Verificar se existe algum encargo/imposto rateado na nota (se todos forem 0, é nota manual sem rateio)
+    const hasAllocations =
+      totalFreight > 0 ||
+      totalInsurance > 0 ||
+      totalOther > 0 ||
+      totalDiscount > 0 ||
+      totalTaxes > 0 ||
+      totalRecoverableTaxes > 0;
+
+    return {
+      totalFreight,
+      totalInsurance,
+      totalOther,
+      totalDiscount,
+      totalIcmsSt,
+      totalIpi,
+      totalIi,
+      totalDifal,
+      totalRecoverableTaxes,
+      totalBaseProducts,
+      totalTaxes,
+      totalDeductions,
+      totalAdditionalExpenses,
+      totalCalculatedCost,
+      hasAllocations,
+    };
+  }, [selectedNF]);
 
   const handleConfirmDeleteNF = async () => {
     if (!nfToDelete) return;
@@ -477,6 +569,92 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
                 </div>
               )}
 
+              {/* RESUMO CONSOLIDADO DE IMPOSTOS E DESPESAS DA NF-E (Apenas se houver valores calculados) */}
+              {nfTotals && nfTotals.hasAllocations && (
+                <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-slate-700 space-y-3.5 shadow-lg animate-in fade-in">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700/80 pb-3 gap-2">
+                    <div className="flex items-center gap-2">
+                      <Receipt className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <div>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-emerald-400">
+                          Resumo Consolidado de Custos e Impostos da NF-e
+                        </h4>
+                        <p className="text-[11px] text-slate-300">
+                          Rateio proporcional de frete, despesas adicionais e tributos fiscais incorporados ao custo real.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-right">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Valor Total NF:</span>
+                      <span className="text-sm sm:text-base font-black text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-lg">
+                        {formatCurrency(selectedNF.totalValue || nfTotals.totalCalculatedCost)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Metrics Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                    <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700/60">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Produtos (Base)</span>
+                      <span className="font-extrabold text-slate-100 text-sm block">
+                        {formatCurrency(nfTotals.totalBaseProducts)}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700/60">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block">+ Frete & Despesas</span>
+                        {nfTotals.totalAdditionalExpenses > 0 && (
+                          <Truck className="w-3 h-3 text-amber-400" />
+                        )}
+                      </div>
+                      <span className={`font-extrabold text-sm block ${nfTotals.totalAdditionalExpenses > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
+                        {formatCurrency(nfTotals.totalAdditionalExpenses)}
+                      </span>
+                      <div className="flex flex-wrap gap-1 mt-1 text-[9px] text-slate-400">
+                        {nfTotals.totalFreight > 0 && <span>Frete: {formatCurrency(nfTotals.totalFreight)}</span>}
+                        {nfTotals.totalInsurance > 0 && <span>• Seg: {formatCurrency(nfTotals.totalInsurance)}</span>}
+                        {nfTotals.totalOther > 0 && <span>• Outros: {formatCurrency(nfTotals.totalOther)}</span>}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700/60">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block">+ Tributos Totais</span>
+                        {nfTotals.totalTaxes > 0 && (
+                          <ShieldCheck className="w-3 h-3 text-rose-400" />
+                        )}
+                      </div>
+                      <span className={`font-extrabold text-sm block ${nfTotals.totalTaxes > 0 ? 'text-rose-300' : 'text-slate-400'}`}>
+                        {formatCurrency(nfTotals.totalTaxes)}
+                      </span>
+                      <div className="flex flex-wrap gap-1 mt-1 text-[9px] text-slate-400">
+                        {nfTotals.totalIcmsSt > 0 && <span>ST: {formatCurrency(nfTotals.totalIcmsSt)}</span>}
+                        {nfTotals.totalIpi > 0 && <span>• IPI: {formatCurrency(nfTotals.totalIpi)}</span>}
+                        {nfTotals.totalIi > 0 && <span>• II: {formatCurrency(nfTotals.totalIi)}</span>}
+                        {nfTotals.totalDifal > 0 && <span>• DIFAL: {formatCurrency(nfTotals.totalDifal)}</span>}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700/60">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block">- Deduções Fiscais</span>
+                        {nfTotals.totalDeductions > 0 && (
+                          <Minus className="w-3 h-3 text-emerald-400" />
+                        )}
+                      </div>
+                      <span className={`font-extrabold text-sm block ${nfTotals.totalDeductions > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                        {formatCurrency(nfTotals.totalDeductions)}
+                      </span>
+                      <div className="flex flex-wrap gap-1 mt-1 text-[9px] text-slate-400">
+                        {nfTotals.totalDiscount > 0 && <span>Desc: {formatCurrency(nfTotals.totalDiscount)}</span>}
+                        {nfTotals.totalRecoverableTaxes > 0 && <span>• Recup: {formatCurrency(nfTotals.totalRecoverableTaxes)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Tabela de Produtos / Itens da Nota */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -502,30 +680,228 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {selectedNF.items?.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
-                          <td className="py-3 px-3.5 font-bold text-slate-800">
-                            {item.productName}
-                          </td>
-                          <td className="py-3 px-3 text-center font-extrabold text-slate-900">
-                            <span className="px-2 py-0.5 bg-slate-100 rounded-lg">
-                              {item.quantity} un
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-right font-medium text-slate-600">
-                            {formatCurrency(item.costPrice || 0)}
-                          </td>
-                          <td className="py-3 px-3 text-right font-extrabold text-slate-900">
-                            {formatCurrency(item.totalCost || (item.quantity * item.costPrice) || 0)}
-                          </td>
-                          <td className="py-3 px-3 font-mono text-slate-600 text-[11px]">
-                            {item.batchNumber || '-'}
-                          </td>
-                          <td className="py-3 px-3 text-slate-600 font-semibold text-[11px]">
-                            {formatDate(item.expirationDate)}
-                          </td>
-                        </tr>
-                      ))}
+                      {selectedNF.items?.map((item, idx) => {
+                        const freight = item.freightAllocated || 0;
+                        const insurance = item.insuranceAllocated || 0;
+                        const other = item.otherExpensesAllocated || 0;
+                        const discount = item.discountAllocated || 0;
+                        const icmsSt = item.icmsStAllocated || 0;
+                        const ipi = item.ipiAllocated || 0;
+                        const ii = item.iiAllocated || 0;
+                        const difal = item.difalAllocated || 0;
+                        const recTaxes = item.recoverableTaxesAllocated || 0;
+
+                        const itemTotalCost = item.totalCost || (item.quantity * item.costPrice) || 0;
+                        const netAlloc = freight + insurance + other + icmsSt + ipi + ii + difal - discount - recTaxes;
+                        const baseProdVal = item.itemProdValue !== undefined && item.itemProdValue > 0
+                          ? item.itemProdValue
+                          : Math.max(0, itemTotalCost - netAlloc);
+                        const baseUnitVal = item.quantity > 0 ? baseProdVal / item.quantity : 0;
+
+                        const hasItemAllocations =
+                          freight > 0 ||
+                          insurance > 0 ||
+                          other > 0 ||
+                          discount > 0 ||
+                          icmsSt > 0 ||
+                          ipi > 0 ||
+                          ii > 0 ||
+                          difal > 0 ||
+                          recTaxes > 0;
+
+                        const isExpanded = !!expandedItems[idx];
+
+                        return (
+                          <React.Fragment key={idx}>
+                            <tr className="hover:bg-slate-50/60 transition-colors">
+                              <td className="py-3 px-3.5 font-bold text-slate-800">
+                                <div className="space-y-1">
+                                  <span className="block font-extrabold text-slate-900">{item.productName}</span>
+                                  {hasItemAllocations && (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleItemExpansion(idx)}
+                                      className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-2 py-0.5 rounded-md transition-colors cursor-pointer border border-rose-200/60"
+                                    >
+                                      <Receipt className="w-3 h-3 text-rose-500" />
+                                      <span>{isExpanded ? 'Ocultar composição' : 'Ver composição do custo'}</span>
+                                      {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 text-center font-extrabold text-slate-900">
+                                <span className="px-2 py-0.5 bg-slate-100 rounded-lg">
+                                  {item.quantity} un
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right font-medium text-slate-600">
+                                <div>
+                                  <span className="block font-bold text-slate-800">{formatCurrency(item.costPrice || 0)}</span>
+                                  {hasItemAllocations && (
+                                    <span className="text-[10px] text-slate-400 block" title="Preço de tabela (base)">
+                                      Base: {formatCurrency(baseUnitVal)}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 text-right font-extrabold text-slate-900">
+                                <span className="text-emerald-600 font-extrabold">
+                                  {formatCurrency(itemTotalCost)}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 font-mono text-slate-600 text-[11px]">
+                                {item.batchNumber || '-'}
+                              </td>
+                              <td className="py-3 px-3 text-slate-600 font-semibold text-[11px]">
+                                {formatDate(item.expirationDate)}
+                              </td>
+                            </tr>
+
+                            {/* Detalhamento da Composição do Custo Real do Item (Apenas se expandido) */}
+                            {isExpanded && hasItemAllocations && (
+                              <tr className="bg-slate-900 text-slate-100 animate-in fade-in">
+                                <td colSpan={6} className="p-3.5 sm:p-4">
+                                  <div className="space-y-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700 pb-2 gap-1.5">
+                                      <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-emerald-400">
+                                        <Receipt className="w-3.5 h-3.5" />
+                                        <span>Composição do Custo Real: {item.productName} (+{item.quantity} un)</span>
+                                      </div>
+                                      <span className="text-[11px] font-mono text-slate-300">
+                                        Custo Real Unitário: <strong className="text-emerald-400 font-black">{formatCurrency(item.costPrice || 0)}</strong>
+                                      </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                                      {/* Linha: Valor Base do Produto */}
+                                      <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase block">Valor do Produto (Base)</span>
+                                        <div className="flex justify-between items-baseline mt-0.5">
+                                          <span className="font-bold text-slate-100">{formatCurrency(baseProdVal)}</span>
+                                          <span className="text-[10px] text-slate-400 font-mono">({formatCurrency(baseUnitVal)}/un)</span>
+                                        </div>
+                                      </div>
+
+                                      {/* Linha: Frete (se > 0) */}
+                                      {freight > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-amber-300 uppercase block">+ Frete Rateado</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-amber-300">+{formatCurrency(freight)}</span>
+                                            <span className="text-[10px] text-amber-200/70 font-mono">(+{formatCurrency(freight / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: Seguro (se > 0) */}
+                                      {insurance > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-amber-300 uppercase block">+ Seguro Rateado</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-amber-300">+{formatCurrency(insurance)}</span>
+                                            <span className="text-[10px] text-amber-200/70 font-mono">(+{formatCurrency(insurance / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: Outras Despesas (se > 0) */}
+                                      {other > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-amber-300 uppercase block">+ Outras Despesas Rateadas</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-amber-300">+{formatCurrency(other)}</span>
+                                            <span className="text-[10px] text-amber-200/70 font-mono">(+{formatCurrency(other / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: Desconto Comercial (se > 0) */}
+                                      {discount > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-emerald-300 uppercase block">- Desconto Rateado</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-emerald-300">-{formatCurrency(discount)}</span>
+                                            <span className="text-[10px] text-emerald-200/70 font-mono">(-{formatCurrency(discount / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: ICMS-ST (se > 0) */}
+                                      {icmsSt > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-rose-300 uppercase block">+ ICMS-ST Rateado</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-rose-300">+{formatCurrency(icmsSt)}</span>
+                                            <span className="text-[10px] text-rose-200/70 font-mono">(+{formatCurrency(icmsSt / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: IPI (se > 0) */}
+                                      {ipi > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-rose-300 uppercase block">+ IPI Rateado</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-rose-300">+{formatCurrency(ipi)}</span>
+                                            <span className="text-[10px] text-rose-200/70 font-mono">(+{formatCurrency(ipi / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: II (se > 0) */}
+                                      {ii > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-rose-300 uppercase block">+ Imposto de Importação (II)</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-rose-300">+{formatCurrency(ii)}</span>
+                                            <span className="text-[10px] text-rose-200/70 font-mono">(+{formatCurrency(ii / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: DIFAL (se > 0) */}
+                                      {difal > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-amber-300 uppercase block">+ DIFAL Rateado</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-amber-300">+{formatCurrency(difal)}</span>
+                                            <span className="text-[10px] text-amber-200/70 font-mono">(+{formatCurrency(difal / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Linha: Impostos Recuperáveis (se > 0) */}
+                                      {recTaxes > 0 && (
+                                        <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                                          <span className="text-[9px] font-bold text-emerald-300 uppercase block">- Impostos Recuperáveis</span>
+                                          <div className="flex justify-between items-baseline mt-0.5">
+                                            <span className="font-bold text-emerald-300">-{formatCurrency(recTaxes)}</span>
+                                            <span className="text-[10px] text-emerald-200/70 font-mono">(-{formatCurrency(recTaxes / item.quantity)}/un)</span>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Total Custo Real do Item */}
+                                      <div className="bg-emerald-950/80 p-2.5 rounded-xl border border-emerald-500/40 sm:col-span-2 lg:col-span-3 flex justify-between items-center">
+                                        <div>
+                                          <span className="text-[9px] font-black text-emerald-400 uppercase block">(=) Custo Real Final de Aquisição</span>
+                                          <span className="text-[11px] text-slate-300 font-mono">
+                                            {item.quantity} un × {formatCurrency(item.costPrice || 0)}
+                                          </span>
+                                        </div>
+                                        <span className="text-base font-black text-emerald-400">
+                                          {formatCurrency(itemTotalCost)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="bg-slate-50/90 font-extrabold border-t border-slate-200 text-slate-900">
