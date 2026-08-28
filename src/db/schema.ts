@@ -138,6 +138,15 @@ export const nfItems = pgTable('nf_items', {
   totalCost: doublePrecision('total_cost').notNull(),
   batchNumber: text('batch_number').notNull(),
   expirationDate: text('expiration_date').notNull(),
+  freightAllocated: doublePrecision('freight_allocated').notNull().default(0),
+  insuranceAllocated: doublePrecision('insurance_allocated').notNull().default(0),
+  otherExpensesAllocated: doublePrecision('other_expenses_allocated').notNull().default(0),
+  discountAllocated: doublePrecision('discount_allocated').notNull().default(0),
+  icmsStAllocated: doublePrecision('icms_st_allocated').notNull().default(0),
+  ipiAllocated: doublePrecision('ipi_allocated').notNull().default(0),
+  iiAllocated: doublePrecision('ii_allocated').notNull().default(0),
+  difalAllocated: doublePrecision('difal_allocated').notNull().default(0),
+  recoverableTaxesAllocated: doublePrecision('recoverable_taxes_allocated').notNull().default(0),
 });
 
 // Store Sales Table

@@ -422,6 +422,15 @@ export async function getAllNFEntries(): Promise<NFEntry[]> {
           totalCost: item.totalCost,
           batchNumber: item.batchNumber || '',
           expirationDate: item.expirationDate || '',
+          freightAllocated: item.freightAllocated || 0,
+          insuranceAllocated: item.insuranceAllocated || 0,
+          otherExpensesAllocated: item.otherExpensesAllocated || 0,
+          discountAllocated: item.discountAllocated || 0,
+          icmsStAllocated: item.icmsStAllocated || 0,
+          ipiAllocated: item.ipiAllocated || 0,
+          iiAllocated: item.iiAllocated || 0,
+          difalAllocated: item.difalAllocated || 0,
+          recoverableTaxesAllocated: item.recoverableTaxesAllocated || 0,
         }));
 
       return {
@@ -533,6 +542,15 @@ export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
             totalCost: item.totalCost,
             batchNumber: item.batchNumber || 'LOTE-PADRAO',
             expirationDate: item.expirationDate || new Date().toISOString().slice(0, 10),
+            freightAllocated: item.freightAllocated || 0,
+            insuranceAllocated: item.insuranceAllocated || 0,
+            otherExpensesAllocated: item.otherExpensesAllocated || 0,
+            discountAllocated: item.discountAllocated || 0,
+            icmsStAllocated: item.icmsStAllocated || 0,
+            ipiAllocated: item.ipiAllocated || 0,
+            iiAllocated: item.iiAllocated || 0,
+            difalAllocated: item.difalAllocated || 0,
+            recoverableTaxesAllocated: item.recoverableTaxesAllocated || 0,
           });
 
           // 2. Atualiza estoque no Depósito Central e preço de custo no cadastro do produto

@@ -50,6 +50,13 @@
       "when": 1787868969992,
       "tag": "0006_remarkable_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787941898045,
+      "tag": "0007_third_siren",
+      "breakpoints": true
     }
   ]
 }

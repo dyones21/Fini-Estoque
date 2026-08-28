@@ -97,10 +97,23 @@ export interface NFItem {
   productId: string;
   productName: string;
   quantity: number;
-  costPrice: number;
-  totalCost: number;
+  costPrice: number; // Custo real unitário de aquisição (após rateio)
+  totalCost: number; // Custo real total de aquisição (após rateio)
   batchNumber: string;
   expirationDate: string;
+
+  // Detalhamento do rateio proporcional (opcional para retrocompatibilidade)
+  unitProdPrice?: number;
+  itemProdValue?: number;
+  freightAllocated?: number;
+  insuranceAllocated?: number;
+  otherExpensesAllocated?: number;
+  discountAllocated?: number;
+  icmsStAllocated?: number;
+  ipiAllocated?: number;
+  iiAllocated?: number;
+  difalAllocated?: number;
+  recoverableTaxesAllocated?: number;
 }
 
 export interface NFEntry {

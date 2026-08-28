@@ -3,6 +3,8 @@ import {
   X,
   FileSpreadsheet,
   Plus,
+  Minus,
+  Receipt,
   Trash2,
   Warehouse,
   CheckCircle2,
@@ -24,7 +26,12 @@ import { NFItem, Product, ProductCategory } from '../types';
 import { formatCurrency, parseNumber } from '../utils/inventoryUtils';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { authFetch } from '../utils/apiAuth';
-import { ParsedNFData, ParsedNFItem } from '../utils/nfeXmlParser';
+import {
+  ParsedNFData,
+  ParsedNFItem,
+  NFXmlTotals,
+  calculateItemAllocations,
+} from '../utils/nfeXmlParser';
 
 interface NFEntryModalProps {
   isOpen: boolean;
@@ -38,11 +45,28 @@ interface ImportedNFItem {
   cProd: string;
   description: string;
   quantity: number;
-  costPrice: number;
   batchNumber: string;
   expirationDate: string;
   unit: Product['unit'];
   category: ProductCategory;
+
+  // Valores de aquisição e rateio
+  unitProdPrice: number;
+  itemProdValue: number;
+  freightAllocated: number;
+  insuranceAllocated: number;
+  otherExpensesAllocated: number;
+  discountAllocated: number;
+  icmsStAllocated: number;
+  ipiAllocated: number;
+  iiAllocated: number;
+  difalAllocated: number;
+  recoverableTaxesAllocated: number;
+
+  // Custo Real de Aquisição
+  costPrice: number; // Unitário
+  totalCost: number; // Total
+
   // Link status
   linkType: 'existing' | 'new';
   matchedProductId: string;
@@ -90,6 +114,21 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     issueDate: new Date().toISOString().slice(0, 10),
     notes: '',
   });
+
+  // XML Totals & Manual Rateio Inputs
+  const [xmlTotals, setXmlTotals] = useState<NFXmlTotals>({
+    vProd: 0,
+    vFrete: 0,
+    vSeg: 0,
+    vOutro: 0,
+    vDesc: 0,
+    vICMSST: 0,
+    vIPI: 0,
+    vII: 0,
+    vNF: 0,
+  });
+  const [difalInput, setDifalInput] = useState<string>('0,00');
+  const [recoverableTaxesInput, setRecoverableTaxesInput] = useState<string>('0,00');
 
   const [importedItems, setImportedItems] = useState<ImportedNFItem[]>([]);
 
@@ -233,6 +272,11 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         notes: parsedData.notes,
       });
 
+      // Salva os totais fiscais extraídos do XML
+      setXmlTotals(parsedData.totals);
+      setDifalInput('0,00');
+      setRecoverableTaxesInput('0,00');
+
       // Margem de lucro configurada pela empresa (padrão 85% se não definida)
       const markupPercent =
         companyInfo?.defaultMarkupPercent !== undefined &&
@@ -241,7 +285,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
           ? Number(companyInfo.defaultMarkupPercent)
           : 85;
 
-      // Mapeia os itens do XML com verificação de vínculo a produtos existentes
+      // Mapeia os itens do XML com verificação de vínculo a produtos existentes e alocações de custo real
       const mapped: ImportedNFItem[] = parsedData.items.map((raw: ParsedNFItem) => {
         const matched = findMatchingProduct(raw.description, raw.codeEAN);
         const standardUnit = mapUnitToStandard(raw.unit);
@@ -255,7 +299,19 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
           cProd: raw.cProd,
           description: raw.description,
           quantity: raw.quantity,
+          unitProdPrice: raw.unitProdPrice,
+          itemProdValue: raw.itemProdValue,
+          freightAllocated: raw.freightAllocated,
+          insuranceAllocated: raw.insuranceAllocated,
+          otherExpensesAllocated: raw.otherExpensesAllocated,
+          discountAllocated: raw.discountAllocated,
+          icmsStAllocated: raw.icmsStAllocated,
+          ipiAllocated: raw.ipiAllocated,
+          iiAllocated: raw.iiAllocated,
+          difalAllocated: raw.difalAllocated,
+          recoverableTaxesAllocated: raw.recoverableTaxesAllocated,
           costPrice: raw.costPrice,
+          totalCost: raw.totalCost,
           batchNumber: raw.batchNumber,
           expirationDate: raw.expirationDate,
           unit: matched ? matched.unit : standardUnit,
@@ -282,6 +338,83 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     } finally {
       setIsProcessingXml(false);
     }
+  };
+
+  // Helper para recalcular os rateios de todos os itens quando DIFAL ou Impostos Recuperáveis mudam
+  const applyAllocations = (
+    items: ImportedNFItem[],
+    totals: NFXmlTotals,
+    difalVal: number,
+    recTaxesVal: number
+  ): ImportedNFItem[] => {
+    const markupPercent =
+      companyInfo?.defaultMarkupPercent !== undefined &&
+      !isNaN(Number(companyInfo.defaultMarkupPercent)) &&
+      Number(companyInfo.defaultMarkupPercent) >= 0
+        ? Number(companyInfo.defaultMarkupPercent)
+        : 85;
+
+    const totalVProd =
+      totals.vProd > 0
+        ? totals.vProd
+        : items.reduce((acc, it) => acc + (it.itemProdValue || it.quantity * it.unitProdPrice), 0);
+
+    return items.map((item) => {
+      const alloc = calculateItemAllocations({
+        itemProdValue: item.itemProdValue || item.quantity * item.unitProdPrice,
+        quantity: item.quantity,
+        totalVProd,
+        freightTotal: totals.vFrete,
+        insuranceTotal: totals.vSeg,
+        otherExpensesTotal: totals.vOutro,
+        discountTotal: totals.vDesc,
+        icmsStTotal: totals.vICMSST,
+        ipiTotal: totals.vIPI,
+        iiTotal: totals.vII,
+        difalTotal: difalVal,
+        recoverableTaxesTotal: recTaxesVal,
+        itemCount: items.length,
+      });
+
+      const suggestedSellPrice =
+        Math.round(alloc.costPrice * (1 + markupPercent / 100) * 100) / 100;
+
+      return {
+        ...item,
+        freightAllocated: alloc.freightAllocated,
+        insuranceAllocated: alloc.insuranceAllocated,
+        otherExpensesAllocated: alloc.otherExpensesAllocated,
+        discountAllocated: alloc.discountAllocated,
+        icmsStAllocated: alloc.icmsStAllocated,
+        ipiAllocated: alloc.ipiAllocated,
+        iiAllocated: alloc.iiAllocated,
+        difalAllocated: alloc.difalAllocated,
+        recoverableTaxesAllocated: alloc.recoverableTaxesAllocated,
+        costPrice: alloc.costPrice,
+        totalCost: alloc.totalCost,
+        newProductData: {
+          ...item.newProductData,
+          sellPrice:
+            item.newProductData.sellPrice > 0
+              ? item.newProductData.sellPrice
+              : suggestedSellPrice,
+        },
+      };
+    });
+  };
+
+  const handleDifalChange = (val: string) => {
+    setDifalInput(val);
+    const difalNum = parseNumber(val, 0);
+    const recNum = parseNumber(recoverableTaxesInput, 0);
+    setImportedItems((prev) => applyAllocations(prev, xmlTotals, difalNum, recNum));
+  };
+
+  const handleRecoverableTaxesChange = (val: string) => {
+    setRecoverableTaxesInput(val);
+    const difalNum = parseNumber(difalInput, 0);
+    const recNum = parseNumber(val, 0);
+    setImportedItems((prev) => applyAllocations(prev, xmlTotals, difalNum, recNum));
   };
 
   // Toggle item link mode (existing vs new)
@@ -330,12 +463,21 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
 
   // Remove item from imported XML list
   const removeImportedItem = (index: number) => {
-    setImportedItems((prev) => prev.filter((_, i) => i !== index));
+    setImportedItems((prev) => {
+      const remaining = prev.filter((_, i) => i !== index);
+      const difalNum = parseNumber(difalInput, 0);
+      const recNum = parseNumber(recoverableTaxesInput, 0);
+      return applyAllocations(remaining, xmlTotals, difalNum, recNum);
+    });
   };
 
   // Calculate totals
-  const xmlTotalValue = importedItems.reduce(
-    (acc, item) => acc + item.quantity * item.costPrice,
+  const xmlTotalRealCost = importedItems.reduce(
+    (acc, item) => acc + (item.totalCost || item.quantity * item.costPrice),
+    0
+  );
+  const xmlTotalProductsValue = importedItems.reduce(
+    (acc, item) => acc + (item.itemProdValue || item.quantity * (item.unitProdPrice || item.costPrice)),
     0
   );
 
@@ -398,8 +540,19 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         productId: finalProductId,
         productName: finalProductName,
         quantity: item.quantity,
+        unitProdPrice: item.unitProdPrice,
+        itemProdValue: item.itemProdValue,
+        freightAllocated: item.freightAllocated,
+        insuranceAllocated: item.insuranceAllocated,
+        otherExpensesAllocated: item.otherExpensesAllocated,
+        discountAllocated: item.discountAllocated,
+        icmsStAllocated: item.icmsStAllocated,
+        ipiAllocated: item.ipiAllocated,
+        iiAllocated: item.iiAllocated,
+        difalAllocated: item.difalAllocated,
+        recoverableTaxesAllocated: item.recoverableTaxesAllocated,
         costPrice: item.costPrice,
-        totalCost: item.quantity * item.costPrice,
+        totalCost: item.totalCost || item.quantity * item.costPrice,
         batchNumber: item.batchNumber,
         expirationDate: item.expirationDate,
       });
@@ -414,7 +567,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         cnpjSupplier: xmlHeader.cnpjSupplier,
         issueDate: xmlHeader.issueDate,
         items: finalNFItems,
-        totalValue: xmlTotalValue,
+        totalValue: xmlTotals.vNF > 0 ? xmlTotals.vNF : xmlTotalRealCost,
         notes: `${xmlHeader.notes} (${newProductsCreatedCount} novos produtos cadastrados auto)`,
         createdBy: currentUser.name,
       });
@@ -700,6 +853,126 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
               </div>
             )}
 
+            {/* TAXES, EXPENSES & PROPORTIONAL ALLOCATION BREAKDOWN CARD */}
+            {xmlHeader.numberNF && (
+              <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-slate-700 space-y-4 shadow-lg animate-in fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700/80 pb-3 gap-2">
+                  <div className="flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-emerald-400">
+                        Cálculo do Custo Real de Aquisição (Rateio Proporcional)
+                      </h4>
+                      <p className="text-[11px] text-slate-300">
+                        Valores oficiais do XML rateados pelo peso de cada item no total de produtos (vProd).
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-right">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Custo Real Total:</span>
+                    <span className="text-sm sm:text-base font-black text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-lg">
+                      {formatCurrency(xmlTotalRealCost)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* XML Official Values Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">Produtos (vProd)</span>
+                    <span className="font-bold text-slate-100 block">{formatCurrency(xmlTotals.vProd || xmlTotalProductsValue)}</span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">+ Frete (vFrete)</span>
+                    <span className={`font-bold block ${xmlTotals.vFrete > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
+                      {formatCurrency(xmlTotals.vFrete)}
+                    </span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">+ Seguro (vSeg)</span>
+                    <span className={`font-bold block ${xmlTotals.vSeg > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
+                      {formatCurrency(xmlTotals.vSeg)}
+                    </span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">+ Outras Desp.</span>
+                    <span className={`font-bold block ${xmlTotals.vOutro > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
+                      {formatCurrency(xmlTotals.vOutro)}
+                    </span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">- Desconto (vDesc)</span>
+                    <span className={`font-bold block ${xmlTotals.vDesc > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                      {formatCurrency(xmlTotals.vDesc)}
+                    </span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">+ ICMS-ST (vST)</span>
+                    <span className={`font-bold block ${xmlTotals.vICMSST > 0 ? 'text-rose-300' : 'text-slate-400'}`}>
+                      {formatCurrency(xmlTotals.vICMSST)}
+                    </span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">+ IPI (vIPI)</span>
+                    <span className={`font-bold block ${xmlTotals.vIPI > 0 ? 'text-rose-300' : 'text-slate-400'}`}>
+                      {formatCurrency(xmlTotals.vIPI)}
+                    </span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">Total NF (vNF)</span>
+                    <span className="font-extrabold text-emerald-400 block">{formatCurrency(xmlTotals.vNF)}</span>
+                  </div>
+                </div>
+
+                {/* Manual Informative Inputs for DIFAL and Recoverable Taxes */}
+                <div className="pt-2 border-t border-slate-700/70 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+                        <Plus className="w-3 h-3" />
+                        DIFAL Informado Manualmente (R$)
+                      </label>
+                      <span className="text-[9px] text-slate-400 font-mono">Soma ao custo</span>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      value={difalInput}
+                      onChange={(e) => handleDifalChange(e.target.value)}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full text-xs p-2 rounded-lg bg-slate-900 border border-slate-600 font-extrabold text-amber-300 focus:border-amber-400 focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                      Diferencial de Alíquota para compras interestaduais no Simples Nacional. O valor é rateado proporcionalmente entre os itens.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-emerald-300 flex items-center gap-1.5">
+                        <Minus className="w-3 h-3" />
+                        Impostos Recuperáveis (R$)
+                      </label>
+                      <span className="text-[9px] text-slate-400 font-mono">Deduz do custo</span>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      value={recoverableTaxesInput}
+                      onChange={(e) => handleRecoverableTaxesChange(e.target.value)}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full text-xs p-2 rounded-lg bg-slate-900 border border-slate-600 font-extrabold text-emerald-300 focus:border-emerald-400 focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                      Créditos fiscais aproveitados na entrada (ex: ICMS/PIS/COFINS). O valor é deduzido proporcionalmente do custo dos itens.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Smart Item Mapping & Auto-Linking List */}
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -708,13 +981,18 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                     Itens Extraídos do XML ({importedItems.length})
                   </h4>
                   <p className="text-[11px] text-slate-500 text-left">
-                    O sistema vincula produtos existentes pelo Código EAN/Nome ou permite cadastrar novos produtos.
+                    Custos unitários calculados com base na fórmula de custo real de aquisição com rateio proporcional.
                   </p>
                 </div>
                 {importedItems.length > 0 && (
-                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl self-start sm:self-auto">
-                    Total da Nota: {formatCurrency(xmlTotalValue)}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl">
+                      Produtos: {formatCurrency(xmlTotalProductsValue)}
+                    </span>
+                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
+                      Custo Real Total: {formatCurrency(xmlTotalRealCost)}
+                    </span>
+                  </div>
                 )}
               </div>
 
@@ -730,6 +1008,16 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                 <div className="space-y-3">
                   {importedItems.map((item, index) => {
                     const matchedProduct = products.find((p) => p.id === item.matchedProductId);
+                    const netAllocations =
+                      item.freightAllocated +
+                      item.insuranceAllocated +
+                      item.otherExpensesAllocated +
+                      item.icmsStAllocated +
+                      item.ipiAllocated +
+                      item.iiAllocated +
+                      item.difalAllocated -
+                      item.discountAllocated -
+                      item.recoverableTaxesAllocated;
 
                     return (
                       <div
@@ -759,28 +1047,81 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                               )}
                             </div>
 
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-slate-700 pt-1">
+                            {/* Cost Comparison & Rateio Details */}
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs text-slate-700 pt-1">
                               <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
                                 <span className="text-[10px] text-slate-400 block font-bold uppercase">Quantidade</span>
                                 <strong className="text-sky-700 font-black">+{item.quantity} {item.unit}</strong>
                               </div>
 
                               <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                                <span className="text-[10px] text-slate-400 block font-bold uppercase">Custo Unitário</span>
-                                <strong className="text-slate-900 font-extrabold">{formatCurrency(item.costPrice)}</strong>
+                                <span className="text-[10px] text-slate-400 block font-bold uppercase">Preço Tabela (vUnCom)</span>
+                                <span className="text-slate-700 font-semibold">{formatCurrency(item.unitProdPrice || item.costPrice)}</span>
                               </div>
 
                               <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                                <span className="text-[10px] text-slate-400 block font-bold uppercase">Total do Item</span>
-                                <strong className="text-emerald-700 font-black">{formatCurrency(item.quantity * item.costPrice)}</strong>
-                              </div>
-
-                              <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                                <span className="text-[10px] text-slate-400 block font-bold uppercase">Lote e Validade</span>
-                                <span className="font-mono text-[11px] text-slate-700 font-semibold block truncate">
-                                  {item.batchNumber} (Val: {item.expirationDate})
+                                <span className="text-[10px] text-slate-400 block font-bold uppercase">Rateio Encargos / Desc</span>
+                                <span className={`font-bold text-[11px] ${netAllocations >= 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                  {netAllocations >= 0 ? `+${formatCurrency(netAllocations)}` : formatCurrency(netAllocations)}
                                 </span>
                               </div>
+
+                              <div className="bg-emerald-50/60 p-2 rounded-xl border border-emerald-200">
+                                <span className="text-[10px] text-emerald-800 block font-black uppercase">Custo Real Unitário</span>
+                                <strong className="text-emerald-900 font-black text-sm">{formatCurrency(item.costPrice)}</strong>
+                              </div>
+
+                              <div className="bg-emerald-50/60 p-2 rounded-xl border border-emerald-200">
+                                <span className="text-[10px] text-emerald-800 block font-black uppercase">Custo Real Total</span>
+                                <strong className="text-emerald-900 font-black text-sm">{formatCurrency(item.totalCost || item.quantity * item.costPrice)}</strong>
+                              </div>
+                            </div>
+
+                            {/* Detailed breakdown pill tags */}
+                            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] text-slate-600">
+                              <span className="font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                                Lote: {item.batchNumber} (Val: {item.expirationDate})
+                              </span>
+                              {item.freightAllocated > 0 && (
+                                <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">
+                                  Frete: +{formatCurrency(item.freightAllocated)}
+                                </span>
+                              )}
+                              {item.insuranceAllocated > 0 && (
+                                <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">
+                                  Seg: +{formatCurrency(item.insuranceAllocated)}
+                                </span>
+                              )}
+                              {item.otherExpensesAllocated > 0 && (
+                                <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">
+                                  Outros: +{formatCurrency(item.otherExpensesAllocated)}
+                                </span>
+                              )}
+                              {item.discountAllocated > 0 && (
+                                <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-semibold">
+                                  Desc: -{formatCurrency(item.discountAllocated)}
+                                </span>
+                              )}
+                              {item.icmsStAllocated > 0 && (
+                                <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded font-semibold">
+                                  ST: +{formatCurrency(item.icmsStAllocated)}
+                                </span>
+                              )}
+                              {item.ipiAllocated > 0 && (
+                                <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded font-semibold">
+                                  IPI: +{formatCurrency(item.ipiAllocated)}
+                                </span>
+                              )}
+                              {item.difalAllocated > 0 && (
+                                <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">
+                                  DIFAL: +{formatCurrency(item.difalAllocated)}
+                                </span>
+                              )}
+                              {item.recoverableTaxesAllocated > 0 && (
+                                <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-semibold">
+                                  Recup: -{formatCurrency(item.recoverableTaxesAllocated)}
+                                </span>
+                              )}
                             </div>
                           </div>
 
@@ -950,11 +1291,18 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
             <div className="bg-slate-900 text-white p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <p className="text-[10px] text-slate-400 uppercase font-bold">
-                  Valor Total da Nota Fiscal XML
+                  Custo Real de Aquisição Total da NF-e
                 </p>
-                <p className="text-2xl font-black text-emerald-400">
-                  {formatCurrency(xmlTotalValue)}
-                </p>
+                <div className="flex items-baseline gap-2">
+                  <p className="text-2xl font-black text-emerald-400">
+                    {formatCurrency(xmlTotalRealCost)}
+                  </p>
+                  {xmlTotals.vNF > 0 && Math.abs(xmlTotals.vNF - xmlTotalRealCost) > 0.01 && (
+                    <span className="text-[11px] text-slate-400">
+                      (Total NF: {formatCurrency(xmlTotals.vNF)})
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center gap-3">
