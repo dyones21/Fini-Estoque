@@ -53,7 +53,7 @@ export async function getAllProducts(): Promise<Product[]> {
   checkDbConnection();
 
   return await withRetry(async () => {
-    const rows = await db.select().from(products);
+    const rows = await db.select().from(products).orderBy(products.name);
     if (!rows || rows.length === 0) {
       return [];
     }

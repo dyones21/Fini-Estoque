@@ -168,7 +168,7 @@ export const StockTable: React.FC<StockTableProps> = ({
       }
 
       return matchesSearch && matchesCategory && matchesStatus;
-    });
+    }).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }, [products, searchQuery, selectedCategory, selectedStatus, locationMode]);
 
   // Grouped Products Map

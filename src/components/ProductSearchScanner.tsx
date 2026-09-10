@@ -51,14 +51,16 @@ export const ProductSearchScanner: React.FC<ProductSearchScannerProps> = ({
   const selectedProduct = products.find((p) => p.id === selectedProductId);
 
   // Filter products by GTIN, SKU or Description/Name
-  const filteredProducts = products.filter((p) => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase().trim();
-    const ean = (p.codeEAN || '').toLowerCase();
-    const sku = (p.sku || '').toLowerCase();
-    const name = (p.name || '').toLowerCase();
-    return ean.includes(term) || sku.includes(term) || name.includes(term);
-  });
+  const filteredProducts = products
+    .filter((p) => {
+      if (!searchTerm.trim()) return true;
+      const term = searchTerm.toLowerCase().trim();
+      const ean = (p.codeEAN || '').toLowerCase();
+      const sku = (p.sku || '').toLowerCase();
+      const name = (p.name || '').toLowerCase();
+      return ean.includes(term) || sku.includes(term) || name.includes(term);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
   // Handle scanned code (from camera or image)
   const handleDecodedCode = (rawCode: string) => {

@@ -145,8 +145,8 @@ export const ReportsView: React.FC = () => {
 
       return true;
     }).sort((a, b) => {
-      if (sortBy === 'nome_asc') return a.name.localeCompare(b.name);
-      if (sortBy === 'nome_desc') return b.name.localeCompare(a.name);
+      if (sortBy === 'nome_asc') return a.name.localeCompare(b.name, 'pt-BR');
+      if (sortBy === 'nome_desc') return b.name.localeCompare(a.name, 'pt-BR');
       if (sortBy === 'custo_maior') return (b.costPrice * (b.stockLoja + b.stockDeposito)) - (a.costPrice * (a.stockLoja + a.stockDeposito));
       if (sortBy === 'venda_maior') return (b.sellPrice * (b.stockLoja + b.stockDeposito)) - (a.sellPrice * (a.stockLoja + a.stockDeposito));
       if (sortBy === 'qtd_maior') return (b.stockLoja + b.stockDeposito) - (a.stockLoja + a.stockDeposito);
@@ -226,7 +226,7 @@ export const ReportsView: React.FC = () => {
 
       // Default for Vencimentos tab: show items with expiration date set
       return true;
-    }).sort((a, b) => a.days - b.days);
+    }).sort((a, b) => a.days - b.days || a.product.name.localeCompare(b.product.name, 'pt-BR'));
   }, [products, categoryFilter, searchQuery, statusFilter]);
 
   // ================= 4. FILTERED NOTAS FISCAIS =================

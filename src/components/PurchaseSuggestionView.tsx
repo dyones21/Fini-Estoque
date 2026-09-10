@@ -175,7 +175,10 @@ export const PurchaseSuggestionView: React.FC = () => {
         if (a.daysOfStockRemaining !== null && b.daysOfStockRemaining === null) return -1;
         if (a.daysOfStockRemaining === null && b.daysOfStockRemaining !== null) return 1;
 
-        return b.totalOut30Days - a.totalOut30Days;
+        const outDiff = b.totalOut30Days - a.totalOut30Days;
+        if (outDiff !== 0) return outDiff;
+
+        return a.product.name.localeCompare(b.product.name, 'pt-BR');
       });
   }, [analysisData, statusFilter, selectedCategory, searchQuery]);
 

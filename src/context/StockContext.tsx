@@ -193,7 +193,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const notifiedLowStockRef = useRef<Set<string>>(new Set());
 
-  const products = useMemo(() => allProducts, [allProducts]);
+  const products = useMemo(
+    () => [...allProducts].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    [allProducts]
+  );
   const nfEntries = useMemo(() => allNfEntries, [allNfEntries]);
   const transfers = useMemo(() => allTransfers, [allTransfers]);
   const movements = useMemo(() => allMovements, [allMovements]);
