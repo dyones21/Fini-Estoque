@@ -64,13 +64,18 @@ export const MovementModal: React.FC<MovementModalProps> = ({
     const qty = parseNumber(quantity, 1);
     if (!selectedProductId || !currentProduct || qty <= 0) return;
 
+    if (type === 'venda_loja' && currentProduct.stockLoja < qty) {
+      alert(`Operação rejeitada: A quantidade solicitada (${qty}) é maior que o estoque disponível na loja (${currentProduct.stockLoja} un).`);
+      return;
+    }
+
     try {
       await registerMovement(
         selectedProductId,
         type,
         qty,
         location,
-        reason || (type === 'venda_loja' ? 'Venda PDV Loja' : 'Baixa registrada'),
+        reason || (type === 'venda_loja' ? 'Baixa para Baleiro / Pacote Aberto' : 'Baixa registrada'),
         type === 'venda_loja' ? currentProduct.sellPrice : currentProduct.costPrice
       );
 

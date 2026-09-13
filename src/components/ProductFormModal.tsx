@@ -146,14 +146,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
     try {
       if (editingProduct) {
+        // REGRA ABSOLUTA: Cadastro NÃO altera estoque.
+        // Ao editar, não enviamos stockDeposito nem stockLoja no payload de atualização cadastral.
         await updateProduct(editingProduct.id, {
           sku,
           ean,
           name,
           category,
           unit: finalUnit,
-          stockDeposito: parseNumber(stockDeposito),
-          stockLoja: parseNumber(stockLoja),
           minStockDeposito: parseNumber(minStockDeposito),
           minStockLoja: parseNumber(minStockLoja),
           costPrice: parseNumber(costPrice),
@@ -161,7 +161,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           expirationDate,
           batchNumber,
         });
-        alert(`Produto "${name}" atualizado com sucesso no banco de dados!`);
       } else {
         await addProduct({
           sku,
@@ -178,14 +177,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           expirationDate,
           batchNumber,
         });
-        alert(`Novo produto "${name}" cadastrado e salvo com sucesso no banco de dados!`);
       }
       onClose();
     } catch (err: any) {
       console.error('Falha ao salvar produto:', err);
       const msg = getFriendlyErrorMessage(err, 'Não foi possível salvar o produto no banco de dados.');
       setFormError(msg);
-      alert(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -417,29 +414,37 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-sky-800 mb-1">
-                Estoque Depósito
+                Estoque Depósito {editingProduct && <span className="text-[10px] text-slate-400 font-normal">(Leitura)</span>}
               </label>
               <input
                 type="text"
                 inputMode="numeric"
+                disabled={!!editingProduct}
                 value={stockDeposito}
                 onChange={(e) => setStockDeposito(e.target.value)}
                 onFocus={(e) => e.target.select()}
-                className="w-full text-xs p-2.5 rounded-xl border border-sky-200 font-bold text-sky-900 bg-sky-50/50"
+                className={`w-full text-xs p-2.5 rounded-xl border border-sky-200 font-bold ${
+                  editingProduct ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'text-sky-900 bg-sky-50/50'
+                }`}
+                title={editingProduct ? 'O estoque é alterado exclusivamente por Notas Fiscais ou Movimentações' : undefined}
               />
             </div>
 
             <div>
               <label className="block text-[11px] font-bold text-amber-800 mb-1">
-                Estoque Loja
+                Estoque Loja {editingProduct && <span className="text-[10px] text-slate-400 font-normal">(Leitura)</span>}
               </label>
               <input
                 type="text"
                 inputMode="numeric"
+                disabled={!!editingProduct}
                 value={stockLoja}
                 onChange={(e) => setStockLoja(e.target.value)}
                 onFocus={(e) => e.target.select()}
-                className="w-full text-xs p-2.5 rounded-xl border border-amber-200 font-bold text-amber-900 bg-amber-50/50"
+                className={`w-full text-xs p-2.5 rounded-xl border border-amber-200 font-bold ${
+                  editingProduct ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'text-amber-900 bg-amber-50/50'
+                }`}
+                title={editingProduct ? 'O estoque é alterado exclusivamente por Baixa de Baleiro ou Transferências' : undefined}
               />
             </div>
 

@@ -57,6 +57,14 @@ async function startServer() {
 
   app.use(express.json({ limit: '10mb' }));
 
+  // Desativa qualquer cache HTTP para endpoints da API (/api/*) para prevenir respostas defasadas no frontend
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
+
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', database: 'Supabase' });
@@ -363,11 +371,17 @@ async function startServer() {
   app.put('/api/products/:id', requireAuth, requirePermission('canManageProducts'), async (req, res) => {
     try {
       const id = req.params.id;
-      const updates = req.body;
+      const updates = { ...req.body };
 
       if (!id) {
         return res.status(400).json({ error: 'ID do produto é obrigatório.' });
       }
+
+      // REGRA ABSOLUTA: Cadastro NÃO pode alterar estoque!
+      // Remove qualquer campo de estoque recebido na atualização cadastral
+      delete updates.stockDeposito;
+      delete updates.stockLoja;
+      delete (updates as any).stock;
 
       const updated = await updateProductById(id, updates);
       if (!updated) {
@@ -458,7 +472,7 @@ async function startServer() {
         });
       } catch (error: any) {
         console.error('API Error POST /api/movements:', error);
-        res.status(500).json({ error: error.message || 'Erro ao registrar movimentação no banco de dados' });
+        res.status(400).json({ error: error.message || 'Erro ao registrar movimentação no banco de dados' });
       }
     }
   );
@@ -591,10 +605,35 @@ async function startServer() {
       }
 
       const saved = await processNFEntry(nfData);
-      res.json(saved);
+      res.status(201).json(saved);
     } catch (error: any) {
       console.error('API Error POST /api/nf-entries:', error);
-      res.status(500).json({ error: error.message || 'Erro ao registrar e processar NF no PostgreSQL' });
+      res.status(400).json({ error: error.message || 'Erro ao registrar e processar NF no PostgreSQL' });
+    }
+  });
+
+  // Atualização/Edição de Nota Fiscal com Reconciliação Atômica de Saldo: Exige canAddNFEntries
+  app.put('/api/nf-entries/:id', requireAuth, requirePermission('canAddNFEntries'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const nfData = { ...req.body, id };
+
+      // Validação de Chave de Acesso Duplicada em outra NF
+      if (nfData.accessKey && String(nfData.accessKey).trim()) {
+        const cleanKey = String(nfData.accessKey).trim();
+        const existing = await getNFEntryByAccessKey(cleanKey);
+        if (existing && existing.id !== id) {
+          return res.status(400).json({
+            error: `A chave de acesso informada já pertence a outra nota fiscal lançada (NF nº ${existing.numberNF}).`,
+          });
+        }
+      }
+
+      const saved = await processNFEntry(nfData);
+      res.json(saved);
+    } catch (error: any) {
+      console.error(`API Error PUT /api/nf-entries/${req.params.id}:`, error);
+      res.status(400).json({ error: error.message || 'Erro ao atualizar Nota Fiscal no PostgreSQL' });
     }
   });
 

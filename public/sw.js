@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-fini-v2';
+const CACHE_NAME = 'erp-fini-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -36,8 +36,13 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests and chrome extension protocols
-  if (request.method !== 'GET' || url.protocol.startsWith('chrome-extension')) {
+  // CRÍTICO: Não interceptar requisições para a API (/api/*), métodos não-GET e extensões.
+  // Garante que todas as chamadas à API alcancem diretamente o backend sem dados defasados.
+  if (
+    request.method !== 'GET' ||
+    url.protocol.startsWith('chrome-extension') ||
+    url.pathname.startsWith('/api')
+  ) {
     return;
   }
 

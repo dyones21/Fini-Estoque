@@ -85,7 +85,8 @@ interface StockContextType {
   deleteProduct: (id: string) => Promise<void>;
 
   // Inventory Operations
-  addNFEntry: (nf: Omit<NFEntry, 'id' | 'receiveDate'>) => Promise<void>;
+  addNFEntry: (nf: (Omit<NFEntry, 'id' | 'receiveDate'> & { id?: string; receiveDate?: string }) | NFEntry) => Promise<void>;
+  updateNFEntry?: (nf: NFEntry) => Promise<void>;
   deleteNFEntry: (id: string) => Promise<{ success: boolean; message: string }>;
   transferStock: (productId: string, quantity: number, notes?: string) => Promise<{ success: boolean; message: string }>;
   registerMovement: (
@@ -193,6 +194,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const notifiedLowStockRef = useRef<Set<string>>(new Set());
   const isFetchingServerDataRef = useRef<boolean>(false);
+  const pendingFetchRef = useRef<boolean>(false);
+  const fetchSequenceRef = useRef<number>(0);
+  const latestCompletedFetchIdRef = useRef<number>(0);
 
   const products = useMemo(
     () => [...allProducts].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
@@ -635,9 +639,13 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Fetch initial data exclusively through Express Server API routes (/api/...)
   const fetchServerData = async () => {
     if (isFetchingServerDataRef.current) {
+      pendingFetchRef.current = true;
       return;
     }
     isFetchingServerDataRef.current = true;
+    const thisFetchId = ++fetchSequenceRef.current;
+    const fetchStartTime = Date.now();
+
     setIsLoadingServer(true);
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
@@ -652,6 +660,13 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         authFetch('/api/categories').catch(() => null),
         authFetch('/api/roles').catch(() => null),
       ]);
+
+      // Se uma busca mais recente já finalizou enquanto esta requisição estava em trânsito,
+      // descarta esta resposta para evitar condições de corrida com dados defasados.
+      if (thisFetchId < latestCompletedFetchIdRef.current) {
+        return;
+      }
+      latestCompletedFetchIdRef.current = thisFetchId;
 
       let loadedProducts: Product[] = [];
       let loadedMovements: StockMovement[] = [];
@@ -721,7 +736,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
 
       if (Array.isArray(dataProd)) {
-        const hydratedProducts = dataProd.map((p) => {
+        const incomingHydrated: Product[] = dataProd.map((p) => {
           const agg = salesAggregates.get(p.id) || { totalQty: 0, totalVal: 0 };
           return {
             ...p,
@@ -729,7 +744,45 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             totalSalesValue: agg.totalVal,
           };
         });
-        setAllProducts(hydratedProducts);
+
+        // Reconciliação atômica e proteção contra sobreposição de estado (anti-race condition):
+        // Se um produto no estado React possui lastUpdated posterior ao início desta busca (fetchStartTime)
+        // ou mais recente que a versão retornada pelo servidor, mantém o estado mais recente.
+        setAllProducts((currentProducts) => {
+          const localMap = new Map(currentProducts.map((p) => [p.id, p]));
+
+          const reconciled = incomingHydrated.map((incomingProd) => {
+            const localProd = localMap.get(incomingProd.id);
+            if (!localProd) return incomingProd;
+
+            const localTime = localProd.lastUpdated ? new Date(localProd.lastUpdated).getTime() : 0;
+            const incomingTime = incomingProd.lastUpdated ? new Date(incomingProd.lastUpdated).getTime() : 0;
+
+            if (localTime >= fetchStartTime || localTime > incomingTime) {
+              return {
+                ...localProd,
+                // Preserva alterações cadastrais locais recentes e atualiza apenas os agregados calculados de vendas
+                totalSalesQuantity: incomingProd.totalSalesQuantity,
+                totalSalesValue: incomingProd.totalSalesValue,
+              };
+            }
+
+            return incomingProd;
+          });
+
+          // Preserva produtos adicionados localmente de forma otimista que ainda não constam na resposta da busca
+          const incomingIds = new Set(incomingHydrated.map((p) => p.id));
+          currentProducts.forEach((p) => {
+            if (!incomingIds.has(p.id)) {
+              const localTime = p.lastUpdated ? new Date(p.lastUpdated).getTime() : 0;
+              if (localTime >= fetchStartTime) {
+                reconciled.push(p);
+              }
+            }
+          });
+
+          return reconciled;
+        });
       }
 
       if (Array.isArray(dataMov)) {
@@ -795,6 +848,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setIsLoadingServer(false);
       setIsLoadingUsers(false);
       setIsLoadingCompany(false);
+      if (pendingFetchRef.current) {
+        pendingFetchRef.current = false;
+        fetchServerData();
+      }
     }
   };
 
@@ -935,10 +992,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const addProduct = async (
     productData: Omit<Product, 'id' | 'lastUpdated' | 'totalSalesQuantity' | 'totalSalesValue'> & { id?: string }
   ): Promise<Product> => {
+    const nowIso = new Date().toISOString();
     const newProduct: Product = {
       ...productData,
       id: productData.id || `p-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      lastUpdated: new Date().toISOString(),
+      lastUpdated: nowIso,
       totalSalesQuantity: 0,
       totalSalesValue: 0,
     };
@@ -963,57 +1021,100 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
 
       const saved = await safeParseJson<Product>(response);
+      if (saved && saved.id) {
+        setAllProducts((prev) =>
+          prev.map((p) => (p.id === newProduct.id ? { ...p, ...saved, lastUpdated: saved.lastUpdated || nowIso } : p))
+        );
+      }
       return saved || newProduct;
     } catch (error) {
+      setAllProducts((prev) => prev.filter((p) => p.id !== newProduct.id));
       console.error('Falha ao sincronizar novo produto com o servidor PostgreSQL:', error);
       throw error;
     }
   };
 
   const updateProduct = async (id: string, updatedFields: Partial<Product>) => {
-    const prevProducts = [...allProducts];
-    setAllProducts((prev) =>
-      prev.map((p) => {
+    // REGRA ABSOLUTA: Cadastro NÃO altera estoque.
+    // Remove qualquer tentativa de alteração de estoque via atualização cadastral
+    const safeUpdates = { ...updatedFields };
+    delete safeUpdates.stockDeposito;
+    delete safeUpdates.stockLoja;
+
+    const nowIso = new Date().toISOString();
+
+    // 1. Atualização OTIMISTA imediata no estado React com timestamp atualizado
+    let previousProduct: Product | undefined;
+    setAllProducts((prev) => {
+      previousProduct = prev.find((p) => p.id === id);
+      return prev.map((p) => {
         if (p.id === id) {
           return {
             ...p,
-            ...updatedFields,
-            lastUpdated: new Date().toISOString(),
+            ...safeUpdates,
+            lastUpdated: nowIso,
           };
         }
         return p;
-      })
-    );
+      });
+    });
 
     try {
       const response = await authFetch(`/api/products/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...updatedFields,
-          lastUpdated: new Date().toISOString(),
+          ...safeUpdates,
+          lastUpdated: nowIso,
         }),
       });
 
       if (!response.ok) {
         if (response.status === 403) {
           handle403PermissionDenied('Editar Dados do Produto');
-          setAllProducts(prevProducts);
+          if (previousProduct) {
+            setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct! : p)));
+          }
           throw new Error('Você não tem permissão para editar dados de produtos.');
         }
         const errData = await safeParseJson<{ error?: string }>(response);
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao atualizar produto no servidor.`);
       }
+
+      // 2. Reconciliação atômica com o produto retornado pelo servidor preservando agregados de vendas
+      const updatedFromServer = await safeParseJson<Product>(response);
+      if (updatedFromServer && updatedFromServer.id) {
+        setAllProducts((prev) =>
+          prev.map((p) => {
+            if (p.id === id) {
+              return {
+                ...p,
+                ...updatedFromServer,
+                totalSalesQuantity: p.totalSalesQuantity ?? 0,
+                totalSalesValue: p.totalSalesValue ?? 0,
+                lastUpdated: updatedFromServer.lastUpdated || nowIso,
+              };
+            }
+            return p;
+          })
+        );
+      }
     } catch (error) {
-      setAllProducts(prevProducts);
+      // Rollback cirúrgico apenas deste produto específico em caso de falha
+      if (previousProduct) {
+        setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct! : p)));
+      }
       console.error('Falha ao atualizar produto no servidor PostgreSQL:', error);
       throw error;
     }
   };
 
   const deleteProduct = async (id: string) => {
-    const prevProducts = [...allProducts];
-    setAllProducts((prev) => prev.filter((p) => p.id !== id));
+    let deletedProduct: Product | undefined;
+    setAllProducts((prev) => {
+      deletedProduct = prev.find((p) => p.id === id);
+      return prev.filter((p) => p.id !== id);
+    });
 
     try {
       const response = await authFetch(`/api/products/${id}`, {
@@ -1023,24 +1124,32 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (!response.ok) {
         if (response.status === 403) {
           handle403PermissionDenied('Excluir Produto');
-          setAllProducts(prevProducts);
+          if (deletedProduct) {
+            setAllProducts((prev) => [deletedProduct!, ...prev]);
+          }
           throw new Error('Você não tem permissão para excluir produtos do catálogo.');
         }
         const errData = await safeParseJson<{ error?: string }>(response);
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao excluir produto no servidor.`);
       }
     } catch (error) {
-      setAllProducts(prevProducts);
+      if (deletedProduct) {
+        setAllProducts((prev) => [deletedProduct!, ...prev]);
+      }
       console.error('Falha ao deletar produto do servidor PostgreSQL:', error);
       throw error;
     }
   };
 
-  const addNFEntry = async (nfData: Omit<NFEntry, 'id' | 'receiveDate'>) => {
-    const newEntry: NFEntry = {
+  const addNFEntry = async (nfData: (Omit<NFEntry, 'id' | 'receiveDate'> & { id?: string; receiveDate?: string }) | NFEntry) => {
+    const isEdit = Boolean(nfData.id && allNfEntries.some((e) => e.id === nfData.id));
+    const targetId = nfData.id || `nf-${Date.now()}`;
+    const targetDate = nfData.receiveDate || new Date().toISOString().slice(0, 10);
+
+    const entryToSave: NFEntry = {
       ...nfData,
-      id: `nf-${Date.now()}`,
-      receiveDate: new Date().toISOString().slice(0, 10),
+      id: targetId,
+      receiveDate: targetDate,
     };
 
     // Salva estados anteriores para rollback em caso de falha
@@ -1048,72 +1157,38 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const prevProducts = [...allProducts];
     const prevMovements = [...allMovements];
 
-    // Atualização otimista imediata na interface
-    setAllNfEntries((prev) => [newEntry, ...prev]);
-
-    setAllProducts((prev) =>
-      prev.map((p) => {
-        const item = newEntry.items.find((i) => i.productId === p.id);
-        if (item) {
-          return {
-            ...p,
-            stockDeposito: p.stockDeposito + item.quantity,
-            costPrice: item.costPrice > 0 ? item.costPrice : p.costPrice,
-            lastUpdated: new Date().toISOString(),
-          };
-        }
-        return p;
-      })
-    );
-
-    const newMovements: StockMovement[] = newEntry.items.map((item) => ({
-      id: `mov-nf-${newEntry.id}-${item.productId}-${Date.now()}`,
-      productId: item.productId,
-      productName: item.productName,
-      type: 'entrada_nf',
-      quantity: item.quantity,
-      location: 'deposito',
-      date: newEntry.receiveDate || new Date().toISOString(),
-      userName: currentUser.name,
-      reason: `Entrada por NF ${newEntry.numberNF} (${newEntry.supplier})`,
-      unitPrice: item.costPrice,
-      nfEntryId: newEntry.id,
-    }));
-
-    setAllMovements((prev) => [...newMovements, ...prev]);
-
     try {
-      const response = await authFetch('/api/nf-entries', {
-        method: 'POST',
+      const endpoint = isEdit ? `/api/nf-entries/${entryToSave.id}` : '/api/nf-entries';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const response = await authFetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEntry),
+        body: JSON.stringify(entryToSave),
       });
 
       if (!response.ok) {
-        // Rollback dos estados locais
-        setAllNfEntries(prevNfEntries);
-        setAllProducts(prevProducts);
-        setAllMovements(prevMovements);
-
         if (response.status === 403) {
-          handle403PermissionDenied('Dar Entrada em Nota Fiscal');
-          throw new Error('Você não tem permissão para lançar notas fiscais de entrada.');
+          handle403PermissionDenied('Salvar Nota Fiscal');
+          throw new Error('Você não tem permissão para lançar ou alterar notas fiscais.');
         }
         const errData = await safeParseJson<{ error?: string }>(response);
-        throw new Error(errData?.error || `Erro HTTP ${response.status} ao registrar NF no servidor.`);
+        throw new Error(errData?.error || `Erro HTTP ${response.status} ao processar Nota Fiscal no servidor.`);
       }
 
-      // Re-sincroniza com os dados oficiais salvos e confirmados no banco de dados
+      // Re-sincroniza com os dados oficiais e consistentes confirmados pelo PostgreSQL
       await fetchServerData();
 
-      await notifyNewNFEntry(
-        newEntry.numberNF,
-        newEntry.supplier,
-        newEntry.items.reduce((acc, i) => acc + i.quantity, 0),
-        newEntry.totalValue
-      );
+      if (!isEdit) {
+        await notifyNewNFEntry(
+          entryToSave.numberNF,
+          entryToSave.supplier,
+          entryToSave.items.reduce((acc, i) => acc + i.quantity, 0),
+          entryToSave.totalValue
+        );
+      }
     } catch (error) {
-      // Garante rollback em caso de falha de rede ou exceção
+      // Garante integridade e restauração dos estados em caso de falha de rede ou validação
       setAllNfEntries(prevNfEntries);
       setAllProducts(prevProducts);
       setAllMovements(prevMovements);
@@ -1522,6 +1597,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         updateProduct,
         deleteProduct,
         addNFEntry,
+        updateNFEntry: addNFEntry,
         deleteNFEntry,
         transferStock,
         registerMovement,

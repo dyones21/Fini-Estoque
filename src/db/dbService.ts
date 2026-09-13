@@ -126,8 +126,6 @@ export async function saveProduct(p: Product): Promise<Product> {
           name: p.name || 'Produto Fini',
           category: p.category || 'Balas de Gelatina',
           unit: p.unit || 'Pacote 500g',
-          stockDeposito: depStock,
-          stockLoja: lojStock,
           minStockDeposito: minDep,
           minStockLoja: minLoj,
           costPrice: cost,
@@ -171,8 +169,6 @@ export async function updateProductById(id: string, updates: Partial<Product>): 
     const nameVal = updates.name !== undefined ? String(updates.name) : current.name;
     const categoryVal = updates.category !== undefined ? String(updates.category) : current.category;
     const unitVal = updates.unit !== undefined ? String(updates.unit) : current.unit;
-    const depStock = updates.stockDeposito !== undefined ? Math.round(Number(updates.stockDeposito) || 0) : current.stockDeposito;
-    const lojStock = updates.stockLoja !== undefined ? Math.round(Number(updates.stockLoja) || 0) : current.stockLoja;
     const minDep = updates.minStockDeposito !== undefined ? Math.round(Number(updates.minStockDeposito) || 0) : current.minStockDeposito;
     const minLoj = updates.minStockLoja !== undefined ? Math.round(Number(updates.minStockLoja) || 0) : current.minStockLoja;
     const cost = updates.costPrice !== undefined ? Number(updates.costPrice) || 0 : current.costPrice;
@@ -180,6 +176,9 @@ export async function updateProductById(id: string, updates: Partial<Product>): 
     const expVal = updates.expirationDate !== undefined ? String(updates.expirationDate) : current.expirationDate;
     const batchVal = updates.batchNumber !== undefined ? String(updates.batchNumber) : current.batchNumber;
 
+    // REGRA ABSOLUTA: Cadastro NÃO pode alterar estoque!
+    // stockDeposito e stockLoja NUNCA são alterados em updateProductById.
+    // O banco preserva rigorosamente os saldos atuais de estoque.
     await db
       .update(products)
       .set({
@@ -188,8 +187,6 @@ export async function updateProductById(id: string, updates: Partial<Product>): 
         name: nameVal,
         category: categoryVal,
         unit: unitVal,
-        stockDeposito: depStock,
-        stockLoja: lojStock,
         minStockDeposito: minDep,
         minStockLoja: minLoj,
         costPrice: cost,
@@ -200,22 +197,25 @@ export async function updateProductById(id: string, updates: Partial<Product>): 
       })
       .where(eq(products.id, id));
 
+    // Busca o registro atualizado diretamente do banco para garantir integridade e saldos vigentes
+    const [refreshed] = await db.select().from(products).where(eq(products.id, id));
+
     return {
       id,
-      sku: skuVal,
-      ean: eanVal,
-      name: nameVal,
-      category: categoryVal as any,
-      unit: unitVal as any,
-      stockDeposito: depStock,
-      stockLoja: lojStock,
-      minStockDeposito: minDep,
-      minStockLoja: minLoj,
-      costPrice: cost,
-      sellPrice: sell,
-      expirationDate: expVal,
-      batchNumber: batchVal,
-      lastUpdated: new Date().toISOString(),
+      sku: refreshed.sku,
+      ean: refreshed.ean,
+      name: refreshed.name,
+      category: refreshed.category as any,
+      unit: refreshed.unit as any,
+      stockDeposito: refreshed.stockDeposito,
+      stockLoja: refreshed.stockLoja,
+      minStockDeposito: refreshed.minStockDeposito,
+      minStockLoja: refreshed.minStockLoja,
+      costPrice: refreshed.costPrice,
+      sellPrice: refreshed.sellPrice,
+      expirationDate: refreshed.expirationDate,
+      batchNumber: refreshed.batchNumber,
+      lastUpdated: (refreshed.updatedAt || new Date()).toISOString(),
       totalSalesQuantity: 0,
       totalSalesValue: 0,
     };
@@ -282,18 +282,65 @@ export async function processStockTransfer(transfer: {
 
   return await withRetry(async () => {
     return await db.transaction(async (tx: any) => {
-      const rows = await tx.select().from(products).where(eq(products.id, transfer.productId));
+      const movementId = transfer.id
+        ? transfer.id.startsWith('mov-')
+          ? transfer.id
+          : `mov-${transfer.id}`
+        : `mov-transf-${Date.now()}`;
+
+      // 1. Idempotência: Se a movimentação já foi processada anteriormente, retorna o estado atual sem alterar estoque
+      if (transfer.id) {
+        const existing = await tx
+          .select()
+          .from(stockMovements)
+          .where(eq(stockMovements.id, movementId))
+          .limit(1);
+
+        if (existing && existing.length > 0) {
+          const [currentProd] = await tx.select().from(products).where(eq(products.id, transfer.productId));
+          return {
+            success: true,
+            movement: {
+              id: existing[0].id,
+              productId: existing[0].productId,
+              productName: existing[0].productName,
+              type: existing[0].type as any,
+              quantity: existing[0].quantity,
+              location: 'ambos' as any,
+              date: existing[0].timestamp,
+              userName: existing[0].createdBy,
+              reason: existing[0].reason,
+              unitPrice: currentProd?.sellPrice || 0,
+            },
+            updatedProduct: currentProd,
+          };
+        }
+      }
+
+      // 2. Concorrência: Trava a linha do produto no PostgreSQL (SELECT FOR UPDATE)
+      const rows = await tx
+        .select()
+        .from(products)
+        .where(eq(products.id, transfer.productId))
+        .for('update');
+
       if (!rows || rows.length === 0) {
         throw new Error('Produto não localizado no banco de dados.');
       }
       const prod = rows[0];
 
-      if (prod.stockDeposito < transfer.quantity) {
-        throw new Error(`Estoque insuficiente no Depósito Central (${prod.stockDeposito} disponível).`);
+      const qty = Number(transfer.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        throw new Error('Quantidade inválida para transferência: deve ser maior que zero.');
       }
 
-      const newStockDeposito = prod.stockDeposito - transfer.quantity;
-      const newStockLoja = prod.stockLoja + transfer.quantity;
+      // Validação de saldo disponível
+      if (prod.stockDeposito < qty) {
+        throw new Error(`Operação rejeitada: Saldo insuficiente no Depósito Central (${prod.stockDeposito} disponível, solicitado ${qty}).`);
+      }
+
+      const newStockDeposito = prod.stockDeposito - qty;
+      const newStockLoja = prod.stockLoja + qty;
 
       await tx
         .update(products)
@@ -304,11 +351,6 @@ export async function processStockTransfer(transfer: {
         })
         .where(eq(products.id, transfer.productId));
 
-      const movementId = transfer.id
-        ? transfer.id.startsWith('mov-')
-          ? transfer.id
-          : `mov-${transfer.id}`
-        : `mov-transf-${Date.now()}`;
       const timestamp = transfer.date || new Date().toISOString();
       const createdBy = transfer.operatorName || 'Operador';
       const reasonText = transfer.notes
@@ -324,13 +366,12 @@ export async function processStockTransfer(transfer: {
           type: 'transferencia_deposito_loja',
           origin: 'Depósito Central',
           destination: 'Loja',
-          quantity: transfer.quantity,
+          quantity: qty,
           batchNumber: prod.batchNumber || 'LOTE-DEFAULT',
           reason: reasonText,
           createdBy,
           timestamp,
-        })
-        .onConflictDoNothing();
+        });
 
       return {
         success: true,
@@ -339,7 +380,7 @@ export async function processStockTransfer(transfer: {
           productId: transfer.productId,
           productName: transfer.productName || prod.name,
           type: 'transferencia_deposito_loja' as any,
-          quantity: transfer.quantity,
+          quantity: qty,
           location: 'ambos' as any,
           date: timestamp,
           userName: createdBy,
@@ -372,8 +413,9 @@ export async function processStockTransfer(transfer: {
 
 /**
  * Processa movimentação de estoque (venda_loja, perda_avaria, ajuste_inventario)
- * de forma atômica no PostgreSQL dentro de db.transaction.
+ * de forma atômica no PostgreSQL dentro de db.transaction com lock de linha (SELECT FOR UPDATE).
  * Atualiza o saldo real em `products` e insere o histórico em `stock_movements`.
+ * Rejeita operações que resultariam em estoque negativo (não reduz para zero silenciosamente).
  */
 export async function processStockMovement(m: {
   id?: string;
@@ -392,47 +434,128 @@ export async function processStockMovement(m: {
 
   return await withRetry(async () => {
     return await db.transaction(async (tx: any) => {
-      // 1. Buscar o produto atual (stockDeposito, stockLoja)
-      const rows = await tx.select().from(products).where(eq(products.id, m.productId));
+      const movementId = m.id
+        ? m.id.startsWith('mov-') ? m.id : `mov-${m.id}`
+        : `mov-${Date.now()}`;
+
+      // 1. Idempotência: Se esta movimentação já foi processada anteriormente com o mesmo ID,
+      // não altera o estoque novamente e retorna o produto no estado atual.
+      if (m.id) {
+        const existingMov = await tx
+          .select()
+          .from(stockMovements)
+          .where(eq(stockMovements.id, movementId))
+          .limit(1);
+
+        if (existingMov && existingMov.length > 0) {
+          const [currentProd] = await tx.select().from(products).where(eq(products.id, m.productId));
+          return {
+            success: true,
+            movement: {
+              id: existingMov[0].id,
+              productId: existingMov[0].productId,
+              productName: existingMov[0].productName,
+              type: existingMov[0].type as any,
+              quantity: existingMov[0].quantity,
+              location: m.location,
+              date: existingMov[0].timestamp,
+              userName: existingMov[0].createdBy,
+              reason: existingMov[0].reason,
+              unitPrice: m.unitPrice !== undefined ? m.unitPrice : (currentProd?.sellPrice || 0),
+              nfEntryId: existingMov[0].nfEntryId || undefined,
+            },
+            product: currentProd,
+          };
+        }
+      }
+
+      // 2. Concorrência: Trava a linha do produto no PostgreSQL (SELECT FOR UPDATE)
+      const rows = await tx
+        .select()
+        .from(products)
+        .where(eq(products.id, m.productId))
+        .for('update');
+
       if (!rows || rows.length === 0) {
         throw new Error(`Produto não localizado no banco de dados (ID: ${m.productId}).`);
       }
       const prod = rows[0];
 
+      // 3. Validação de quantidade
       const qty = Number(m.quantity);
-      if (isNaN(qty) || qty < 0) {
-        throw new Error('Quantidade inválida para a movimentação.');
+      if (isNaN(qty)) {
+        throw new Error('Quantidade inválida para movimentação de estoque.');
       }
 
-      // 2. Calcular o novo estoque de acordo com o tipo
+      // 4. Calcular o novo estoque e validar disponibilidade (ESTOQUE NÃO PODE FICAR NEGATIVO)
       let newStockDeposito = prod.stockDeposito;
       let newStockLoja = prod.stockLoja;
 
       if (m.type === 'venda_loja') {
-        // venda_loja: subtrai a quantidade de stockLoja (nunca abaixo de zero)
-        newStockLoja = Math.max(0, prod.stockLoja - qty);
-      } else if (m.type === 'perda_avaria') {
-        // perda_avaria: subtrai a quantidade de stockDeposito e/ou stockLoja, dependendo do campo location recebido
-        if (m.location === 'deposito' || m.location === 'ambos') {
-          newStockDeposito = Math.max(0, prod.stockDeposito - qty);
+        // Baixa para Baleiro / Pacote Aberto: quantidade deve ser estritamente maior que zero
+        if (qty <= 0) {
+          throw new Error('Quantidade para baixa de baleiro deve ser maior que zero.');
         }
-        if (m.location === 'loja' || m.location === 'ambos') {
-          newStockLoja = Math.max(0, prod.stockLoja - qty);
+        // Valida disponibilidade: REJEITA se quantidade > estoque (NUNCA reduz para zero)
+        if (prod.stockLoja < qty) {
+          throw new Error(
+            `Operação rejeitada: Quantidade solicitada (${qty}) é maior que o estoque disponível na loja (${prod.stockLoja} un).`
+          );
+        }
+        newStockLoja = prod.stockLoja - qty;
+      } else if (m.type === 'perda_avaria') {
+        if (qty <= 0) {
+          throw new Error('Quantidade para registro de perda/avaria deve ser maior que zero.');
+        }
+        if (m.location === 'deposito') {
+          if (prod.stockDeposito < qty) {
+            throw new Error(
+              `Operação rejeitada: Quantidade solicitada (${qty}) é maior que o estoque disponível no depósito (${prod.stockDeposito} un).`
+            );
+          }
+          newStockDeposito = prod.stockDeposito - qty;
+        } else if (m.location === 'loja') {
+          if (prod.stockLoja < qty) {
+            throw new Error(
+              `Operação rejeitada: Quantidade solicitada (${qty}) é maior que o estoque disponível na loja (${prod.stockLoja} un).`
+            );
+          }
+          newStockLoja = prod.stockLoja - qty;
+        } else if (m.location === 'ambos') {
+          if (prod.stockDeposito < qty || prod.stockLoja < qty) {
+            throw new Error(
+              `Operação rejeitada: Quantidade solicitada (${qty}) excede o saldo disponível (Depósito: ${prod.stockDeposito}, Loja: ${prod.stockLoja}).`
+            );
+          }
+          newStockDeposito = prod.stockDeposito - qty;
+          newStockLoja = prod.stockLoja - qty;
         }
       } else if (m.type === 'ajuste_inventario') {
-        // ajuste_inventario: define o valor absoluto (não subtrai) de stockDeposito e/ou stockLoja, dependendo de location
+        // Ajuste de inventário: define contagem física absoluta. Não pode ser negativo.
+        if (qty < 0) {
+          throw new Error('Quantidade para ajuste de inventário não pode ser negativa.');
+        }
+        const roundedQty = Math.round(qty);
         if (m.location === 'deposito' || m.location === 'ambos') {
-          newStockDeposito = Math.max(0, Math.round(qty));
+          newStockDeposito = roundedQty;
         }
         if (m.location === 'loja' || m.location === 'ambos') {
-          newStockLoja = Math.max(0, Math.round(qty));
+          newStockLoja = roundedQty;
         }
       } else if (m.type === 'transferencia_deposito_loja') {
-        newStockDeposito = Math.max(0, prod.stockDeposito - qty);
+        if (qty <= 0) {
+          throw new Error('Quantidade para transferência deve ser maior que zero.');
+        }
+        if (prod.stockDeposito < qty) {
+          throw new Error(
+            `Operação rejeitada: Saldo insuficiente no depósito (${prod.stockDeposito} disponível, solicitado ${qty}).`
+          );
+        }
+        newStockDeposito = prod.stockDeposito - qty;
         newStockLoja = prod.stockLoja + qty;
       }
 
-      // 3. Atualizar o produto com o novo estoque dentro da mesma transação
+      // 5. Atualizar o produto com o novo estoque dentro da mesma transação
       await tx
         .update(products)
         .set({
@@ -442,25 +565,48 @@ export async function processStockMovement(m: {
         })
         .where(eq(products.id, m.productId));
 
-      // 4. Inserir o registro em stock_movements dentro da mesma transação
-      const movementId = m.id
-        ? m.id.startsWith('mov-') ? m.id : `mov-${m.id}`
-        : `mov-${Date.now()}`;
+      // 6. Inserir o registro em stock_movements dentro da mesma transação
       const timestamp = m.date || new Date().toISOString();
-      const createdBy = m.userName || 'Sistema';
+      const createdBy = m.userName || 'Operador';
 
       let origin = 'Loja';
       let destination = 'Cliente Final';
-      if (m.location === 'deposito') {
+      let defaultReason = `Movimentação de estoque: ${m.type}`;
+
+      if (m.type === 'venda_loja') {
+        origin = 'Loja';
+        destination = 'Baleiro / Consumidor Final';
+        defaultReason = 'Baixa para Baleiro / Pacote Aberto';
+      } else if (m.type === 'perda_avaria') {
+        origin = m.location === 'deposito' ? 'Depósito Central' : m.location === 'ambos' ? 'Depósito e Loja' : 'Loja';
+        destination = 'Descarte / Perda / Avaria';
+        defaultReason = 'Baixa por Perda / Avaria';
+      } else if (m.type === 'ajuste_inventario') {
+        origin = 'Auditoria / Contagem Física';
+        destination = m.location === 'deposito' ? 'Depósito Central' : m.location === 'ambos' ? 'Depósito e Loja' : 'Loja';
+        const prevCount = m.location === 'deposito' ? prod.stockDeposito : prod.stockLoja;
+        const diff = Math.round(qty) - prevCount;
+        const diffStr = diff >= 0 ? `+${diff}` : `${diff}`;
+        defaultReason = `Ajuste de Inventário (Anterior: ${prevCount}, Atual: ${Math.round(qty)}, Dif: ${diffStr})`;
+      } else if (m.type === 'transferencia_deposito_loja') {
         origin = 'Depósito Central';
-        destination = m.type === 'venda_loja' ? 'Cliente Final' : 'Depósito Central';
+        destination = 'Loja';
+        defaultReason = 'Transferência Depósito ➔ Loja';
+      } else if (m.location === 'deposito') {
+        origin = 'Depósito Central';
+        destination = 'Depósito Central';
       } else if (m.location === 'ambos') {
         origin = 'Depósito e Loja';
         destination = 'Depósito e Loja';
       } else {
         origin = 'Loja';
-        destination = m.type === 'venda_loja' ? 'Cliente Final' : 'Loja';
+        destination = 'Loja';
       }
+
+      const movementReason = m.reason ? m.reason : defaultReason;
+      const unitCostOrSellPrice = m.unitPrice !== undefined
+        ? m.unitPrice
+        : (m.type === 'perda_avaria' ? prod.costPrice : prod.sellPrice);
 
       await tx
         .insert(stockMovements)
@@ -473,14 +619,13 @@ export async function processStockMovement(m: {
           destination,
           quantity: qty,
           batchNumber: prod.batchNumber || 'LOTE-DEFAULT',
-          reason: m.reason || `Movimentação de estoque: ${m.type}`,
+          reason: movementReason,
           createdBy,
           timestamp,
           nfEntryId: m.nfEntryId || null,
-        })
-        .onConflictDoNothing();
+        });
 
-      // 5 & 6. Retornar produto atualizado e movimentação
+      // 7. Retornar produto atualizado e movimentação confirmada
       const updatedProduct: Product = {
         id: prod.id,
         sku: prod.sku,
@@ -510,8 +655,8 @@ export async function processStockMovement(m: {
         location: m.location,
         date: timestamp,
         userName: createdBy,
-        reason: m.reason || `Movimentação: ${m.type}`,
-        unitPrice: m.unitPrice !== undefined ? m.unitPrice : prod.sellPrice,
+        reason: movementReason,
+        unitPrice: unitCostOrSellPrice,
         nfEntryId: m.nfEntryId || undefined,
       };
 
@@ -614,10 +759,12 @@ export async function getNFEntryByAccessKey(accessKey: string): Promise<NFEntry 
 }
 
 /**
- * Processa a entrada de Nota Fiscal e seus itens no PostgreSQL em transação atômica rigorosa.
- * Persiste a NF em nf_entries, os itens em nf_items, atualiza o stockDeposito dos produtos e
- * registra as movimentações em stock_movements com vínculo nfEntryId.
- * Se qualquer etapa falhar, toda a transação é revertida.
+ * Processa a entrada e edição de Nota Fiscal e seus itens no PostgreSQL em transação atômica rigorosa.
+ * - Na criação de NF: adiciona as quantidades ao stockDeposito no Depósito Central.
+ * - Na edição de NF: calcula a reconciliação (delta = nova_qtd - antiga_qtd) para cada produto,
+ *   garantindo que não ocorra duplicação de estoque (ex: 100 -> 120 adiciona apenas +20, resultando em +120).
+ * - Se uma redução for solicitada e o estoque disponível no depósito for inferior, a operação é rejeitada.
+ * - Registra movimentações em stock_movements com vínculo nfEntryId e auditoria completa.
  */
 export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
   checkDbConnection();
@@ -626,6 +773,90 @@ export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
     return await db.transaction(async (tx: any) => {
       const cleanAccessKey = (nf.accessKey || '').trim();
 
+      // 1. Verifica se a NF já existe no banco de dados (Modo Edição vs Modo Nova Inserção)
+      const existingNfRows = await tx
+        .select()
+        .from(nfEntries)
+        .where(eq(nfEntries.id, nf.id))
+        .for('update');
+      const isEditing = existingNfRows && existingNfRows.length > 0;
+
+      // 2. Se for edição, busca os itens antigos da NF para calcular o impacto anterior
+      const oldQtyByProduct: Record<string, { quantity: number; productName: string }> = {};
+      if (isEditing) {
+        const previousItems = await tx
+          .select()
+          .from(nfItems)
+          .where(eq(nfItems.nfId, nf.id));
+
+        for (const pItem of previousItems) {
+          if (!oldQtyByProduct[pItem.productId]) {
+            oldQtyByProduct[pItem.productId] = { quantity: 0, productName: pItem.productName };
+          }
+          oldQtyByProduct[pItem.productId].quantity += Number(pItem.quantity) || 0;
+        }
+      }
+
+      // 3. Agrupa as novas quantidades informadas para esta NF por produto
+      const newQtyByProduct: Record<string, { quantity: number; productName: string }> = {};
+      if (nf.items && nf.items.length > 0) {
+        for (const item of nf.items) {
+          const itemQty = Number(item.quantity);
+          if (isNaN(itemQty) || itemQty <= 0) {
+            throw new Error(`Quantidade inválida para o item "${item.productName}": deve ser maior que zero.`);
+          }
+          if (!newQtyByProduct[item.productId]) {
+            newQtyByProduct[item.productId] = { quantity: 0, productName: item.productName };
+          }
+          newQtyByProduct[item.productId].quantity += itemQty;
+        }
+      }
+
+      // 4. Reconciliação atômica de saldo: calcula o delta para todos os produtos envolvidos
+      const allProductIds = Array.from(
+        new Set([...Object.keys(oldQtyByProduct), ...Object.keys(newQtyByProduct)])
+      );
+
+      for (const productId of allProductIds) {
+        const oldQty = oldQtyByProduct[productId]?.quantity || 0;
+        const newQty = newQtyByProduct[productId]?.quantity || 0;
+        const delta = newQty - oldQty;
+
+        // Se não houve alteração na quantidade deste produto, nada a ajustar no saldo
+        if (delta === 0) continue;
+
+        // Trava a linha do produto no PostgreSQL (SELECT FOR UPDATE)
+        const prodRows = await tx
+          .select()
+          .from(products)
+          .where(eq(products.id, productId))
+          .for('update');
+
+        if (!prodRows || prodRows.length === 0) {
+          const prodName = newQtyByProduct[productId]?.productName || oldQtyByProduct[productId]?.productName || productId;
+          throw new Error(`Produto "${prodName}" não foi localizado no banco de dados para reconciliação de estoque.`);
+        }
+        const prod = prodRows[0];
+
+        // Se delta < 0 (redução de quantidade na NF ou remoção de item), verifica disponibilidade no depósito
+        if (delta < 0 && prod.stockDeposito < Math.abs(delta)) {
+          throw new Error(
+            `Não é possível alterar a NF: parte do estoque do produto "${prod.name}" já foi movimentada (vendida ou transferida). Saldo disponível no Depósito Central: ${prod.stockDeposito} un, redução solicitada: ${Math.abs(delta)} un.`
+          );
+        }
+
+        // Aplica o delta no estoque do Depósito Central
+        const newStockDeposito = prod.stockDeposito + delta;
+        await tx
+          .update(products)
+          .set({
+            stockDeposito: newStockDeposito,
+            updatedAt: new Date(),
+          })
+          .where(eq(products.id, productId));
+      }
+
+      // 5. Persiste/Atualiza o cabeçalho da NF (nfEntries)
       await tx
         .insert(nfEntries)
         .values({
@@ -655,19 +886,36 @@ export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
           },
         });
 
-      // Remove itens e movimentações anteriores da NF para evitar duplicidade em updates
+      // 6. Remove itens e movimentações anteriores desta NF para recriá-los sincronizados
       await tx.delete(nfItems).where(eq(nfItems.nfId, nf.id));
       await tx.delete(stockMovements).where(eq(stockMovements.nfEntryId, nf.id));
 
-      // Insere os novos itens da NF, atualiza estoque do produto e cria movimentações
+      // 7. Insere os novos itens da NF, atualiza metadados cadastrais do produto e insere movimentações
       if (nf.items && nf.items.length > 0) {
         for (const item of nf.items) {
-          // 1. Insere item da NF
+          const itemQty = Number(item.quantity);
+
+          // Atualiza dados de custo, lote e validade no cadastro do produto (sem alterar estoque)
+          const prodRows = await tx.select().from(products).where(eq(products.id, item.productId));
+          if (prodRows && prodRows.length > 0) {
+            const currentProd = prodRows[0];
+            await tx
+              .update(products)
+              .set({
+                costPrice: item.costPrice > 0 ? item.costPrice : currentProd.costPrice,
+                batchNumber: item.batchNumber || currentProd.batchNumber,
+                expirationDate: item.expirationDate || currentProd.expirationDate,
+                updatedAt: new Date(),
+              })
+              .where(eq(products.id, item.productId));
+          }
+
+          // 7.1. Insere item da NF em nf_items
           await tx.insert(nfItems).values({
             nfId: nf.id,
             productId: item.productId,
             productName: item.productName,
-            quantity: item.quantity,
+            quantity: itemQty,
             costPrice: item.costPrice,
             totalCost: item.totalCost,
             batchNumber: item.batchNumber || 'LOTE-PADRAO',
@@ -683,28 +931,12 @@ export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
             recoverableTaxesAllocated: item.recoverableTaxesAllocated || 0,
           });
 
-          // 2. Atualiza estoque no Depósito Central e preço de custo no cadastro do produto
-          const prodRows = await tx.select().from(products).where(eq(products.id, item.productId));
-          if (prodRows && prodRows.length > 0) {
-            const currentProd = prodRows[0];
-            await tx
-              .update(products)
-              .set({
-                stockDeposito: currentProd.stockDeposito + item.quantity,
-                costPrice: item.costPrice > 0 ? item.costPrice : currentProd.costPrice,
-                batchNumber: item.batchNumber || currentProd.batchNumber,
-                expirationDate: item.expirationDate || currentProd.expirationDate,
-                updatedAt: new Date(),
-              })
-              .where(eq(products.id, item.productId));
-          } else {
-            throw new Error(
-              `Produto "${item.productName}" (ID: ${item.productId}) não foi encontrado no banco de dados para atualização de estoque.`
-            );
-          }
-
-          // 3. Registra movimentação de entrada vinculada à NF (nfEntryId)
+          // 7.2. Registra movimentação de entrada vinculada à NF (nfEntryId) em stock_movements
           const movementId = `mov-nf-${nf.id}-${item.productId}-${Date.now()}`;
+          const reasonText = isEditing
+            ? `Entrada por NF ${nf.numberNF} (${nf.supplier || 'Fornecedor'}) [Atualizada]`
+            : `Entrada por NF ${nf.numberNF} (${nf.supplier || 'Fornecedor'})`;
+
           await tx.insert(stockMovements).values({
             id: movementId,
             productId: item.productId,
@@ -712,9 +944,9 @@ export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
             type: 'entrada_nf',
             origin: nf.supplier || 'Fornecedor NF',
             destination: 'Depósito Central',
-            quantity: item.quantity,
+            quantity: itemQty,
             batchNumber: item.batchNumber || 'LOTE-PADRAO',
-            reason: `Entrada por NF ${nf.numberNF} (${nf.supplier || 'Fornecedor'})`,
+            reason: reasonText,
             createdBy: nf.createdBy || 'Operador',
             timestamp: nf.receiveDate || new Date().toISOString(),
             nfEntryId: nf.id,
@@ -742,37 +974,49 @@ export async function deleteNFEntryById(id: string): Promise<{ success: boolean;
 
   return await withRetry(async () => {
     return await db.transaction(async (tx: any) => {
-      // 1. Busca os dados da NF
-      const nfRows = await tx.select().from(nfEntries).where(eq(nfEntries.id, id));
+      // 1. Busca e trava os dados da NF
+      const nfRows = await tx.select().from(nfEntries).where(eq(nfEntries.id, id)).for('update');
       if (!nfRows || nfRows.length === 0) {
         throw new Error('Nota Fiscal não encontrada no banco de dados.');
       }
       const nf = nfRows[0];
 
-      // 2. Busca todas as movimentações de estoque vinculadas a essa NF (nfEntryId)
+      // 2. Busca itens da NF e movimentações vinculadas
+      const items = await tx.select().from(nfItems).where(eq(nfItems.nfId, id));
       const linkedMovements = await tx
         .select()
         .from(stockMovements)
         .where(eq(stockMovements.nfEntryId, id));
 
-      if (!linkedMovements || linkedMovements.length === 0) {
-        throw new Error(
-          'Esta nota fiscal é antiga e não possui movimentações vinculadas para reversão automática de estoque. A correção deve ser realizada manualmente através do ajuste de estoque.'
-        );
-      }
-
       // 3. Agrupa a quantidade a subtrair por produto no Depósito Central
       const qtyToSubtractByProduct: Record<string, { quantity: number; productName: string }> = {};
-      for (const mov of linkedMovements) {
-        if (!qtyToSubtractByProduct[mov.productId]) {
-          qtyToSubtractByProduct[mov.productId] = { quantity: 0, productName: mov.productName };
+
+      if (items && items.length > 0) {
+        for (const it of items) {
+          if (!qtyToSubtractByProduct[it.productId]) {
+            qtyToSubtractByProduct[it.productId] = { quantity: 0, productName: it.productName };
+          }
+          qtyToSubtractByProduct[it.productId].quantity += Number(it.quantity) || 0;
         }
-        qtyToSubtractByProduct[mov.productId].quantity += mov.quantity;
+      } else if (linkedMovements && linkedMovements.length > 0) {
+        for (const mov of linkedMovements) {
+          if (!qtyToSubtractByProduct[mov.productId]) {
+            qtyToSubtractByProduct[mov.productId] = { quantity: 0, productName: mov.productName };
+          }
+          qtyToSubtractByProduct[mov.productId].quantity += Number(mov.quantity) || 0;
+        }
+      } else {
+        throw new Error('Esta nota fiscal não possui itens nem movimentações registradas para reversão de estoque.');
       }
 
       // 4. Verifica se cada produto possui saldo suficiente no estoque do depósito para subtrair
       for (const [productId, info] of Object.entries(qtyToSubtractByProduct)) {
-        const prodRows = await tx.select().from(products).where(eq(products.id, productId));
+        const prodRows = await tx
+          .select()
+          .from(products)
+          .where(eq(products.id, productId))
+          .for('update');
+
         if (!prodRows || prodRows.length === 0) {
           throw new Error(
             `Produto "${info.productName}" não foi localizado no cadastro para reversão de estoque.`
@@ -782,12 +1026,12 @@ export async function deleteNFEntryById(id: string): Promise<{ success: boolean;
 
         if (prod.stockDeposito < info.quantity) {
           throw new Error(
-            'Não é possível excluir: parte do estoque desta nota já foi movimentado (vendido ou transferido). Ajuste o estoque manualmente em vez de excluir.'
+            `Não é possível excluir a NF: parte do estoque do produto "${prod.name}" já foi movimentado (vendido ou transferido). Saldo disponível no Depósito Central: ${prod.stockDeposito} un, quantidade a estornar: ${info.quantity} un. Ajuste o estoque manualmente em vez de excluir a nota fiscal.`
           );
         }
       }
 
-      // 5. Aplica a reversão de estoque no depósito para todos os produtos
+      // 5. Aplica a reversão de estoque no Depósito Central para todos os produtos
       for (const [productId, info] of Object.entries(qtyToSubtractByProduct)) {
         const prodRows = await tx.select().from(products).where(eq(products.id, productId));
         const prod = prodRows[0];
