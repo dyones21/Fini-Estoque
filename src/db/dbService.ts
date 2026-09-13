@@ -370,31 +370,161 @@ export async function processStockTransfer(transfer: {
   });
 }
 
-export async function insertMovement(m: StockMovement): Promise<StockMovement> {
+/**
+ * Processa movimentação de estoque (venda_loja, perda_avaria, ajuste_inventario)
+ * de forma atômica no PostgreSQL dentro de db.transaction.
+ * Atualiza o saldo real em `products` e insere o histórico em `stock_movements`.
+ */
+export async function processStockMovement(m: {
+  id?: string;
+  productId: string;
+  productName?: string;
+  type: StockMovement['type'];
+  quantity: number;
+  location: 'loja' | 'deposito' | 'ambos';
+  reason?: string;
+  date?: string;
+  userName?: string;
+  unitPrice?: number;
+  nfEntryId?: string;
+}): Promise<{ success: boolean; movement: StockMovement; product: Product }> {
   checkDbConnection();
 
-  await withRetry(async () => {
-    await db
-      .insert(stockMovements)
-      .values({
-        id: m.id,
-        productId: m.productId,
-        productName: m.productName,
-        type: m.type,
-        origin: m.location === 'deposito' ? 'Depósito Central' : 'Loja',
-        destination: m.location === 'loja' ? 'Loja' : 'Depósito Central',
-        quantity: m.quantity,
-        batchNumber: 'LOTE-DEFAULT',
-        reason: m.reason || 'Movimentação de estoque',
-        createdBy: m.userName || 'Sistema',
-        timestamp: m.date || new Date().toISOString(),
-        nfEntryId: m.nfEntryId || null,
-      })
-      .onConflictDoNothing();
-  });
+  return await withRetry(async () => {
+    return await db.transaction(async (tx: any) => {
+      // 1. Buscar o produto atual (stockDeposito, stockLoja)
+      const rows = await tx.select().from(products).where(eq(products.id, m.productId));
+      if (!rows || rows.length === 0) {
+        throw new Error(`Produto não localizado no banco de dados (ID: ${m.productId}).`);
+      }
+      const prod = rows[0];
 
-  return m;
+      const qty = Number(m.quantity);
+      if (isNaN(qty) || qty < 0) {
+        throw new Error('Quantidade inválida para a movimentação.');
+      }
+
+      // 2. Calcular o novo estoque de acordo com o tipo
+      let newStockDeposito = prod.stockDeposito;
+      let newStockLoja = prod.stockLoja;
+
+      if (m.type === 'venda_loja') {
+        // venda_loja: subtrai a quantidade de stockLoja (nunca abaixo de zero)
+        newStockLoja = Math.max(0, prod.stockLoja - qty);
+      } else if (m.type === 'perda_avaria') {
+        // perda_avaria: subtrai a quantidade de stockDeposito e/ou stockLoja, dependendo do campo location recebido
+        if (m.location === 'deposito' || m.location === 'ambos') {
+          newStockDeposito = Math.max(0, prod.stockDeposito - qty);
+        }
+        if (m.location === 'loja' || m.location === 'ambos') {
+          newStockLoja = Math.max(0, prod.stockLoja - qty);
+        }
+      } else if (m.type === 'ajuste_inventario') {
+        // ajuste_inventario: define o valor absoluto (não subtrai) de stockDeposito e/ou stockLoja, dependendo de location
+        if (m.location === 'deposito' || m.location === 'ambos') {
+          newStockDeposito = Math.max(0, Math.round(qty));
+        }
+        if (m.location === 'loja' || m.location === 'ambos') {
+          newStockLoja = Math.max(0, Math.round(qty));
+        }
+      } else if (m.type === 'transferencia_deposito_loja') {
+        newStockDeposito = Math.max(0, prod.stockDeposito - qty);
+        newStockLoja = prod.stockLoja + qty;
+      }
+
+      // 3. Atualizar o produto com o novo estoque dentro da mesma transação
+      await tx
+        .update(products)
+        .set({
+          stockDeposito: newStockDeposito,
+          stockLoja: newStockLoja,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, m.productId));
+
+      // 4. Inserir o registro em stock_movements dentro da mesma transação
+      const movementId = m.id
+        ? m.id.startsWith('mov-') ? m.id : `mov-${m.id}`
+        : `mov-${Date.now()}`;
+      const timestamp = m.date || new Date().toISOString();
+      const createdBy = m.userName || 'Sistema';
+
+      let origin = 'Loja';
+      let destination = 'Cliente Final';
+      if (m.location === 'deposito') {
+        origin = 'Depósito Central';
+        destination = m.type === 'venda_loja' ? 'Cliente Final' : 'Depósito Central';
+      } else if (m.location === 'ambos') {
+        origin = 'Depósito e Loja';
+        destination = 'Depósito e Loja';
+      } else {
+        origin = 'Loja';
+        destination = m.type === 'venda_loja' ? 'Cliente Final' : 'Loja';
+      }
+
+      await tx
+        .insert(stockMovements)
+        .values({
+          id: movementId,
+          productId: m.productId,
+          productName: m.productName || prod.name,
+          type: m.type,
+          origin,
+          destination,
+          quantity: qty,
+          batchNumber: prod.batchNumber || 'LOTE-DEFAULT',
+          reason: m.reason || `Movimentação de estoque: ${m.type}`,
+          createdBy,
+          timestamp,
+          nfEntryId: m.nfEntryId || null,
+        })
+        .onConflictDoNothing();
+
+      // 5 & 6. Retornar produto atualizado e movimentação
+      const updatedProduct: Product = {
+        id: prod.id,
+        sku: prod.sku,
+        ean: prod.ean,
+        name: prod.name,
+        category: prod.category as any,
+        unit: prod.unit as any,
+        stockDeposito: newStockDeposito,
+        stockLoja: newStockLoja,
+        minStockDeposito: prod.minStockDeposito,
+        minStockLoja: prod.minStockLoja,
+        costPrice: prod.costPrice,
+        sellPrice: prod.sellPrice,
+        expirationDate: prod.expirationDate,
+        batchNumber: prod.batchNumber,
+        lastUpdated: new Date().toISOString(),
+        totalSalesQuantity: 0,
+        totalSalesValue: 0,
+      };
+
+      const movement: StockMovement = {
+        id: movementId,
+        productId: m.productId,
+        productName: m.productName || prod.name,
+        type: m.type,
+        quantity: qty,
+        location: m.location,
+        date: timestamp,
+        userName: createdBy,
+        reason: m.reason || `Movimentação: ${m.type}`,
+        unitPrice: m.unitPrice !== undefined ? m.unitPrice : prod.sellPrice,
+        nfEntryId: m.nfEntryId || undefined,
+      };
+
+      return {
+        success: true,
+        movement,
+        product: updatedProduct,
+      };
+    });
+  });
 }
+
+export const insertMovement = processStockMovement;
 
 /**
  * Busca todas as notas fiscais e seus itens diretamente do PostgreSQL.

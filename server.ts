@@ -9,6 +9,7 @@ import {
   deleteProductById,
   getAllMovements,
   insertMovement,
+  processStockMovement,
   processStockTransfer,
   getAllNFEntries,
   getNFEntryByAccessKey,
@@ -446,11 +447,18 @@ async function startServer() {
     async (req, res) => {
       try {
         const movementData = req.body;
-        const saved = await insertMovement(movementData);
-        res.json(saved);
+        if (!movementData || !movementData.productId) {
+          return res.status(400).json({ error: 'Produto é obrigatório para registrar a movimentação.' });
+        }
+        const result = await processStockMovement(movementData);
+        res.status(201).json({
+          success: true,
+          movement: result.movement,
+          product: result.product,
+        });
       } catch (error: any) {
         console.error('API Error POST /api/movements:', error);
-        res.status(500).json({ error: error.message || 'Erro ao registrar movimentação no Supabase' });
+        res.status(500).json({ error: error.message || 'Erro ao registrar movimentação no banco de dados' });
       }
     }
   );

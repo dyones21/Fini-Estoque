@@ -192,6 +192,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   });
 
   const notifiedLowStockRef = useRef<Set<string>>(new Set());
+  const isFetchingServerDataRef = useRef<boolean>(false);
 
   const products = useMemo(
     () => [...allProducts].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
@@ -633,6 +634,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Fetch initial data exclusively through Express Server API routes (/api/...)
   const fetchServerData = async () => {
+    if (isFetchingServerDataRef.current) {
+      return;
+    }
+    isFetchingServerDataRef.current = true;
     setIsLoadingServer(true);
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
@@ -786,6 +791,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       console.warn('Aviso ao sincronizar dados com o servidor:', e?.message || e);
       setCloudInfo((prev) => ({ ...prev, status: 'error' }));
     } finally {
+      isFetchingServerDataRef.current = false;
       setIsLoadingServer(false);
       setIsLoadingUsers(false);
       setIsLoadingCompany(false);
@@ -1264,6 +1270,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const product = allProducts.find((p) => p.id === productId);
     if (!product) return;
 
+    // Snapshot current state for rollback on failure
+    const previousProducts = allProducts;
+    const previousMovements = allMovements;
+
     const newMov: StockMovement = {
       id: `mov-${Date.now()}`,
       productId,
@@ -1277,6 +1287,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       unitPrice: unitPrice !== undefined ? unitPrice : product.sellPrice,
     };
 
+    // Optimistic updates
     setAllMovements((prev) => [newMov, ...prev]);
 
     setAllProducts((prev) =>
@@ -1291,12 +1302,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             if (location === 'deposito' || location === 'ambos') {
               newDeposito = Math.max(0, newDeposito - quantity);
             }
-            if (location === 'loja') {
+            if (location === 'loja' || location === 'ambos') {
               newLoja = Math.max(0, newLoja - quantity);
             }
           } else if (type === 'ajuste_inventario') {
-            if (location === 'deposito') newDeposito = quantity;
-            if (location === 'loja') newLoja = quantity;
+            if (location === 'deposito' || location === 'ambos') newDeposito = quantity;
+            if (location === 'loja' || location === 'ambos') newLoja = quantity;
           } else if (type === 'transferencia_deposito_loja') {
             newDeposito = Math.max(0, newDeposito - quantity);
             newLoja = newLoja + quantity;
@@ -1321,6 +1332,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
 
       if (!response.ok) {
+        // Rollback optimistic state immediately
+        setAllProducts(previousProducts);
+        setAllMovements(previousMovements);
+
         if (response.status === 403) {
           handle403PermissionDenied('Registrar Movimentação de Estoque');
           throw new Error('Você não tem permissão para lançar movimentações manuais de estoque.');
@@ -1328,7 +1343,42 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         const errData = await safeParseJson<{ error?: string }>(response);
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao registrar movimentação no servidor.`);
       }
+
+      const resData = await safeParseJson<{
+        success?: boolean;
+        movement?: StockMovement;
+        product?: Product;
+        updatedProduct?: Product;
+      }>(response);
+
+      // Reconcile product with official server state
+      const serverProduct = resData?.product || resData?.updatedProduct;
+      if (serverProduct && serverProduct.id) {
+        setAllProducts((prev) =>
+          prev.map((p) => {
+            if (p.id === serverProduct.id) {
+              return {
+                ...p,
+                stockDeposito: serverProduct.stockDeposito,
+                stockLoja: serverProduct.stockLoja,
+                lastUpdated: serverProduct.lastUpdated || new Date().toISOString(),
+              };
+            }
+            return p;
+          })
+        );
+      }
+
+      // Reconcile movement with official server state
+      if (resData?.movement) {
+        setAllMovements((prev) =>
+          prev.map((m) => (m.id === newMov.id ? resData.movement! : m))
+        );
+      }
     } catch (error) {
+      // Revert optimistic updates on any error (network failure, JSON parse, etc.)
+      setAllProducts(previousProducts);
+      setAllMovements(previousMovements);
       console.error('Falha ao registrar movimentação no servidor PostgreSQL:', error);
       throw error;
     }
