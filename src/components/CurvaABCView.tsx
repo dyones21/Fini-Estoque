@@ -68,7 +68,7 @@ export const CurvaABCView: React.FC = () => {
     const data = filteredList.map((item) => ({
       Classe: item.classABC,
       SKU: item.product.sku,
-      'Cód. Barras (EAN)': item.product.ean || '',
+      'Cód. Barras (EAN)': item.product.ean || item.product.codeEAN || '',
       Produto: item.product.name,
       Categoria: item.product.category,
       Unidade: item.product.unit,
@@ -101,7 +101,7 @@ export const CurvaABCView: React.FC = () => {
     const rows = filteredList.map((item) => [
       item.classABC,
       item.product.sku,
-      item.product.ean || '',
+      item.product.ean || item.product.codeEAN || '',
       item.product.name,
       item.product.category,
       item.product.unit,

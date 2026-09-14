@@ -719,11 +719,16 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (Array.isArray(dataUsers)) loadedUsers = dataUsers;
 
       if (Array.isArray(dataProd)) {
-        const incomingHydrated: Product[] = dataProd.map((p) => ({
-          ...p,
-          totalSalesQuantity: 0,
-          totalSalesValue: 0,
-        }));
+        const incomingHydrated: Product[] = dataProd.map((p) => {
+          const safeEan = p.ean || p.codeEAN || '';
+          return {
+            ...p,
+            ean: safeEan,
+            codeEAN: safeEan,
+            totalSalesQuantity: 0,
+            totalSalesValue: 0,
+          };
+        });
 
         // Reconciliação atômica e proteção contra sobreposição de estado (anti-race condition):
         // Se um produto no estado React possui mutação local recente com início após o disparo da busca,
@@ -989,8 +994,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   ): Promise<Product> => {
     const mutationTime = Date.now();
     const nowIso = new Date(mutationTime).toISOString();
+    const safeEan = productData.ean || productData.codeEAN || '';
     const newProduct: Product = {
       ...productData,
+      ean: safeEan,
+      codeEAN: safeEan,
       id: productData.id || `p-${mutationTime}-${Math.floor(Math.random() * 1000)}`,
       lastUpdated: nowIso,
       totalSalesQuantity: 0,
@@ -1045,6 +1053,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const safeUpdates = { ...updatedFields };
     delete safeUpdates.stockDeposito;
     delete safeUpdates.stockLoja;
+    if (safeUpdates.ean !== undefined || (safeUpdates as any).codeEAN !== undefined) {
+      const normalizedEan = safeUpdates.ean || (safeUpdates as any).codeEAN || '';
+      safeUpdates.ean = normalizedEan;
+      safeUpdates.codeEAN = normalizedEan;
+    }
 
     const mutationTime = Date.now();
     localMutationTimestampsRef.current.set(id, mutationTime);
@@ -1095,12 +1108,15 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       localMutationTimestampsRef.current.set(id, postMutationTime);
 
       if (updatedFromServer && updatedFromServer.id) {
+        const serverEan = updatedFromServer.ean || (updatedFromServer as any).codeEAN || '';
         setAllProducts((prev) =>
           prev.map((p) => {
             if (p.id === id) {
               return {
                 ...p,
                 ...updatedFromServer,
+                ean: serverEan || p.ean || '',
+                codeEAN: serverEan || p.codeEAN || '',
                 totalSalesQuantity: p.totalSalesQuantity ?? 0,
                 totalSalesValue: p.totalSalesValue ?? 0,
                 lastUpdated: updatedFromServer.lastUpdated || new Date(postMutationTime).toISOString(),

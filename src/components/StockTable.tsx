@@ -140,11 +140,12 @@ export const StockTable: React.FC<StockTableProps> = ({
     return products.filter((p) => {
       // 1. Search Query
       const query = searchQuery.toLowerCase().trim();
+      const safeEan = (p.ean || p.codeEAN || '').toLowerCase();
       const matchesSearch =
         !query ||
         p.name.toLowerCase().includes(query) ||
         p.sku.toLowerCase().includes(query) ||
-        p.ean.toLowerCase().includes(query) ||
+        safeEan.includes(query) ||
         p.batchNumber.toLowerCase().includes(query);
 
       // 2. Category
@@ -215,7 +216,7 @@ export const StockTable: React.FC<StockTableProps> = ({
         Produto: p.name,
         Categoria: p.category,
         Unidade: p.unit,
-        'Cód. Barras (EAN)': p.ean || '',
+        'Cód. Barras (EAN)': p.ean || p.codeEAN || '',
         Lote: p.batchNumber,
         'Data Validade': p.expirationDate,
         'Status Validade': statusValidade,
@@ -261,7 +262,7 @@ export const StockTable: React.FC<StockTableProps> = ({
         p.name,
         p.category,
         p.unit,
-        p.ean || '',
+        p.ean || p.codeEAN || '',
         p.batchNumber,
         p.expirationDate,
         p.stockLoja,
@@ -583,7 +584,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                             {/* SKU & EAN */}
                             <td className="py-3 px-4 font-mono text-[11px] text-slate-500">
                               <p className="font-bold text-slate-800">{product.sku}</p>
-                              <p className="text-[10px] text-slate-400">{product.ean || '—'}</p>
+                              <p className="text-[10px] text-slate-400">{product.ean || product.codeEAN || '—'}</p>
                             </td>
 
                             {/* Name & Category */}

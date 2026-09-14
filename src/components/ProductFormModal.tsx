@@ -63,7 +63,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setIsSubmitting(false);
     if (editingProduct) {
       setSku(editingProduct.sku);
-      setEan(editingProduct.ean);
+      setEan(editingProduct.ean || editingProduct.codeEAN || '');
       setName(editingProduct.name);
       setCategory(editingProduct.category);
       
@@ -151,6 +151,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         await updateProduct(editingProduct.id, {
           sku,
           ean,
+          codeEAN: ean,
           name,
           category,
           unit: finalUnit,
@@ -165,6 +166,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         await addProduct({
           sku,
           ean,
+          codeEAN: ean,
           name,
           category,
           unit: finalUnit,

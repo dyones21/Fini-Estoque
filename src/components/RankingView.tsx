@@ -50,7 +50,7 @@ export const RankingView: React.FC = () => {
     const data = rankedProducts.map((p, idx) => ({
       Posição: `${idx + 1}º`,
       SKU: p.sku,
-      'Cód. Barras (EAN)': p.ean || '',
+      'Cód. Barras (EAN)': p.ean || p.codeEAN || '',
       Produto: p.name,
       Categoria: p.category,
       Unidade: p.unit,
@@ -81,7 +81,7 @@ export const RankingView: React.FC = () => {
     const rows = rankedProducts.map((p, idx) => [
       `${idx + 1}º`,
       p.sku,
-      p.ean || '',
+      p.ean || p.codeEAN || '',
       p.name,
       p.category,
       p.unit,

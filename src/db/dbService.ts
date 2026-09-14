@@ -61,7 +61,8 @@ export async function getAllProducts(): Promise<Product[]> {
     return rows.map((r) => ({
       id: r.id,
       sku: r.sku,
-      ean: r.ean,
+      ean: r.ean || '',
+      codeEAN: r.ean || '',
       name: r.name,
       category: r.category as any,
       unit: r.unit as any,
@@ -141,6 +142,7 @@ export async function saveProduct(p: Product): Promise<Product> {
     ...p,
     sku: skuVal,
     ean: eanVal,
+    codeEAN: eanVal,
     stockDeposito: depStock,
     stockLoja: lojStock,
     costPrice: cost,
@@ -203,7 +205,8 @@ export async function updateProductById(id: string, updates: Partial<Product>): 
     return {
       id,
       sku: refreshed.sku,
-      ean: refreshed.ean,
+      ean: refreshed.ean || '',
+      codeEAN: refreshed.ean || '',
       name: refreshed.name,
       category: refreshed.category as any,
       unit: refreshed.unit as any,

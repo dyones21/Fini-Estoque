@@ -110,46 +110,59 @@ export const ReportsView: React.FC = () => {
   // ================= 1. FILTERED POSIÇÃO DE ESTOQUE =================
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
-      // Category
+      // 1. Categoria
       if (categoryFilter !== 'todos' && p.category !== categoryFilter) return false;
 
-      // Location / Non-zero stock filter
-      const totalStock = p.stockLoja + p.stockDeposito;
-      if (locationFilter === 'loja' && p.stockLoja <= 0 && statusFilter !== 'zerado') {
-        // allow if specifically filtering status
-      }
-
-      // Search Query
+      // 2. Busca textual segura (Nome, SKU, EAN/codeEAN, Categoria)
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchName = p.name.toLowerCase().includes(q);
-        const matchSKU = p.sku.toLowerCase().includes(q);
-        const matchEAN = p.ean.toLowerCase().includes(q);
-        const matchCategory = p.category.toLowerCase().includes(q);
+        const q = searchQuery.toLowerCase().trim();
+        const matchName = (p.name || '').toLowerCase().includes(q);
+        const matchSKU = (p.sku || '').toLowerCase().includes(q);
+        const safeEAN = (p.ean || p.codeEAN || '').toLowerCase();
+        const matchEAN = safeEAN.includes(q);
+        const matchCategory = (p.category || '').toLowerCase().includes(q);
         if (!matchName && !matchSKU && !matchEAN && !matchCategory) return false;
       }
 
-      // Status
+      // 3. Quantidade de estoque relevante para o local selecionado
+      const relevantStock = locationFilter === 'loja' 
+        ? p.stockLoja 
+        : locationFilter === 'deposito' 
+          ? p.stockDeposito 
+          : (p.stockLoja + p.stockDeposito);
+
+      // 4. Validade e Status de Estoque
       const daysToExp = getDaysToExpiration(p.expirationDate);
-      if (statusFilter === 'estoque_baixo') {
+
+      if (statusFilter === 'todos') {
+        // Na visão Loja/Depósito, o produto é considerado quando possuir estoque no local
+        if (locationFilter === 'loja' && p.stockLoja <= 0) return false;
+        if (locationFilter === 'deposito' && p.stockDeposito <= 0) return false;
+        // Na visão Geral, exibe todos os produtos conforme os demais filtros
+      } else if (statusFilter === 'disponivel') {
+        if (relevantStock <= 0) return false;
+      } else if (statusFilter === 'zerado') {
+        if (relevantStock > 0) return false;
+      } else if (statusFilter === 'estoque_baixo') {
         if (!isLowStock(p, locationFilter)) return false;
       } else if (statusFilter === 'validade_proxima') {
         if (daysToExp < 0 || daysToExp > 30) return false;
+        if (relevantStock <= 0) return false;
       } else if (statusFilter === 'vencido') {
         if (daysToExp >= 0) return false;
-      } else if (statusFilter === 'zerado') {
-        if (totalStock > 0) return false;
-      } else if (statusFilter === 'disponivel') {
-        if (totalStock <= 0) return false;
+        if (relevantStock <= 0) return false;
       }
 
       return true;
     }).sort((a, b) => {
+      const getUnits = (prod: Product) =>
+        locationFilter === 'loja' ? prod.stockLoja : locationFilter === 'deposito' ? prod.stockDeposito : (prod.stockLoja + prod.stockDeposito);
+
       if (sortBy === 'nome_asc') return a.name.localeCompare(b.name, 'pt-BR');
       if (sortBy === 'nome_desc') return b.name.localeCompare(a.name, 'pt-BR');
-      if (sortBy === 'custo_maior') return (b.costPrice * (b.stockLoja + b.stockDeposito)) - (a.costPrice * (a.stockLoja + a.stockDeposito));
-      if (sortBy === 'venda_maior') return (b.sellPrice * (b.stockLoja + b.stockDeposito)) - (a.sellPrice * (a.stockLoja + a.stockDeposito));
-      if (sortBy === 'qtd_maior') return (b.stockLoja + b.stockDeposito) - (a.stockLoja + a.stockDeposito);
+      if (sortBy === 'custo_maior') return (b.costPrice * getUnits(b)) - (a.costPrice * getUnits(a));
+      if (sortBy === 'venda_maior') return (b.sellPrice * getUnits(b)) - (a.sellPrice * getUnits(a));
+      if (sortBy === 'qtd_maior') return getUnits(b) - getUnits(a);
       if (sortBy === 'validade_mais_proxima') return new Date(a.expirationDate).getTime() - new Date(b.expirationDate).getTime();
       return 0;
     });
@@ -164,12 +177,17 @@ export const ReportsView: React.FC = () => {
     let totalDepositoItems = 0;
 
     filteredProducts.forEach((p) => {
-      const totalUnits = p.stockLoja + p.stockDeposito;
-      totalItemsCount += totalUnits;
+      const units = locationFilter === 'loja'
+        ? p.stockLoja
+        : locationFilter === 'deposito'
+          ? p.stockDeposito
+          : (p.stockLoja + p.stockDeposito);
+
+      totalItemsCount += units;
       totalLojaItems += p.stockLoja;
       totalDepositoItems += p.stockDeposito;
-      totalCostVal += totalUnits * p.costPrice;
-      totalSellVal += totalUnits * p.sellPrice;
+      totalCostVal += units * p.costPrice;
+      totalSellVal += units * p.sellPrice;
     });
 
     return {
@@ -181,7 +199,7 @@ export const ReportsView: React.FC = () => {
       totalSellVal,
       estimatedProfit: totalSellVal - totalCostVal,
     };
-  }, [filteredProducts]);
+  }, [filteredProducts, locationFilter]);
 
   // ================= 2. FILTERED MOVIMENTAÇÕES =================
   const filteredMovements = useMemo(() => {
@@ -368,7 +386,7 @@ export const ReportsView: React.FC = () => {
         const total = p.stockLoja + p.stockDeposito;
         csvRows.push([
           p.sku,
-          p.ean,
+          p.ean || p.codeEAN || '',
           p.name,
           p.category,
           p.unit,
@@ -721,7 +739,7 @@ export const ReportsView: React.FC = () => {
                 className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold bg-white"
               >
                 <option value="geral">Todos os Locais (Unificado)</option>
-                <option value="loja">Loja GummyStock</option>
+                <option value="loja">Loja</option>
                 <option value="deposito">Depósito Central</option>
               </select>
             </div>
