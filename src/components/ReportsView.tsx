@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory, StockMovement, NFEntry, StockTransfer } from '../types';
-import { formatCurrency, formatDateTime, getDaysToExpiration, isLowStock } from '../utils/inventoryUtils';
+import { formatCurrency, formatDateTime, getDaysToExpiration, isLowStock, calculateCurvaABC } from '../utils/inventoryUtils';
 import { exportToExcel, exportToCSV } from '../utils/exportUtils';
 import { ExportButton } from './ExportButton';
 
@@ -253,39 +253,7 @@ export const ReportsView: React.FC = () => {
 
   // ================= 5. CURVA ABC =================
   const abcAnalysis = useMemo(() => {
-    const sorted = [...products].map((product) => {
-      const totalUnits = (Number(product.stockDeposito) || 0) + (Number(product.stockLoja) || 0);
-      const unitCost = Number(product.costPrice) > 0 ? Number(product.costPrice) : (Number(product.sellPrice) || 0);
-      const stockVal = totalUnits * unitCost;
-      return {
-        product,
-        totalStockVal: stockVal,
-        totalUnits,
-      };
-    }).sort((a, b) => b.totalStockVal - a.totalStockVal);
-
-    const grandTotal = sorted.reduce((sum, p) => sum + p.totalStockVal, 0);
-
-    let cumulative = 0;
-    return sorted.map(({ product, totalStockVal, totalUnits }) => {
-      const revPct = grandTotal > 0 ? (totalStockVal / grandTotal) * 100 : 0;
-      cumulative += revPct;
-
-      let classABC: 'A' | 'B' | 'C' = 'C';
-      if (cumulative <= 80 || revPct >= 15) {
-        classABC = 'A';
-      } else if (cumulative <= 95) {
-        classABC = 'B';
-      }
-
-      return {
-        product,
-        totalRevenue: totalStockVal,
-        revenuePercentage: revPct,
-        cumulativePercentage: cumulative,
-        classABC,
-      };
-    });
+    return calculateCurvaABC(products);
   }, [products]);
 
   // Handler for Printing / PDF Export
@@ -915,7 +883,7 @@ export const ReportsView: React.FC = () => {
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
             <span className="text-[10px] font-extrabold text-slate-400 uppercase block">Potencial Venda</span>
             <span className="text-xl font-black text-emerald-700 mt-0.5 block">{formatCurrency(stockMetrics.totalSellVal)}</span>
-            <span className="text-[11px] text-slate-500 font-semibold">Faturamento Bruto</span>
+            <span className="text-[11px] text-slate-500 font-semibold">Valor Total de Venda</span>
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">

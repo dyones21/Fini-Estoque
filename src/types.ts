@@ -89,8 +89,8 @@ export interface Product {
   expirationDate: string; // ISO date YYYY-MM-DD
   batchNumber: string; // Lote
   lastUpdated: string;
-  totalSalesQuantity: number; // Para cálculo de ranking e Curva ABC
-  totalSalesValue: number; // Faturamento total gerado
+  totalSalesQuantity?: number; // Total de saídas operacionais históricas
+  totalSalesValue?: number; // Valor acumulado de saídas operacionais
 }
 
 export interface NFItem {

@@ -48,7 +48,7 @@ export const PERMISSION_METAS: PermissionMeta[] = [
     key: 'canViewDashboard',
     title: 'Visualizar Dashboard & Indicadores',
     category: 'Visualização',
-    description: 'Acesso aos gráficos executivos, faturamento, Curva ABC e métricas financeiras da loja.',
+    description: 'Acesso aos gráficos executivos, valor em estoque, Curva ABC e métricas operacionais.',
   },
   {
     key: 'canViewStock',

@@ -53,7 +53,7 @@ export const CurvaABCView: React.FC = () => {
       name: item.product.name.split(' ')[1]
         ? `${item.product.name.split(' ')[0]} ${item.product.name.split(' ')[1]}`
         : item.product.name,
-      faturamento: item.totalRevenue,
+      valorEstoque: item.totalRevenue,
       acumuladoPct: item.cumulativePercentage,
       classe: item.classABC,
     }));
@@ -242,10 +242,10 @@ export const CurvaABCView: React.FC = () => {
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div className="mb-4">
           <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-            Gráfico de Curva de Pareto (Faturamento vs Acumulado %)
+            Gráfico de Curva de Pareto (Valor em Estoque vs Acumulado %)
           </h3>
           <p className="text-xs text-slate-500">
-            Barras representam o faturamento por produto e a linha representa o % acumulado
+            Barras representam o capital imobilizado por produto e a linha representa o % acumulado
           </p>
         </div>
 
@@ -264,7 +264,7 @@ export const CurvaABCView: React.FC = () => {
                 contentStyle={{ borderRadius: '12px', fontSize: '12px' }}
               />
               <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-              <Bar yAxisId="left" dataKey="faturamento" name="Valor em Estoque" fill="#059669" radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="left" dataKey="valorEstoque" name="Valor em Estoque" fill="#059669" radius={[4, 4, 0, 0]} />
               <Line yAxisId="right" type="monotone" dataKey="acumuladoPct" name="Acumulado %" stroke="#e11d48" strokeWidth={3} dot={{ r: 4 }} />
             </ComposedChart>
           </ResponsiveContainer>

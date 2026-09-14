@@ -55,7 +55,7 @@ export const ProductSearchScanner: React.FC<ProductSearchScannerProps> = ({
     .filter((p) => {
       if (!searchTerm.trim()) return true;
       const term = searchTerm.toLowerCase().trim();
-      const ean = (p.codeEAN || '').toLowerCase();
+      const ean = (p.ean || p.codeEAN || '').toLowerCase();
       const sku = (p.sku || '').toLowerCase();
       const name = (p.name || '').toLowerCase();
       return ean.includes(term) || sku.includes(term) || name.includes(term);
@@ -70,6 +70,7 @@ export const ProductSearchScanner: React.FC<ProductSearchScannerProps> = ({
     // Search exact match by GTIN/EAN, SKU, or ID
     const found = products.find(
       (p) =>
+        (p.ean && p.ean.trim() === code) ||
         (p.codeEAN && p.codeEAN.trim() === code) ||
         (p.sku && p.sku.trim() === code) ||
         p.id === code ||
@@ -79,7 +80,7 @@ export const ProductSearchScanner: React.FC<ProductSearchScannerProps> = ({
     if (found) {
       onSelectProduct(found);
       setSearchTerm('');
-      setScannedFeedback(`✓ Produto localizado por GTIN/Código: "${found.name}" (GTIN: ${found.codeEAN || 'S/N'})`);
+      setScannedFeedback(`✓ Produto localizado por GTIN/Código: "${found.name}" (GTIN: ${found.ean || found.codeEAN || 'S/N'})`);
       stopCameraScanner();
       setIsCameraOpen(false);
       setTimeout(() => setScannedFeedback(null), 4000);
@@ -384,7 +385,7 @@ export const ProductSearchScanner: React.FC<ProductSearchScannerProps> = ({
                       </div>
                       <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
                         <span>
-                          GTIN/EAN: <strong className="text-slate-700">{prod.codeEAN || 'Sem GTIN'}</strong>
+                          GTIN/EAN: <strong className="text-slate-700">{prod.ean || prod.codeEAN || 'Sem GTIN'}</strong>
                         </span>
                         <span>•</span>
                         <span>
@@ -419,7 +420,7 @@ export const ProductSearchScanner: React.FC<ProductSearchScannerProps> = ({
             <div className="truncate">
               <p className="font-extrabold text-slate-900 truncate">{selectedProduct.name}</p>
               <p className="text-[10px] text-slate-500 truncate">
-                GTIN: <strong>{selectedProduct.codeEAN || 'N/A'}</strong> • SKU: <strong>{selectedProduct.sku}</strong>
+                GTIN: <strong>{selectedProduct.ean || selectedProduct.codeEAN || 'N/A'}</strong> • SKU: <strong>{selectedProduct.sku}</strong>
               </p>
             </div>
           </div>

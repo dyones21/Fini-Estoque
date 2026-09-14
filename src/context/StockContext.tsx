@@ -197,6 +197,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const pendingFetchRef = useRef<boolean>(false);
   const fetchSequenceRef = useRef<number>(0);
   const latestCompletedFetchIdRef = useRef<number>(0);
+  const localMutationTimestampsRef = useRef<Map<string, number>>(new Map());
+  const recentlyDeletedProductIdsRef = useRef<Set<string>>(new Set());
 
   const products = useMemo(
     () => [...allProducts].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
@@ -724,34 +726,49 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         }));
 
         // Reconciliação atômica e proteção contra sobreposição de estado (anti-race condition):
-        // Se um produto no estado React possui lastUpdated posterior ao início desta busca (fetchStartTime)
-        // ou mais recente que a versão retornada pelo servidor, mantém o estado mais recente.
+        // Se um produto no estado React possui mutação local recente com início após o disparo da busca,
+        // ou timestamp local superior à versão retornada pelo servidor, mantém a versão local protegida.
         setAllProducts((currentProducts) => {
           const localMap = new Map(currentProducts.map((p) => [p.id, p]));
 
-          const reconciled = incomingHydrated.map((incomingProd) => {
-            const localProd = localMap.get(incomingProd.id);
-            if (!localProd) return incomingProd;
+          const reconciled = incomingHydrated
+            .filter((p) => !recentlyDeletedProductIdsRef.current.has(p.id))
+            .map((incomingProd) => {
+              const localProd = localMap.get(incomingProd.id);
+              if (!localProd) return incomingProd;
 
-            const localTime = localProd.lastUpdated ? new Date(localProd.lastUpdated).getTime() : 0;
-            const incomingTime = incomingProd.lastUpdated ? new Date(incomingProd.lastUpdated).getTime() : 0;
+              const lastMutation = localMutationTimestampsRef.current.get(incomingProd.id) || 0;
+              const isRecentlyMutatedLocally = (Date.now() - lastMutation) < 45000;
 
-            if (localTime >= fetchStartTime || localTime > incomingTime) {
-              return {
-                ...localProd,
-                // Preserva alterações cadastrais locais recentes e atualiza apenas os agregados calculados de vendas
-                totalSalesQuantity: incomingProd.totalSalesQuantity,
-                totalSalesValue: incomingProd.totalSalesValue,
-              };
-            }
+              // Se o produto foi alterado localmente e a busca atual começou antes ou junto da mutação,
+              // mantém a versão local já confirmada e evita sobreposição por dados defasados do servidor
+              if (isRecentlyMutatedLocally && fetchStartTime <= lastMutation) {
+                return {
+                  ...localProd,
+                  totalSalesQuantity: incomingProd.totalSalesQuantity,
+                  totalSalesValue: incomingProd.totalSalesValue,
+                };
+              }
 
-            return incomingProd;
-          });
+              const localTime = localProd.lastUpdated ? new Date(localProd.lastUpdated).getTime() : 0;
+              const incomingTime = incomingProd.lastUpdated ? new Date(incomingProd.lastUpdated).getTime() : 0;
+
+              if (localTime >= fetchStartTime || localTime > incomingTime) {
+                return {
+                  ...localProd,
+                  // Preserva alterações cadastrais locais recentes e atualiza apenas os agregados calculados de vendas
+                  totalSalesQuantity: incomingProd.totalSalesQuantity,
+                  totalSalesValue: incomingProd.totalSalesValue,
+                };
+              }
+
+              return incomingProd;
+            });
 
           // Preserva produtos adicionados localmente de forma otimista que ainda não constam na resposta da busca
           const incomingIds = new Set(incomingHydrated.map((p) => p.id));
           currentProducts.forEach((p) => {
-            if (!incomingIds.has(p.id)) {
+            if (!incomingIds.has(p.id) && !recentlyDeletedProductIdsRef.current.has(p.id)) {
               const localTime = p.lastUpdated ? new Date(p.lastUpdated).getTime() : 0;
               if (localTime >= fetchStartTime) {
                 reconciled.push(p);
@@ -970,14 +987,18 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const addProduct = async (
     productData: Omit<Product, 'id' | 'lastUpdated' | 'totalSalesQuantity' | 'totalSalesValue'> & { id?: string }
   ): Promise<Product> => {
-    const nowIso = new Date().toISOString();
+    const mutationTime = Date.now();
+    const nowIso = new Date(mutationTime).toISOString();
     const newProduct: Product = {
       ...productData,
-      id: productData.id || `p-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: productData.id || `p-${mutationTime}-${Math.floor(Math.random() * 1000)}`,
       lastUpdated: nowIso,
       totalSalesQuantity: 0,
       totalSalesValue: 0,
     };
+
+    localMutationTimestampsRef.current.set(newProduct.id, mutationTime);
+    recentlyDeletedProductIdsRef.current.delete(newProduct.id);
 
     setAllProducts((prev) => [newProduct, ...prev]);
 
@@ -991,21 +1012,27 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (!response.ok) {
         if (response.status === 403) {
           handle403PermissionDenied('Cadastrar Novo Produto');
+          localMutationTimestampsRef.current.delete(newProduct.id);
           setAllProducts((prev) => prev.filter((p) => p.id !== newProduct.id));
           throw new Error('Você não tem permissão para cadastrar novos produtos no estoque.');
         }
         const errData = await safeParseJson<{ error?: string }>(response);
+        localMutationTimestampsRef.current.delete(newProduct.id);
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao salvar produto no servidor.`);
       }
 
       const saved = await safeParseJson<Product>(response);
+      const postMutationTime = Date.now();
+      localMutationTimestampsRef.current.set(newProduct.id, postMutationTime);
+
       if (saved && saved.id) {
         setAllProducts((prev) =>
-          prev.map((p) => (p.id === newProduct.id ? { ...p, ...saved, lastUpdated: saved.lastUpdated || nowIso } : p))
+          prev.map((p) => (p.id === newProduct.id ? { ...p, ...saved, lastUpdated: saved.lastUpdated || new Date(postMutationTime).toISOString() } : p))
         );
       }
       return saved || newProduct;
     } catch (error) {
+      localMutationTimestampsRef.current.delete(newProduct.id);
       setAllProducts((prev) => prev.filter((p) => p.id !== newProduct.id));
       console.error('Falha ao sincronizar novo produto com o servidor PostgreSQL:', error);
       throw error;
@@ -1019,7 +1046,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     delete safeUpdates.stockDeposito;
     delete safeUpdates.stockLoja;
 
-    const nowIso = new Date().toISOString();
+    const mutationTime = Date.now();
+    localMutationTimestampsRef.current.set(id, mutationTime);
+    const nowIso = new Date(mutationTime).toISOString();
 
     // 1. Atualização OTIMISTA imediata no estado React com timestamp atualizado
     let previousProduct: Product | undefined;
@@ -1051,6 +1080,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (response.status === 403) {
           handle403PermissionDenied('Editar Dados do Produto');
           if (previousProduct) {
+            localMutationTimestampsRef.current.delete(id);
             setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct! : p)));
           }
           throw new Error('Você não tem permissão para editar dados de produtos.');
@@ -1059,8 +1089,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao atualizar produto no servidor.`);
       }
 
-      // 2. Reconciliação atômica com o produto retornado pelo servidor preservando agregados de vendas
+      // 2. Reconciliação atômica pontual com o produto retornado pelo servidor
       const updatedFromServer = await safeParseJson<Product>(response);
+      const postMutationTime = Date.now();
+      localMutationTimestampsRef.current.set(id, postMutationTime);
+
       if (updatedFromServer && updatedFromServer.id) {
         setAllProducts((prev) =>
           prev.map((p) => {
@@ -1070,7 +1103,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
                 ...updatedFromServer,
                 totalSalesQuantity: p.totalSalesQuantity ?? 0,
                 totalSalesValue: p.totalSalesValue ?? 0,
-                lastUpdated: updatedFromServer.lastUpdated || nowIso,
+                lastUpdated: updatedFromServer.lastUpdated || new Date(postMutationTime).toISOString(),
               };
             }
             return p;
@@ -1079,6 +1112,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     } catch (error) {
       // Rollback cirúrgico apenas deste produto específico em caso de falha
+      localMutationTimestampsRef.current.delete(id);
       if (previousProduct) {
         setAllProducts((prev) => prev.map((p) => (p.id === id ? previousProduct! : p)));
       }
@@ -1089,6 +1123,9 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const deleteProduct = async (id: string) => {
     let deletedProduct: Product | undefined;
+    recentlyDeletedProductIdsRef.current.add(id);
+    localMutationTimestampsRef.current.delete(id);
+
     setAllProducts((prev) => {
       deletedProduct = prev.find((p) => p.id === id);
       return prev.filter((p) => p.id !== id);
@@ -1102,6 +1139,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (!response.ok) {
         if (response.status === 403) {
           handle403PermissionDenied('Excluir Produto');
+          recentlyDeletedProductIdsRef.current.delete(id);
           if (deletedProduct) {
             setAllProducts((prev) => [deletedProduct!, ...prev]);
           }
@@ -1111,6 +1149,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         throw new Error(errData?.error || `Erro HTTP ${response.status} ao excluir produto no servidor.`);
       }
     } catch (error) {
+      recentlyDeletedProductIdsRef.current.delete(id);
       if (deletedProduct) {
         setAllProducts((prev) => [deletedProduct!, ...prev]);
       }

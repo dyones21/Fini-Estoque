@@ -131,10 +131,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
   // Filtered Products for the Overview Table
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
+      const eanStr = p.ean || p.codeEAN || '';
       const matchesSearch =
         p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.codeEAN.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        eanStr.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.category.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesCat =
@@ -563,7 +564,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
                         <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
                           <span>SKU: {p.sku}</span>
                           <span>•</span>
-                          <span>EAN: {p.codeEAN}</span>
+                          <span>EAN: {p.ean || p.codeEAN || '—'}</span>
                           <span>•</span>
                           <span>Lote: {p.batchNumber}</span>
                         </div>

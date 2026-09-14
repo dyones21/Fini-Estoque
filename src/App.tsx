@@ -305,7 +305,10 @@ const MainApp: React.FC = () => {
 
       <ProductFormModal
         isOpen={isProductModalOpen}
-        onClose={() => setIsProductModalOpen(false)}
+        onClose={() => {
+          setIsProductModalOpen(false);
+          setSelectedProduct(null);
+        }}
         editingProduct={selectedProduct}
       />
 
