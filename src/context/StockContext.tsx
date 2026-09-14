@@ -650,11 +650,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       setCloudInfo((prev) => ({ ...prev, status: 'syncing' }));
 
-      const [resProd, resMov, resNFs, resSales, resUsers, resComp, resCats, resRoles] = await Promise.all([
+      const [resProd, resMov, resNFs, resUsers, resComp, resCats, resRoles] = await Promise.all([
         authFetch('/api/products').catch(() => null),
         authFetch('/api/movements').catch(() => null),
         authFetch('/api/nf-entries').catch(() => null),
-        authFetch('/api/sales').catch(() => null),
         authFetch('/api/users').catch(() => null),
         authFetch('/api/company').catch(() => null),
         authFetch('/api/categories').catch(() => null),
@@ -672,13 +671,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       let loadedMovements: StockMovement[] = [];
       let loadedNFs: NFEntry[] = [];
       let loadedUsers: any[] = [];
-      let loadedSales: any[] = [];
 
-      const [dataProd, dataMov, dataNFs, dataSales, dataUsers, dataComp, dataCats, dataRoles] = await Promise.all([
+      const [dataProd, dataMov, dataNFs, dataUsers, dataComp, dataCats, dataRoles] = await Promise.all([
         safeParseJson(resProd),
         safeParseJson(resMov),
         safeParseJson(resNFs),
-        safeParseJson(resSales),
         safeParseJson(resUsers),
         safeParseJson(resComp),
         safeParseJson(resCats),
@@ -717,33 +714,14 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (Array.isArray(dataProd)) loadedProducts = dataProd;
       if (Array.isArray(dataMov)) loadedMovements = dataMov;
       if (Array.isArray(dataNFs)) loadedNFs = dataNFs;
-      if (Array.isArray(dataSales)) loadedSales = dataSales;
       if (Array.isArray(dataUsers)) loadedUsers = dataUsers;
 
-      // Merge aggregates from sales into products
-      const salesAggregates = new Map<string, { totalQty: number; totalVal: number }>();
-      loadedSales.forEach((s: any) => {
-        const pId = s.productId || s.product_id;
-        const qty = Number(s.quantity) || 0;
-        const val = Number(s.totalAmount ?? s.total_amount) || 0;
-        if (pId) {
-          const current = salesAggregates.get(pId) || { totalQty: 0, totalVal: 0 };
-          salesAggregates.set(pId, {
-            totalQty: current.totalQty + qty,
-            totalVal: current.totalVal + val,
-          });
-        }
-      });
-
       if (Array.isArray(dataProd)) {
-        const incomingHydrated: Product[] = dataProd.map((p) => {
-          const agg = salesAggregates.get(p.id) || { totalQty: 0, totalVal: 0 };
-          return {
-            ...p,
-            totalSalesQuantity: agg.totalQty,
-            totalSalesValue: agg.totalVal,
-          };
-        });
+        const incomingHydrated: Product[] = dataProd.map((p) => ({
+          ...p,
+          totalSalesQuantity: 0,
+          totalSalesValue: 0,
+        }));
 
         // Reconciliação atômica e proteção contra sobreposição de estado (anti-race condition):
         // Se um produto no estado React possui lastUpdated posterior ao início desta busca (fetchStartTime)

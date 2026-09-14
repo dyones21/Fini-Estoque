@@ -104,20 +104,25 @@ export const PurchaseSuggestionView: React.FC = () => {
       const daysOfStock = dailyConsumption > 0 ? totalStock / dailyConsumption : null;
 
       const isExhausted = totalStock <= 0;
-      const isCritical = daysOfStock !== null && daysOfStock < 7;
+      const isBelowMin = minTotal > 0 && totalStock < minTotal;
+      const isCritical = (daysOfStock !== null && daysOfStock < 7) || (isExhausted && minTotal > 0);
       
-      // Sugerido se durar menos que thresholdDays ou se estiver zerado com consumo histórico
+      // Sugerido se durar menos que thresholdDays, ou se estiver abaixo do estoque mínimo, ou zerado
       const isSuggested =
         (daysOfStock !== null && daysOfStock < thresholdDays) ||
+        isBelowMin ||
         (isExhausted && (dailyConsumption > 0 || minTotal > 0));
 
-      // Quantidade sugerida para cobrir targetCoverageDays
+      // Quantidade sugerida para cobrir targetCoverageDays e garantir o estoque mínimo
       let suggestedQty = 0;
       if (dailyConsumption > 0) {
         const targetStockNeeded = Math.ceil(dailyConsumption * targetCoverageDays);
         suggestedQty = Math.max(0, targetStockNeeded - totalStock);
+      }
+      if (isBelowMin) {
+        suggestedQty = Math.max(suggestedQty, minTotal - totalStock);
       } else if (isExhausted && minTotal > 0) {
-        suggestedQty = minTotal;
+        suggestedQty = Math.max(suggestedQty, minTotal);
       }
 
       const costPrice = Number(prod.costPrice) || 0;
@@ -341,7 +346,7 @@ export const PurchaseSuggestionView: React.FC = () => {
         <div className="mt-5 p-3.5 bg-amber-50/80 rounded-2xl border border-amber-200/80 flex items-start gap-3 text-xs text-amber-900">
           <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <p className="leading-relaxed font-medium">
-            <strong>Como funciona o cálculo:</strong> A velocidade de saída é calculada somando todas as <strong>vendas na loja</strong> e <strong>perdas/avarias</strong> dos últimos 30 dias e dividindo por 30 (consumo médio diário). <em>Transferências internas entre depósito e loja não contam como saída</em>, pois a mercadoria permanece no estoque da empresa. Produtos com estoque restante inferior a <strong>{thresholdDays} dias</strong> são sugeridos para compra com meta de <strong>{targetCoverageDays} dias de cobertura</strong>.
+            <strong>Como funciona o cálculo:</strong> A velocidade de saída é calculada somando todas as <strong>baixas operacionais na loja</strong> e <strong>perdas/avarias</strong> dos últimos 30 dias e dividindo por 30 (consumo médio diário). <em>Transferências internas entre depósito e loja não contam como saída</em>, pois a mercadoria permanece no estoque da empresa. Produtos com estoque restante inferior a <strong>{thresholdDays} dias</strong> ou com saldo abaixo do <strong>estoque mínimo de segurança</strong> são sugeridos para compra com meta de <strong>{targetCoverageDays} dias de cobertura</strong>.
           </p>
         </div>
 

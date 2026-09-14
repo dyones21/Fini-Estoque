@@ -253,12 +253,22 @@ export const ReportsView: React.FC = () => {
 
   // ================= 5. CURVA ABC =================
   const abcAnalysis = useMemo(() => {
-    const sorted = [...products].sort((a, b) => b.totalSalesValue - a.totalSalesValue);
-    const grandTotal = sorted.reduce((sum, p) => sum + p.totalSalesValue, 0);
+    const sorted = [...products].map((product) => {
+      const totalUnits = (Number(product.stockDeposito) || 0) + (Number(product.stockLoja) || 0);
+      const unitCost = Number(product.costPrice) > 0 ? Number(product.costPrice) : (Number(product.sellPrice) || 0);
+      const stockVal = totalUnits * unitCost;
+      return {
+        product,
+        totalStockVal: stockVal,
+        totalUnits,
+      };
+    }).sort((a, b) => b.totalStockVal - a.totalStockVal);
+
+    const grandTotal = sorted.reduce((sum, p) => sum + p.totalStockVal, 0);
 
     let cumulative = 0;
-    return sorted.map((product) => {
-      const revPct = grandTotal > 0 ? (product.totalSalesValue / grandTotal) * 100 : 0;
+    return sorted.map(({ product, totalStockVal, totalUnits }) => {
+      const revPct = grandTotal > 0 ? (totalStockVal / grandTotal) * 100 : 0;
       cumulative += revPct;
 
       let classABC: 'A' | 'B' | 'C' = 'C';
@@ -270,7 +280,7 @@ export const ReportsView: React.FC = () => {
 
       return {
         product,
-        totalRevenue: product.totalSalesValue,
+        totalRevenue: totalStockVal,
         revenuePercentage: revPct,
         cumulativePercentage: cumulative,
         classABC,
@@ -353,12 +363,12 @@ export const ReportsView: React.FC = () => {
         SKU: item.product.sku,
         Produto: item.product.name,
         Categoria: item.product.category,
-        'Qtd Vendida': item.product.totalSalesQuantity,
-        'Faturamento Total (R$)': Number(item.totalRevenue.toFixed(2)),
+        'Estoque Total (un)': item.product.stockLoja + item.product.stockDeposito,
+        'Valor em Estoque (R$)': Number(item.totalRevenue.toFixed(2)),
         '% Representatividade': `${item.revenuePercentage.toFixed(2)}%`,
         '% Acumulada': `${item.cumulativePercentage.toFixed(2)}%`,
       }));
-      exportToExcel(data, fileName, 'Curva ABC');
+      exportToExcel(data, fileName, 'Curva ABC Estoque');
     }
   };
 
@@ -454,7 +464,7 @@ export const ReportsView: React.FC = () => {
         ]);
       });
     } else if (reportType === 'curva_abc') {
-      headers = ['Classe ABC', 'SKU', 'Produto', 'Categoria', 'Qtd Vendida', 'Faturamento Total (R$)', '% Representatividade', '% Acumulada'];
+      headers = ['Classe ABC', 'SKU', 'Produto', 'Categoria', 'Estoque Total (un)', 'Valor em Estoque (R$)', '% Representatividade', '% Acumulada'];
 
       abcAnalysis.forEach((item) => {
         csvRows.push([
@@ -462,7 +472,7 @@ export const ReportsView: React.FC = () => {
           item.product.sku,
           item.product.name,
           item.product.category,
-          item.product.totalSalesQuantity,
+          item.product.stockLoja + item.product.stockDeposito,
           item.totalRevenue.toFixed(2),
           item.revenuePercentage.toFixed(2) + '%',
           item.cumulativePercentage.toFixed(2) + '%',
@@ -1268,8 +1278,8 @@ export const ReportsView: React.FC = () => {
                   <th className="py-3 px-4 text-center">Classe ABC</th>
                   <th className="py-3 px-3">Produto</th>
                   <th className="py-3 px-3">Categoria</th>
-                  <th className="py-3 px-3 text-center">Qtd Vendida</th>
-                  <th className="py-3 px-3 text-right">Faturamento Total</th>
+                  <th className="py-3 px-3 text-center">Estoque Total</th>
+                  <th className="py-3 px-3 text-right">Valor em Estoque</th>
                   <th className="py-3 px-3 text-right">% Representatividade</th>
                   <th className="py-3 px-3 text-right">% Acumulada</th>
                 </tr>
@@ -1298,7 +1308,7 @@ export const ReportsView: React.FC = () => {
                       {item.product.category}
                     </td>
                     <td className="py-2.5 px-3 text-center font-bold text-slate-800">
-                      {item.product.totalSalesQuantity} un
+                      {item.product.stockLoja + item.product.stockDeposito} un
                     </td>
                     <td className="py-2.5 px-3 text-right font-black text-emerald-700">
                       {formatCurrency(item.totalRevenue)}

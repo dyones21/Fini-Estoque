@@ -127,7 +127,7 @@ async function runSyncAuditTests() {
     // -------------------------------------------------------------------------
     console.log('TESTE 4: Validação de Headers HTTP no servidor Express');
     try {
-      const response = await fetch('http://localhost:3000/api/health');
+      const response = await fetch('http://127.0.0.1:3000/api/health');
       const cacheControl = response.headers.get('cache-control');
       if (cacheControl && cacheControl.includes('no-store')) {
         console.log(`✓ PASSOU: Cache-Control para /api inclui "no-store": "${cacheControl}"\n`);
@@ -163,6 +163,7 @@ async function runSyncAuditTests() {
   } finally {
     // Limpeza do registro de teste para manter o banco higienizado
     await db.delete(products).where(eq(products.id, testId)).catch(() => null);
+    process.exit(passed === total ? 0 : 1);
   }
 }
 

@@ -72,16 +72,15 @@ export const CurvaABCView: React.FC = () => {
       Produto: item.product.name,
       Categoria: item.product.category,
       Unidade: item.product.unit,
-      'Quantidade Vendida': item.product.totalSalesQuantity,
-      'Faturamento Total (R$)': Number(item.totalRevenue.toFixed(2)),
+      'Estoque Total (un)': item.product.stockLoja + item.product.stockDeposito,
+      'Valor em Estoque (R$)': Number(item.totalRevenue.toFixed(2)),
       '% do Total': `${item.revenuePercentage.toFixed(2)}%`,
       '% Acumulada': `${item.cumulativePercentage.toFixed(2)}%`,
       'Estoque Loja': item.product.stockLoja,
       'Estoque Depósito': item.product.stockDeposito,
-      'Estoque Total': item.product.stockLoja + item.product.stockDeposito,
     }));
     const dateStr = new Date().toISOString().slice(0, 10);
-    exportToExcel(data, `curva_abc_gummystock_classe_${selectedClass}_${dateStr}`, 'Curva ABC');
+    exportToExcel(data, `curva_abc_estoque_classe_${selectedClass}_${dateStr}`, 'Curva ABC Estoque');
   };
 
   const handleExportCSV = () => {
@@ -92,13 +91,12 @@ export const CurvaABCView: React.FC = () => {
       'Produto',
       'Categoria',
       'Unidade',
-      'Qtd Vendida',
-      'Faturamento Total (R$)',
+      'Estoque Total (un)',
+      'Valor em Estoque (R$)',
       '% do Total',
       '% Acumulada',
       'Estoque Loja',
       'Estoque Depósito',
-      'Estoque Total',
     ];
     const rows = filteredList.map((item) => [
       item.classABC,
@@ -107,16 +105,15 @@ export const CurvaABCView: React.FC = () => {
       item.product.name,
       item.product.category,
       item.product.unit,
-      item.product.totalSalesQuantity,
+      item.product.stockLoja + item.product.stockDeposito,
       item.totalRevenue.toFixed(2),
       `${item.revenuePercentage.toFixed(2)}%`,
       `${item.cumulativePercentage.toFixed(2)}%`,
       item.product.stockLoja,
       item.product.stockDeposito,
-      item.product.stockLoja + item.product.stockDeposito,
     ]);
     const dateStr = new Date().toISOString().slice(0, 10);
-    exportToCSV(headers, rows, `curva_abc_gummystock_classe_${selectedClass}_${dateStr}`);
+    exportToCSV(headers, rows, `curva_abc_estoque_classe_${selectedClass}_${dateStr}`);
   };
 
   return (
@@ -131,14 +128,14 @@ export const CurvaABCView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-black text-slate-900">
-                Análise de Curva ABC (Princípio de Pareto)
+                Curva ABC de Estoque (Capital Imobilizado)
               </h2>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase">
-                Faturamento Pareto
+                Estoque Pareto
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Classificação estratégica dos produtos GummyStock por relevância de faturamento e giro comercial
+              Classificação estratégica dos produtos por relevância de capital imobilizado em estoque (Depósito + Loja)
             </p>
           </div>
         </div>
@@ -176,10 +173,10 @@ export const CurvaABCView: React.FC = () => {
             {formatCurrency(revA)}
           </p>
           <p className="text-xs text-emerald-700 font-semibold mt-1">
-            Representa ~80% do Faturamento Total
+            Representa ~80% do Valor Total em Estoque
           </p>
           <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-            Produtos indispensáveis na gôndola. NUNCA podem ter estoque zerado na Loja.
+            Maior capital imobilizado. Itens de alto valor financeiro que exigem máximo rigor de controle.
           </p>
         </div>
 
@@ -204,10 +201,10 @@ export const CurvaABCView: React.FC = () => {
             {formatCurrency(revB)}
           </p>
           <p className="text-xs text-amber-700 font-semibold mt-1">
-            Representa ~15% do Faturamento Total
+            Representa ~15% do Valor Total em Estoque
           </p>
           <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-            Giro intermediário constante. Monitorar estoque mínimo no Depósito.
+            Impacto financeiro intermediário. Manter monitoramento contínuo entre Depósito e Loja.
           </p>
         </div>
 
@@ -232,10 +229,10 @@ export const CurvaABCView: React.FC = () => {
             {formatCurrency(revC)}
           </p>
           <p className="text-xs text-slate-600 font-semibold mt-1">
-            Representa ~5% do Faturamento Total
+            Representa ~5% do Valor Total em Estoque
           </p>
           <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-            Linha complementar/especial. Manter estoque enxuto para evitar perda de validade.
+            Menor peso financeiro. Manter controle ágil e atenção a lotes e prazos de validade.
           </p>
         </div>
 
@@ -261,13 +258,13 @@ export const CurvaABCView: React.FC = () => {
               <YAxis yAxisId="right" orientation="right" domain={[0, 100]} unit="%" tick={{ fontSize: 10 }} />
               <Tooltip
                 formatter={(value: any, name: string) => {
-                  if (name === 'Faturamento') return [formatCurrency(Number(value)), 'Faturamento'];
+                  if (name === 'Valor em Estoque') return [formatCurrency(Number(value)), 'Valor em Estoque'];
                   return [`${value}%`, 'Acumulado %'];
                 }}
                 contentStyle={{ borderRadius: '12px', fontSize: '12px' }}
               />
               <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-              <Bar yAxisId="left" dataKey="faturamento" name="Faturamento" fill="#059669" radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="left" dataKey="faturamento" name="Valor em Estoque" fill="#059669" radius={[4, 4, 0, 0]} />
               <Line yAxisId="right" type="monotone" dataKey="acumuladoPct" name="Acumulado %" stroke="#e11d48" strokeWidth={3} dot={{ r: 4 }} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -301,7 +298,7 @@ export const CurvaABCView: React.FC = () => {
               <tr>
                 <th className="py-3 px-4">Classe</th>
                 <th className="py-3 px-4">Produto</th>
-                <th className="py-3 px-4 text-center">Faturamento Acumulado</th>
+                <th className="py-3 px-4 text-center">Valor em Estoque</th>
                 <th className="py-3 px-4 text-center">% do Total</th>
                 <th className="py-3 px-4 text-center">% Acumulada</th>
                 <th className="py-3 px-4 text-center">Estoque Atual (Dep + Loja)</th>
@@ -351,6 +348,19 @@ export const CurvaABCView: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Metodologia e Limitação Documentada */}
+      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-start gap-3 text-slate-600">
+        <HelpCircle className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+        <div className="text-xs space-y-1">
+          <p className="font-bold text-slate-800">
+            Metodologia Curva ABC de Estoque (Capital Imobilizado)
+          </p>
+          <p className="leading-relaxed text-slate-600">
+            Por se tratar de um sistema estritamente operacional de controle de estoque, esta análise de Pareto é calculada sobre o <strong>Capital Imobilizado</strong> (Saldo Físico em Depósito + Loja multiplicado pelo Preço de Custo cadastrado, ou Preço de Venda quando custo zerado). Não são utilizados dados de vendas, faturamento comercial ou registros de PDV, garantindo total fidelidade à posição real do inventário.
+          </p>
         </div>
       </div>
 

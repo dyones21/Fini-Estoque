@@ -95,22 +95,24 @@ export function getDaysToExpiration(expirationDateStr: string): number {
 }
 
 /**
- * Perform Curva ABC Analysis (Pareto Classification)
- * Class A: Up to 80% of cumulative revenue
- * Class B: Next 15% (up to 95%)
- * Class C: Remaining 5%
+ * Curva ABC de Estoque (Capital Imobilizado / Valor em Estoque)
+ * Classificação de Pareto baseada no valor total dos itens em estoque (Depósito + Loja).
+ * Classe A: Até 80% do valor acumulado
+ * Classe B: Próximos 15% (até 95%)
+ * Classe C: 5% restantes
  */
 export function calculateCurvaABC(products: Product[]): ABCAnalysisItem[] {
-  // 1. Calculate total revenue across all products
-  const productsWithSales = products.map((p) => {
-    // If product totalSalesValue is 0, estimate based on stock value to ensure ABC works even for new items
-    const rev = p.totalSalesValue > 0 ? p.totalSalesValue : (p.stockDeposito + p.stockLoja) * p.sellPrice;
-    return { product: p, revenue: rev };
+  // 1. Calcula o valor em estoque (Capital Imobilizado) por produto: (stockDeposito + stockLoja) * costPrice (ou sellPrice se custo = 0)
+  const productsWithStockValue = products.map((p) => {
+    const totalUnits = (Number(p.stockDeposito) || 0) + (Number(p.stockLoja) || 0);
+    const unitPrice = (Number(p.costPrice) || 0) > 0 ? Number(p.costPrice) : (Number(p.sellPrice) || 0);
+    const stockVal = totalUnits * unitPrice;
+    return { product: p, revenue: stockVal };
   });
 
-  const totalRevenue = productsWithSales.reduce((acc, curr) => acc + curr.revenue, 0);
+  const totalStockValue = productsWithStockValue.reduce((acc, curr) => acc + curr.revenue, 0);
 
-  if (totalRevenue === 0) {
+  if (totalStockValue === 0) {
     return products.map((p) => ({
       product: p,
       totalRevenue: 0,
@@ -120,15 +122,15 @@ export function calculateCurvaABC(products: Product[]): ABCAnalysisItem[] {
     }));
   }
 
-  // 2. Sort descending by revenue
-  productsWithSales.sort((a, b) => b.revenue - a.revenue);
+  // 2. Ordena decrescente pelo valor financeiro imobilizado em estoque
+  productsWithStockValue.sort((a, b) => b.revenue - a.revenue);
 
-  // 3. Compute cumulative %
+  // 3. Calcula % individual e % acumulada de Pareto
   let cumulativeValue = 0;
-  return productsWithSales.map((item) => {
+  return productsWithStockValue.map((item) => {
     cumulativeValue += item.revenue;
-    const revenuePct = (item.revenue / totalRevenue) * 100;
-    const cumulativePct = (cumulativeValue / totalRevenue) * 100;
+    const revenuePct = (item.revenue / totalStockValue) * 100;
+    const cumulativePct = (cumulativeValue / totalStockValue) * 100;
 
     let classABC: 'A' | 'B' | 'C' = 'C';
     if (cumulativePct <= 80 || (cumulativePct - revenuePct) < 80) {

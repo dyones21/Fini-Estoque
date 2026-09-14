@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Trophy, Flame, ShoppingBag, ArrowUpRight, Award } from 'lucide-react';
+import { Trophy, Boxes, PackageCheck, Layers } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { formatCurrency } from '../utils/inventoryUtils';
 import { exportToExcel, exportToCSV } from '../utils/exportUtils';
@@ -7,24 +7,43 @@ import { ExportButton } from './ExportButton';
 
 export const RankingView: React.FC = () => {
   const { products } = useStock();
-  const [metric, setMetric] = useState<'faturamento' | 'quantidade'>('faturamento');
+  const [metric, setMetric] = useState<'valor_estoque' | 'quantidade'>('valor_estoque');
+
+  // Compute stock aggregates for each product
+  const productsWithMetrics = useMemo(() => {
+    return products.map((p) => {
+      const depStock = Number(p.stockDeposito) || 0;
+      const lojStock = Number(p.stockLoja) || 0;
+      const totalStock = depStock + lojStock;
+      const unitVal = Number(p.costPrice) > 0 ? Number(p.costPrice) : (Number(p.sellPrice) || 0);
+      const stockValue = totalStock * unitVal;
+      return {
+        ...p,
+        totalStock,
+        depStock,
+        lojStock,
+        unitVal,
+        stockValue,
+      };
+    });
+  }, [products]);
 
   // Sorted product list for ranking
   const rankedProducts = useMemo(() => {
-    const list = [...products];
-    if (metric === 'faturamento') {
-      list.sort((a, b) => b.totalSalesValue - a.totalSalesValue);
+    const list = [...productsWithMetrics];
+    if (metric === 'valor_estoque') {
+      list.sort((a, b) => b.stockValue - a.stockValue);
     } else {
-      list.sort((a, b) => b.totalSalesQuantity - a.totalSalesQuantity);
+      list.sort((a, b) => b.totalStock - a.totalStock);
     }
     return list;
-  }, [products, metric]);
+  }, [productsWithMetrics, metric]);
 
   const maxVal = useMemo(() => {
     if (rankedProducts.length === 0) return 1;
-    return metric === 'faturamento'
-      ? rankedProducts[0].totalSalesValue
-      : rankedProducts[0].totalSalesQuantity;
+    return metric === 'valor_estoque'
+      ? rankedProducts[0].stockValue
+      : rankedProducts[0].totalStock;
   }, [rankedProducts, metric]);
 
   const handleExportExcel = () => {
@@ -35,13 +54,14 @@ export const RankingView: React.FC = () => {
       Produto: p.name,
       Categoria: p.category,
       Unidade: p.unit,
-      'Faturamento Total (R$)': Number(p.totalSalesValue.toFixed(2)),
-      'Quantidade Vendida': p.totalSalesQuantity,
-      'Preço Venda Unit. (R$)': Number(p.sellPrice.toFixed(2)),
-      'Estoque Atual Total': p.stockLoja + p.stockDeposito,
+      'Estoque Total (un)': p.totalStock,
+      'Estoque Depósito (un)': p.depStock,
+      'Estoque Loja (un)': p.lojStock,
+      'Valor Unitário Base (R$)': Number(p.unitVal.toFixed(2)),
+      'Capital Imobilizado (R$)': Number(p.stockValue.toFixed(2)),
     }));
     const dateStr = new Date().toISOString().slice(0, 10);
-    exportToExcel(data, `ranking_vendas_gummystock_${metric}_${dateStr}`, 'Ranking Vendas');
+    exportToExcel(data, `ranking_estoque_${metric}_${dateStr}`, 'Ranking Estoque');
   };
 
   const handleExportCSV = () => {
@@ -52,10 +72,11 @@ export const RankingView: React.FC = () => {
       'Produto',
       'Categoria',
       'Unidade',
-      'Faturamento Total (R$)',
-      'Quantidade Vendida',
-      'Preço Venda Unit. (R$)',
-      'Estoque Atual Total',
+      'Estoque Total (un)',
+      'Estoque Depósito (un)',
+      'Estoque Loja (un)',
+      'Valor Unitário Base (R$)',
+      'Capital Imobilizado (R$)',
     ];
     const rows = rankedProducts.map((p, idx) => [
       `${idx + 1}º`,
@@ -64,13 +85,14 @@ export const RankingView: React.FC = () => {
       p.name,
       p.category,
       p.unit,
-      p.totalSalesValue.toFixed(2),
-      p.totalSalesQuantity,
-      p.sellPrice.toFixed(2),
-      p.stockLoja + p.stockDeposito,
+      p.totalStock,
+      p.depStock,
+      p.lojStock,
+      p.unitVal.toFixed(2),
+      p.stockValue.toFixed(2),
     ]);
     const dateStr = new Date().toISOString().slice(0, 10);
-    exportToCSV(headers, rows, `ranking_vendas_gummystock_${metric}_${dateStr}`);
+    exportToCSV(headers, rows, `ranking_estoque_${metric}_${dateStr}`);
   };
 
   return (
@@ -85,14 +107,14 @@ export const RankingView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-black text-slate-900">
-                Ranking de Saída de Produtos (Giro GummyStock)
+                Ranking de Produtos em Estoque
               </h2>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 uppercase">
-                Top Vendas
+                Estoque Físico e Financeiro
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Acompanhe os campeões de vendas e saída de estoque do GummyStock
+              Acompanhe os produtos com maior capital imobilizado e maior volume de unidades em estoque
             </p>
           </div>
         </div>
@@ -101,24 +123,24 @@ export const RankingView: React.FC = () => {
           {/* Toggle metric */}
           <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button
-              onClick={() => setMetric('faturamento')}
+              onClick={() => setMetric('valor_estoque')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                metric === 'faturamento'
-                  ? 'bg-white text-rose-600 shadow-xs'
+                metric === 'valor_estoque'
+                  ? 'bg-white text-emerald-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Por Faturamento (R$)
+              Por Capital Imobilizado (R$)
             </button>
             <button
               onClick={() => setMetric('quantidade')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 metric === 'quantidade'
-                  ? 'bg-white text-rose-600 shadow-xs'
+                  ? 'bg-white text-emerald-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Por Unidades Vendidas
+              Por Quantidade Físico (un)
             </button>
           </div>
 
@@ -179,19 +201,22 @@ export const RankingView: React.FC = () => {
               <div className="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between">
                 <div>
                   <p className="text-[10px] text-slate-500 uppercase font-bold">
-                    Faturamento Gerado
+                    Capital Imobilizado
                   </p>
-                  <p className="text-lg font-black text-rose-600">
-                    {formatCurrency(prod.totalSalesValue)}
+                  <p className="text-lg font-black text-emerald-700">
+                    {formatCurrency(prod.stockValue)}
                   </p>
                 </div>
 
                 <div className="text-right">
                   <p className="text-[10px] text-slate-500 uppercase font-bold">
-                    Saídas
+                    Estoque Total
                   </p>
                   <p className="text-sm font-black text-slate-900">
-                    {prod.totalSalesQuantity} un
+                    {prod.totalStock} un
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-medium">
+                    Dep: {prod.depStock} | Loja: {prod.lojStock}
                   </p>
                 </div>
               </div>
@@ -203,12 +228,12 @@ export const RankingView: React.FC = () => {
       {/* Complete Ranking List with Progress Bars */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
         <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
-          Lista Completa de Desempenho
+          Lista Completa de Produtos em Estoque
         </h3>
 
         <div className="space-y-4">
           {rankedProducts.map((p, idx) => {
-            const currentVal = metric === 'faturamento' ? p.totalSalesValue : p.totalSalesQuantity;
+            const currentVal = metric === 'valor_estoque' ? p.stockValue : p.totalStock;
             const pct = Math.max(2, Math.round((currentVal / (maxVal || 1)) * 100));
 
             return (
@@ -226,10 +251,10 @@ export const RankingView: React.FC = () => {
 
                   <div className="flex items-center gap-3 font-mono">
                     <span className="text-slate-500 text-[11px]">
-                      {p.totalSalesQuantity} un
+                      {p.totalStock} un (D:{p.depStock} / L:{p.lojStock})
                     </span>
-                    <span className="font-bold text-rose-600 text-xs">
-                      {formatCurrency(p.totalSalesValue)}
+                    <span className="font-bold text-emerald-700 text-xs">
+                      {formatCurrency(p.stockValue)}
                     </span>
                   </div>
                 </div>
@@ -238,7 +263,7 @@ export const RankingView: React.FC = () => {
                 <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                   <div
                     style={{ width: `${pct}%` }}
-                    className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
                   />
                 </div>
               </div>
