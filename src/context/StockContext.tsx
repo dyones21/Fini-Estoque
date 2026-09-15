@@ -12,6 +12,7 @@ import {
   UserPermissions,
   CompanyInfo,
   Role,
+  LossCategory,
 } from '../types';
 import {
   INITIAL_PRODUCTS,
@@ -95,7 +96,8 @@ interface StockContextType {
     quantity: number,
     location: 'loja' | 'deposito' | 'ambos',
     reason?: string,
-    unitPrice?: number
+    unitPrice?: number,
+    lossCategory?: LossCategory
   ) => Promise<void>;
 
   // Notifications
@@ -1403,7 +1405,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     quantity: number,
     location: 'loja' | 'deposito' | 'ambos',
     reason?: string,
-    unitPrice?: number
+    unitPrice?: number,
+    lossCategory?: LossCategory
   ) => {
     const product = allProducts.find((p) => p.id === productId);
     if (!product) return;
@@ -1417,6 +1420,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       type,
       quantity,
       location,
+      lossCategory: type === 'perda_avaria' ? (lossCategory || 'Outro') : undefined,
       date: new Date().toISOString(),
       userName: currentUser.name,
       reason: reason || `Movimentação avulsa: ${type}`,

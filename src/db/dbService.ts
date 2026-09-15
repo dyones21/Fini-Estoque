@@ -258,6 +258,8 @@ export async function getAllMovements(): Promise<StockMovement[]> {
       productName: r.productName,
       type: r.type as any,
       quantity: r.quantity,
+      previousQuantity: r.previousQuantity !== null && r.previousQuantity !== undefined ? r.previousQuantity : undefined,
+      lossCategory: r.lossCategory || undefined,
       location: (r.destination === 'Loja Nova Friburgo' || r.destination === 'Loja' ? 'loja' : 'deposito') as any,
       reason: r.reason || undefined,
       userName: r.createdBy,
@@ -426,6 +428,8 @@ export async function processStockMovement(m: {
   productName?: string;
   type: StockMovement['type'];
   quantity: number;
+  previousQuantity?: number;
+  lossCategory?: string;
   location: 'loja' | 'deposito' | 'ambos';
   reason?: string;
   date?: string;
@@ -445,6 +449,19 @@ export async function processStockMovement(m: {
       throw new Error('Transferências entre Depósito e Loja devem ser processadas exclusivamente via processStockTransfer().');
     }
     throw new Error(`Tipo de movimentação inválido: "${m.type}". Tipos suportados: ${ALLOWED_TYPES.join(', ')}.`);
+  }
+
+  // Validação de motivo obrigatório para perda/avaria e ajuste de inventário
+  if (m.type === 'perda_avaria') {
+    const hasCategory = Boolean(m.lossCategory && String(m.lossCategory).trim());
+    const hasReason = Boolean(m.reason && String(m.reason).trim());
+    if (!hasCategory && !hasReason) {
+      throw new Error('Categoria e/ou motivo são obrigatórios para registrar perda/avaria.');
+    }
+  } else if (m.type === 'ajuste_inventario') {
+    if (!m.reason || !String(m.reason).trim()) {
+      throw new Error('Motivo/justificativa é obrigatório para registrar ajuste de inventário.');
+    }
   }
 
   // 3. Validação de Localização (Location)
@@ -505,6 +522,8 @@ export async function processStockMovement(m: {
               productName: existingMov[0].productName,
               type: existingMov[0].type as any,
               quantity: existingMov[0].quantity,
+              previousQuantity: existingMov[0].previousQuantity !== null && existingMov[0].previousQuantity !== undefined ? existingMov[0].previousQuantity : undefined,
+              lossCategory: existingMov[0].lossCategory || undefined,
               location: m.location,
               date: existingMov[0].timestamp,
               userName: existingMov[0].createdBy,
@@ -615,6 +634,9 @@ export async function processStockMovement(m: {
       let destination = 'Cliente Final';
       let defaultReason = `Movimentação de estoque: ${m.type}`;
 
+      let prevCount: number | null = null;
+      let lossCategoryVal: string | null = null;
+
       if (m.type === 'venda_loja') {
         origin = 'Loja';
         destination = 'Baleiro / Consumidor Final';
@@ -622,11 +644,12 @@ export async function processStockMovement(m: {
       } else if (m.type === 'perda_avaria') {
         origin = m.location === 'deposito' ? 'Depósito Central' : m.location === 'ambos' ? 'Depósito e Loja' : 'Loja';
         destination = 'Descarte / Perda / Avaria';
-        defaultReason = 'Baixa por Perda / Avaria';
+        lossCategoryVal = m.lossCategory ? String(m.lossCategory).trim() : 'Outro';
+        defaultReason = `Perda / Avaria [${lossCategoryVal}]`;
       } else if (m.type === 'ajuste_inventario') {
         origin = 'Auditoria / Contagem Física';
         destination = m.location === 'deposito' ? 'Depósito Central' : m.location === 'ambos' ? 'Depósito e Loja' : 'Loja';
-        const prevCount = m.location === 'deposito' ? prod.stockDeposito : prod.stockLoja;
+        prevCount = m.location === 'deposito' ? prod.stockDeposito : prod.stockLoja;
         const diff = Math.round(qty) - prevCount;
         const diffStr = diff >= 0 ? `+${diff}` : `${diff}`;
         defaultReason = `Ajuste de Inventário (Anterior: ${prevCount}, Atual: ${Math.round(qty)}, Dif: ${diffStr})`;
@@ -660,6 +683,8 @@ export async function processStockMovement(m: {
           origin,
           destination,
           quantity: qty,
+          previousQuantity: prevCount,
+          lossCategory: lossCategoryVal,
           batchNumber: prod.batchNumber || 'LOTE-DEFAULT',
           reason: movementReason,
           createdBy,
@@ -694,6 +719,8 @@ export async function processStockMovement(m: {
         productName: m.productName || prod.name,
         type: m.type,
         quantity: qty,
+        previousQuantity: prevCount !== null ? prevCount : undefined,
+        lossCategory: lossCategoryVal || undefined,
         location: m.location,
         date: timestamp,
         userName: createdBy,

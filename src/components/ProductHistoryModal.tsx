@@ -102,27 +102,40 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
 
     if (rawType.includes('venda') || rawType === 'venda_loja') {
       return {
-        label: 'Baixa para Baleiro / Venda',
+        label: 'Saída para o Baleiro',
         badgeClass: 'bg-teal-100 text-teal-800 border-teal-300',
         icon: ShoppingBag,
         iconColor: 'text-teal-600',
         qtyPrefix: '-',
         qtyClass: 'text-teal-700 font-extrabold',
         defaultOrigin: 'Loja GummyStock',
-        defaultDest: 'Baleiro / Consumidor Final',
+        defaultDest: 'Baleiro (Exposição / Pacote Aberto)',
       };
     }
 
-    // Perda / Avaria / Ajuste
+    if (rawType === 'perda_avaria') {
+      return {
+        label: m.lossCategory ? `Perda/Avaria (${m.lossCategory})` : 'Perda / Avaria',
+        badgeClass: 'bg-rose-100 text-rose-800 border-rose-300',
+        icon: MinusCircle,
+        iconColor: 'text-rose-600',
+        qtyPrefix: '-',
+        qtyClass: 'text-rose-700 font-bold',
+        defaultOrigin: m.location === 'deposito' ? 'Depósito Central' : 'Loja GummyStock',
+        defaultDest: 'Descarte / Baixa Operacional',
+      };
+    }
+
+    // Ajuste de inventário
     return {
-      label: 'Ajuste / Perda / Avaria',
+      label: 'Ajuste de Inventário',
       badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
       icon: MinusCircle,
       iconColor: 'text-amber-600',
       qtyPrefix: '-',
       qtyClass: 'text-amber-700 font-bold',
       defaultOrigin: m.location === 'deposito' ? 'Depósito Central' : 'Loja GummyStock',
-      defaultDest: 'Baixa Operacional',
+      defaultDest: 'Ajuste de Balanço',
     };
   };
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, MinusCircle, ShoppingBag, AlertOctagon, RefreshCw } from 'lucide-react';
 import { useStock } from '../context/StockContext';
-import { Product, StockMovement } from '../types';
+import { Product, StockMovement, LossCategory } from '../types';
 import { ProductSearchScanner } from './ProductSearchScanner';
 import { parseNumber } from '../utils/inventoryUtils';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
@@ -23,6 +23,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
   const [type, setType] = useState<StockMovement['type']>('venda_loja');
   const [location, setLocation] = useState<'loja' | 'deposito'>('loja');
   const [quantity, setQuantity] = useState<string | number>(1);
+  const [lossCategory, setLossCategory] = useState<LossCategory>('Vencimento');
   const [reason, setReason] = useState<string>('');
 
   useEffect(() => {
@@ -69,14 +70,36 @@ export const MovementModal: React.FC<MovementModalProps> = ({
       return;
     }
 
+    // Validação estrita de motivo para perda/avaria e ajuste de inventário
+    const trimmedReason = reason.trim();
+    if (type === 'ajuste_inventario') {
+      if (!trimmedReason) {
+        alert('O motivo/justificativa é obrigatório para registrar um ajuste de inventário.');
+        return;
+      }
+    } else if (type === 'perda_avaria') {
+      if (lossCategory === 'Outro' && !trimmedReason) {
+        alert('Para o motivo "Outro", é obrigatório especificar a justificativa no campo de texto.');
+        return;
+      }
+    }
+
+    let finalReason = trimmedReason;
+    if (type === 'perda_avaria') {
+      finalReason = trimmedReason ? `${lossCategory}: ${trimmedReason}` : `Perda por ${lossCategory}`;
+    } else if (type === 'venda_loja') {
+      finalReason = trimmedReason || 'Baixa para Baleiro / Pacote Aberto';
+    }
+
     try {
       await registerMovement(
         selectedProductId,
         type,
         qty,
         location,
-        reason || (type === 'venda_loja' ? 'Baixa para Baleiro / Pacote Aberto' : 'Baixa registrada'),
-        type === 'venda_loja' ? currentProduct.sellPrice : currentProduct.costPrice
+        finalReason,
+        type === 'venda_loja' ? currentProduct.sellPrice : currentProduct.costPrice,
+        type === 'perda_avaria' ? lossCategory : undefined
       );
 
       alert(`Movimentação registrada com sucesso para "${currentProduct.name}"!`);
@@ -101,7 +124,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
                 Registrar Saída ou Baixa
               </h2>
               <p className="text-xs text-slate-300">
-                Baixas por Venda, Validade Vencida, Avaria ou Ajuste
+                Baixas por Saída p/ Baleiro, Validade Vencida, Avaria ou Ajuste
               </p>
             </div>
           </div>
@@ -135,7 +158,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
                 }`}
               >
                 <ShoppingBag className="w-4 h-4 text-emerald-600 mb-1" />
-                <p className="text-xs">Baixa Baleiro</p>
+                <p className="text-xs">Saída Baleiro</p>
               </button>
 
               <button
@@ -192,6 +215,25 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             </div>
           )}
 
+          {/* Structured Loss Category for perda_avaria */}
+          {type === 'perda_avaria' && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Motivo da Perda / Avaria *
+              </label>
+              <select
+                value={lossCategory}
+                onChange={(e) => setLossCategory(e.target.value as LossCategory)}
+                className="w-full text-xs p-2.5 rounded-xl border border-rose-300 bg-rose-50/50 font-semibold text-rose-900 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+              >
+                <option value="Vencimento">Vencimento (Data de validade expirada)</option>
+                <option value="Quebra/Avaria">Quebra / Avaria (Embalagem rasgada/danificada)</option>
+                <option value="Furto/Extravio">Furto / Extravio</option>
+                <option value="Outro">Outro (especifique no campo abaixo)</option>
+              </select>
+            </div>
+          )}
+
           {/* Quantity */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -207,17 +249,36 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             />
           </div>
 
-          {/* Reason */}
+          {/* Reason / Justification */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              Motivo / Justificativa
+              {type === 'ajuste_inventario' ? (
+                <span>Motivo / Justificativa do Ajuste <span className="text-rose-600">*</span></span>
+              ) : type === 'perda_avaria' ? (
+                <span>
+                  Complemento do Motivo {lossCategory === 'Outro' ? <span className="text-rose-600">* (obrigatório)</span> : <span className="text-slate-400 font-normal">(opcional)</span>}
+                </span>
+              ) : (
+                <span>Observação <span className="text-slate-400 font-normal">(opcional)</span></span>
+              )}
             </label>
             <input
               type="text"
-              placeholder="Ex: Embalagem danificada, vencimento ou cupom de venda"
+              placeholder={
+                type === 'ajuste_inventario'
+                  ? 'Ex: Contagem física mensal acusou diferença de saldo (obrigatório)'
+                  : type === 'perda_avaria'
+                  ? (lossCategory === 'Outro' ? 'Especifique o motivo detalhado (obrigatório)' : 'Ex: Embalagem furada na caixa do fornecedor...')
+                  : 'Ex: Baixa para reposição de baleiro'
+              }
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200"
+              className={`w-full text-xs p-2.5 rounded-xl border ${
+                (type === 'ajuste_inventario' || (type === 'perda_avaria' && lossCategory === 'Outro')) && !reason.trim()
+                  ? 'border-amber-300 bg-amber-50/20'
+                  : 'border-slate-200'
+              }`}
+              required={type === 'ajuste_inventario' || (type === 'perda_avaria' && lossCategory === 'Outro')}
             />
           </div>
 

@@ -30,9 +30,13 @@ export async function getAuthToken(): Promise<string | null> {
 
 /**
  * Wrapper de fetch que anexa automaticamente o cabeçalho Authorization: Bearer <token>
- * quando há usuário autenticado no Firebase.
+ * quando há usuário autenticado no Firebase e instrumenta tempos de resposta para escrita.
  */
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method || 'GET').toUpperCase();
+  const isWrite = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method);
+  const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
   const token = await getAuthToken();
 
   const headers = new Headers(init.headers || {});
@@ -45,10 +49,35 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
     headers.set('Content-Type', 'application/json');
   }
 
-  return fetch(input, {
+  const response = await fetch(input, {
     ...init,
     headers,
   });
+
+  if (isWrite) {
+    const totalMs = Math.round(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime
+    );
+    const serverHeader = response.headers.get('X-Response-Time-Ms');
+    const serverMs = serverHeader ? Number(serverHeader) : null;
+    const networkMs = serverMs !== null && !isNaN(serverMs) ? Math.max(0, totalMs - serverMs) : null;
+    const urlStr =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : (input as Request)?.url || '';
+
+    if (serverMs !== null && !isNaN(serverMs)) {
+      console.info(
+        `[API Perf] ${method} ${urlStr} → Total: ${totalMs}ms (Servidor: ${serverMs}ms | Rede: ${networkMs}ms)`
+      );
+    } else {
+      console.info(`[API Perf] ${method} ${urlStr} → Total: ${totalMs}ms`);
+    }
+  }
+
+  return response;
 }
 
 /**

@@ -33,14 +33,14 @@ export const companyInfo = pgTable('company_info', {
 // Categories Table
 export const categories = pgTable('categories', {
   id: serial('id').primaryKey(),
-  name: text('name').notNull().unique(),
+  name: text('name').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
 // Roles Table (Dynamic RBAC)
 export const roles = pgTable('roles', {
   id: text('id').primaryKey(),
-  name: text('name').notNull().unique(),
+  name: text('name').notNull(),
   isSystemRole: boolean('is_system_role').notNull().default(false),
   canViewDashboard: boolean('can_view_dashboard').notNull().default(false),
   canViewStock: boolean('can_view_stock').notNull().default(false),
@@ -96,6 +96,8 @@ export const stockMovements = pgTable('stock_movements', {
   origin: text('origin').notNull(), // 'Depósito Central', 'Loja Nova Friburgo', 'Fornecedor NF', 'Cliente Final'
   destination: text('destination').notNull(),
   quantity: integer('quantity').notNull(),
+  previousQuantity: integer('previous_quantity'),
+  lossCategory: text('loss_category'),
   batchNumber: text('batch_number').notNull(),
   reason: text('reason').notNull(),
   createdBy: text('created_by').notNull(),

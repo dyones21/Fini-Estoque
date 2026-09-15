@@ -1073,8 +1073,8 @@ export const ReportsView: React.FC = () => {
                         <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-800">
                           {m.type === 'entrada_nf' && 'Entrada NF'}
                           {m.type === 'transferencia_deposito_loja' && 'Transf. Depósito -> Loja'}
-                          {m.type === 'venda_loja' && 'Baixa p/ Baleiro'}
-                          {m.type === 'perda_avaria' && 'Perda / Avaria'}
+                          {m.type === 'venda_loja' && 'Saída p/ Baleiro'}
+                          {m.type === 'perda_avaria' && (m.lossCategory ? `Perda (${m.lossCategory})` : 'Perda / Avaria')}
                           {m.type === 'ajuste_inventario' && 'Ajuste Inventário'}
                         </span>
                       </td>

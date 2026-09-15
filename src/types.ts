@@ -145,6 +145,8 @@ export interface StockTransfer {
   status: 'concluida' | 'cancelada';
 }
 
+export type LossCategory = 'Vencimento' | 'Quebra/Avaria' | 'Furto/Extravio' | 'Outro';
+
 export interface StockMovement {
   id: string;
   tenantId?: string;
@@ -153,6 +155,8 @@ export interface StockMovement {
   productName: string;
   type: MovementType;
   quantity: number;
+  previousQuantity?: number; // Saldo anterior do estoque antes do ajuste de inventário
+  lossCategory?: LossCategory | string; // Categoria estruturada da perda/avaria
   location: 'loja' | 'deposito' | 'ambos';
   unitPrice?: number;
   totalValue?: number;

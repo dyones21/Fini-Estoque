@@ -55,6 +55,31 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Middleware de medição de tempo de resposta real (X-Response-Time-Ms) e log para latências > 500ms
+  app.use((req, res, next) => {
+    const start = process.hrtime.bigint();
+
+    const originalWriteHead = res.writeHead;
+    res.writeHead = function (statusCode: number, ...args: any[]) {
+      const end = process.hrtime.bigint();
+      const durationMs = Math.round(Number(end - start) / 1_000_000);
+      try {
+        res.setHeader('X-Response-Time-Ms', String(durationMs));
+      } catch {}
+      return (originalWriteHead as any).call(this, statusCode, ...args);
+    };
+
+    res.on('finish', () => {
+      const end = process.hrtime.bigint();
+      const durationMs = Math.round(Number(end - start) / 1_000_000);
+      if (durationMs > 500) {
+        console.warn(`[LATÊNCIA ALTA] ${req.method} ${req.originalUrl || req.url} - ${durationMs}ms (Status: ${res.statusCode})`);
+      }
+    });
+
+    next();
+  });
+
   app.use(express.json({ limit: '10mb' }));
 
   // Desativa qualquer cache HTTP para endpoints da API (/api/*) para prevenir respostas defasadas no frontend
@@ -516,6 +541,19 @@ async function startServer() {
           }
         }
 
+        // Validação de motivo e categoria
+        if (type === 'perda_avaria') {
+          const hasCategory = Boolean(movementData.lossCategory && String(movementData.lossCategory).trim());
+          const hasReason = Boolean(movementData.reason && String(movementData.reason).trim());
+          if (!hasCategory && !hasReason) {
+            return res.status(400).json({ error: 'Categoria e/ou motivo são obrigatórios para registrar perda/avaria.' });
+          }
+        } else if (type === 'ajuste_inventario') {
+          if (!movementData.reason || !String(movementData.reason).trim()) {
+            return res.status(400).json({ error: 'Motivo/justificativa é obrigatório para registrar ajuste de inventário.' });
+          }
+        }
+
         const operatorName = req.body?.userName || req.user?.name || 'Operador';
 
         const result = await processStockMovement({
@@ -524,6 +562,7 @@ async function startServer() {
           type: type as any,
           quantity: numQty,
           location: location as any,
+          lossCategory: movementData.lossCategory ? String(movementData.lossCategory).trim() : undefined,
           userName: operatorName,
           createdBy: operatorName,
         });
