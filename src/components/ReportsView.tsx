@@ -271,8 +271,8 @@ export const ReportsView: React.FC = () => {
 
   // ================= 5. CURVA ABC =================
   const abcAnalysis = useMemo(() => {
-    return calculateCurvaABC(products);
-  }, [products]);
+    return calculateCurvaABC(products, movements);
+  }, [products, movements]);
 
   // Handler for Printing / PDF Export
   const handlePrintPDF = () => {
@@ -349,12 +349,14 @@ export const ReportsView: React.FC = () => {
         SKU: item.product.sku,
         Produto: item.product.name,
         Categoria: item.product.category,
-        'Estoque Total (un)': item.product.stockLoja + item.product.stockDeposito,
-        'Valor em Estoque (R$)': Number(item.totalRevenue.toFixed(2)),
+        'Saída p/ Baleiro (un)': item.totalOutputUnits || 0,
+        'Preço de Venda Base (R$)': Number((Number(item.product.sellPrice) || 0).toFixed(2)),
+        'Valor Estimado de Saída (R$)': Number(item.totalRevenue.toFixed(2)),
         '% Representatividade': `${item.revenuePercentage.toFixed(2)}%`,
         '% Acumulada': `${item.cumulativePercentage.toFixed(2)}%`,
+        'Estoque Atual Total (un)': item.product.stockLoja + item.product.stockDeposito,
       }));
-      exportToExcel(data, fileName, 'Curva ABC Estoque');
+      exportToExcel(data, fileName, 'Curva ABC Saída Baleiro');
     }
   };
 
@@ -450,7 +452,7 @@ export const ReportsView: React.FC = () => {
         ]);
       });
     } else if (reportType === 'curva_abc') {
-      headers = ['Classe ABC', 'SKU', 'Produto', 'Categoria', 'Estoque Total (un)', 'Valor em Estoque (R$)', '% Representatividade', '% Acumulada'];
+      headers = ['Classe ABC', 'SKU', 'Produto', 'Categoria', 'Saída p/ Baleiro (un)', 'Valor Estimado de Saída (R$)', '% Representatividade', '% Acumulada', 'Estoque Atual (un)'];
 
       abcAnalysis.forEach((item) => {
         csvRows.push([
@@ -458,10 +460,11 @@ export const ReportsView: React.FC = () => {
           item.product.sku,
           item.product.name,
           item.product.category,
-          item.product.stockLoja + item.product.stockDeposito,
+          item.totalOutputUnits || 0,
           item.totalRevenue.toFixed(2),
           item.revenuePercentage.toFixed(2) + '%',
           item.cumulativePercentage.toFixed(2) + '%',
+          item.product.stockLoja + item.product.stockDeposito,
         ]);
       });
     }
@@ -1264,10 +1267,11 @@ export const ReportsView: React.FC = () => {
                   <th className="py-3 px-4 text-center">Classe ABC</th>
                   <th className="py-3 px-3">Produto</th>
                   <th className="py-3 px-3">Categoria</th>
-                  <th className="py-3 px-3 text-center">Estoque Total</th>
-                  <th className="py-3 px-3 text-right">Valor em Estoque</th>
+                  <th className="py-3 px-3 text-center">Saída p/ Baleiro</th>
+                  <th className="py-3 px-3 text-right">Valor Estimado Saída</th>
                   <th className="py-3 px-3 text-right">% Representatividade</th>
                   <th className="py-3 px-3 text-right">% Acumulada</th>
+                  <th className="py-3 px-3 text-center">Estoque Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1293,10 +1297,10 @@ export const ReportsView: React.FC = () => {
                     <td className="py-2.5 px-3 font-semibold text-slate-600">
                       {item.product.category}
                     </td>
-                    <td className="py-2.5 px-3 text-center font-bold text-slate-800">
-                      {item.product.stockLoja + item.product.stockDeposito} un
+                    <td className="py-2.5 px-3 text-center font-black text-rose-700">
+                      {item.totalOutputUnits || 0} un
                     </td>
-                    <td className="py-2.5 px-3 text-right font-black text-emerald-700">
+                    <td className="py-2.5 px-3 text-right font-black text-slate-900">
                       {formatCurrency(item.totalRevenue)}
                     </td>
                     <td className="py-2.5 px-3 text-right font-bold text-slate-800">
@@ -1304,6 +1308,9 @@ export const ReportsView: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-3 text-right font-bold text-slate-600">
                       {item.cumulativePercentage.toFixed(2)}%
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-bold text-slate-700">
+                      {item.product.stockLoja + item.product.stockDeposito} un
                     </td>
                   </tr>
                 ))}

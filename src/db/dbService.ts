@@ -433,6 +433,51 @@ export async function processStockMovement(m: {
   unitPrice?: number;
   nfEntryId?: string;
 }): Promise<{ success: boolean; movement: StockMovement; product: Product }> {
+  // 1. Validação estrita de Produto
+  if (!m || !m.productId || typeof m.productId !== 'string' || !m.productId.trim()) {
+    throw new Error('Produto é obrigatório para registrar a movimentação de estoque.');
+  }
+
+  // 2. Whitelist estrita de Tipo de Movimentação
+  const ALLOWED_TYPES = ['venda_loja', 'perda_avaria', 'ajuste_inventario'] as const;
+  if (!m.type || !ALLOWED_TYPES.includes(m.type as any)) {
+    if ((m.type as string) === 'transferencia_deposito_loja') {
+      throw new Error('Transferências entre Depósito e Loja devem ser processadas exclusivamente via processStockTransfer().');
+    }
+    throw new Error(`Tipo de movimentação inválido: "${m.type}". Tipos suportados: ${ALLOWED_TYPES.join(', ')}.`);
+  }
+
+  // 3. Validação de Localização (Location)
+  const ALLOWED_LOCATIONS = ['loja', 'deposito', 'ambos'] as const;
+  if (!m.location || !ALLOWED_LOCATIONS.includes(m.location as any)) {
+    throw new Error(`Localização inválida: "${m.location}". Localizações permitidas: loja, deposito, ambos.`);
+  }
+  if (m.type === 'venda_loja' && m.location !== 'loja') {
+    throw new Error('Para baixa de venda/baleiro (venda_loja), a localização deve ser exclusivamente "loja".');
+  }
+
+  // 4. Validação estrita de Quantidade (Rejeita NaN, Infinity, -Infinity, booleans, strings inválidas)
+  if (m.quantity === null || m.quantity === undefined || typeof (m as any).quantity === 'boolean' || typeof (m as any).quantity === 'object') {
+    throw new Error('Quantidade é obrigatória e deve ser um número válido.');
+  }
+  const qty = Number(m.quantity);
+  if (!Number.isFinite(qty)) {
+    throw new Error('Quantidade inválida: deve ser um número finito.');
+  }
+  if (m.type === 'venda_loja' || m.type === 'perda_avaria') {
+    if (qty <= 0) {
+      throw new Error(
+        m.type === 'venda_loja'
+          ? 'Quantidade para baixa de baleiro deve ser maior que zero.'
+          : 'Quantidade para registro de perda/avaria deve ser maior que zero.'
+      );
+    }
+  } else if (m.type === 'ajuste_inventario') {
+    if (qty < 0) {
+      throw new Error('Quantidade para ajuste de inventário não pode ser negativa.');
+    }
+  }
+
   checkDbConnection();
 
   return await withRetry(async () => {
@@ -484,13 +529,7 @@ export async function processStockMovement(m: {
       }
       const prod = rows[0];
 
-      // 3. Validação de quantidade
-      const qty = Number(m.quantity);
-      if (isNaN(qty)) {
-        throw new Error('Quantidade inválida para movimentação de estoque.');
-      }
-
-      // 4. Calcular o novo estoque e validar disponibilidade (ESTOQUE NÃO PODE FICAR NEGATIVO)
+      // 3. Calcular o novo estoque e validar disponibilidade (ESTOQUE NÃO PODE FICAR NEGATIVO)
       let newStockDeposito = prod.stockDeposito;
       let newStockLoja = prod.stockLoja;
 

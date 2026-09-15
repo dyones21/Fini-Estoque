@@ -458,13 +458,76 @@ async function startServer() {
       }
       return perms.canRegisterMovements;
     }),
-    async (req, res) => {
+    async (req: AuthRequest, res) => {
       try {
         const movementData = req.body;
-        if (!movementData || !movementData.productId) {
+        if (!movementData || typeof movementData !== 'object') {
+          return res.status(400).json({ error: 'Dados da movimentação são obrigatórios.' });
+        }
+
+        const { productId, type, quantity, location } = movementData;
+
+        // 1. Validação de Produto
+        if (!productId || typeof productId !== 'string' || !productId.trim()) {
           return res.status(400).json({ error: 'Produto é obrigatório para registrar a movimentação.' });
         }
-        const result = await processStockMovement(movementData);
+
+        // 2. Whitelist estrita de Tipo de Movimentação
+        const ALLOWED_TYPES = ['venda_loja', 'perda_avaria', 'ajuste_inventario'];
+        if (!type || typeof type !== 'string' || !ALLOWED_TYPES.includes(type)) {
+          if (type === 'transferencia_deposito_loja') {
+            return res.status(400).json({
+              error: 'Transferências entre Depósito e Loja devem ser registradas exclusivamente via /api/transfers.',
+            });
+          }
+          return res.status(400).json({
+            error: `Tipo de movimentação inválido: "${type}". Tipos permitidos: ${ALLOWED_TYPES.join(', ')}.`,
+          });
+        }
+
+        // 3. Validação de Localização (Location)
+        const ALLOWED_LOCATIONS = ['loja', 'deposito', 'ambos'];
+        if (!location || typeof location !== 'string' || !ALLOWED_LOCATIONS.includes(location)) {
+          return res.status(400).json({
+            error: `Localização inválida: "${location}". Valores permitidos: ${ALLOWED_LOCATIONS.join(', ')}.`,
+          });
+        }
+        if (type === 'venda_loja' && location !== 'loja') {
+          return res.status(400).json({
+            error: 'Para baixa de venda/baleiro (venda_loja), a localização deve ser exclusivamente "loja".',
+          });
+        }
+
+        // 4. Validação de Quantidade (Rejeita NaN, Infinity, -Infinity, strings inválidas, booleans)
+        if (quantity === null || quantity === undefined || typeof quantity === 'boolean' || typeof quantity === 'object') {
+          return res.status(400).json({ error: 'Quantidade é obrigatória e deve ser um número válido.' });
+        }
+        const numQty = Number(quantity);
+        if (!Number.isFinite(numQty)) {
+          return res.status(400).json({ error: 'Quantidade inválida: deve ser um número finito.' });
+        }
+        if (type === 'venda_loja' || type === 'perda_avaria') {
+          if (numQty <= 0) {
+            return res.status(400).json({ error: 'A quantidade deve ser um número maior que zero.' });
+          }
+        } else if (type === 'ajuste_inventario') {
+          if (numQty < 0) {
+            return res.status(400).json({ error: 'A quantidade para ajuste de inventário não pode ser negativa.' });
+          }
+        }
+
+        const operatorName = req.body?.userName || req.user?.name || 'Operador';
+
+        const result = await processStockMovement({
+          ...movementData,
+          productId: productId.trim(),
+          type: type as any,
+          quantity: numQty,
+          location: location as any,
+          userName: operatorName,
+          createdBy: operatorName,
+        });
+
         res.status(201).json({
           success: true,
           movement: result.movement,
@@ -482,18 +545,26 @@ async function startServer() {
   app.post('/api/transfers', requireAuth, requirePermission('canTransferStock'), async (req: AuthRequest, res) => {
     try {
       const transferData = req.body;
-      if (!transferData || !transferData.productId || !transferData.quantity) {
+      if (!transferData || typeof transferData !== 'object' || !transferData.productId) {
         return res.status(400).json({ error: 'Produto e quantidade são obrigatórios para a transferência de estoque.' });
       }
 
+      if (typeof transferData.productId !== 'string' || !transferData.productId.trim()) {
+        return res.status(400).json({ error: 'Produto inválido para transferência.' });
+      }
+
+      if (transferData.quantity === null || transferData.quantity === undefined || typeof transferData.quantity === 'boolean' || typeof transferData.quantity === 'object') {
+        return res.status(400).json({ error: 'A quantidade a transferir deve ser um número válido maior que zero.' });
+      }
+
       const qty = Number(transferData.quantity);
-      if (isNaN(qty) || qty <= 0) {
-        return res.status(400).json({ error: 'A quantidade a transferir deve ser um número maior que zero.' });
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return res.status(400).json({ error: 'A quantidade a transferir deve ser um número finito maior que zero.' });
       }
 
       const result = await processStockTransfer({
         id: transferData.id,
-        productId: transferData.productId,
+        productId: transferData.productId.trim(),
         productName: transferData.productName,
         quantity: qty,
         date: transferData.date || new Date().toISOString(),
@@ -589,9 +660,14 @@ async function startServer() {
   });
 
   // Entrada por Nota Fiscal: Exige canAddNFEntries
-  app.post('/api/nf-entries', requireAuth, requirePermission('canAddNFEntries'), async (req, res) => {
+  app.post('/api/nf-entries', requireAuth, requirePermission('canAddNFEntries'), async (req: AuthRequest, res) => {
     try {
-      const nfData = req.body;
+      const operatorName = req.body?.userName || req.body?.createdBy || req.user?.name || 'Operador';
+      const nfData = {
+        ...req.body,
+        createdBy: req.body?.createdBy || req.body?.userName || req.user?.name || 'Operador',
+        userName: operatorName,
+      };
 
       // Validação de Chave de Acesso Duplicada
       if (nfData.accessKey && String(nfData.accessKey).trim()) {

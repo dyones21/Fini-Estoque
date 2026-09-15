@@ -1,4 +1,4 @@
-import { Product, ABCAnalysisItem, LocationType } from '../types';
+import { Product, ABCAnalysisItem, LocationType, StockMovement } from '../types';
 
 /**
  * Format numbers to Brazilian Real currency format (R$)
@@ -95,42 +95,75 @@ export function getDaysToExpiration(expirationDateStr: string): number {
 }
 
 /**
- * Curva ABC de Estoque (Capital Imobilizado / Valor em Estoque)
- * Classificação de Pareto baseada no valor total dos itens em estoque (Depósito + Loja).
+ * Curva ABC de Giro / Saída para o Baleiro (com opção para Capital Imobilizado)
+ * 
+ * Por padrão (saida_baleiro):
+ * Mede o giro real através da soma das movimentações de saída para o baleiro (venda_loja)
+ * multiplicada pelo Preço de Venda cadastrado (Valor Estimado de Saída).
+ * 
+ * Opção alternativa (capital_imobilizado):
+ * Classificação de Pareto baseada no valor dos itens em estoque (Depósito + Loja).
+ * 
  * Classe A: Até 80% do valor acumulado
  * Classe B: Próximos 15% (até 95%)
  * Classe C: 5% restantes
  */
-export function calculateCurvaABC(products: Product[]): ABCAnalysisItem[] {
-  // 1. Calcula o valor em estoque (Capital Imobilizado) por produto: (stockDeposito + stockLoja) * costPrice (ou sellPrice se custo = 0)
-  const productsWithStockValue = products.map((p) => {
-    const totalUnits = (Number(p.stockDeposito) || 0) + (Number(p.stockLoja) || 0);
-    const unitPrice = (Number(p.costPrice) || 0) > 0 ? Number(p.costPrice) : (Number(p.sellPrice) || 0);
-    const stockVal = totalUnits * unitPrice;
-    return { product: p, revenue: stockVal };
+export function calculateCurvaABC(
+  products: Product[],
+  movements: StockMovement[] = [],
+  metricMode: 'saida_baleiro' | 'capital_imobilizado' = 'saida_baleiro'
+): ABCAnalysisItem[] {
+  // Pré-agrega as saídas para o baleiro (venda_loja e variantes históricas equivalentes)
+  const outputUnitsByProduct: Record<string, number> = {};
+  for (const m of movements) {
+    const t = (m.type || '').toLowerCase();
+    if (t === 'venda_loja' || t === 'venda' || t === 'saida_baleiro' || t === 'saida_loja') {
+      outputUnitsByProduct[m.productId] = (outputUnitsByProduct[m.productId] || 0) + (Number(m.quantity) || 0);
+    }
+  }
+
+  const items = products.map((p) => {
+    const outputUnits = outputUnitsByProduct[p.id] || 0;
+    let metricValue = 0;
+
+    if (metricMode === 'saida_baleiro') {
+      const sellPrice = Number(p.sellPrice) || 0;
+      metricValue = outputUnits * sellPrice;
+    } else {
+      const totalUnits = (Number(p.stockDeposito) || 0) + (Number(p.stockLoja) || 0);
+      const unitPrice = (Number(p.costPrice) || 0) > 0 ? Number(p.costPrice) : (Number(p.sellPrice) || 0);
+      metricValue = totalUnits * unitPrice;
+    }
+
+    return {
+      product: p,
+      revenue: metricValue,
+      totalOutputUnits: outputUnits,
+    };
   });
 
-  const totalStockValue = productsWithStockValue.reduce((acc, curr) => acc + curr.revenue, 0);
+  const totalValue = items.reduce((acc, curr) => acc + curr.revenue, 0);
 
-  if (totalStockValue === 0) {
-    return products.map((p) => ({
-      product: p,
+  if (totalValue === 0) {
+    return items.map((item) => ({
+      product: item.product,
       totalRevenue: 0,
       revenuePercentage: 0,
       cumulativePercentage: 0,
       classABC: 'C',
+      totalOutputUnits: item.totalOutputUnits,
     }));
   }
 
-  // 2. Ordena decrescente pelo valor financeiro imobilizado em estoque
-  productsWithStockValue.sort((a, b) => b.revenue - a.revenue);
+  // 2. Ordena decrescente pelo valor financeiro calculado
+  items.sort((a, b) => b.revenue - a.revenue);
 
   // 3. Calcula % individual e % acumulada de Pareto
   let cumulativeValue = 0;
-  return productsWithStockValue.map((item) => {
+  return items.map((item) => {
     cumulativeValue += item.revenue;
-    const revenuePct = (item.revenue / totalStockValue) * 100;
-    const cumulativePct = (cumulativeValue / totalStockValue) * 100;
+    const revenuePct = (item.revenue / totalValue) * 100;
+    const cumulativePct = (cumulativeValue / totalValue) * 100;
 
     let classABC: 'A' | 'B' | 'C' = 'C';
     if (cumulativePct <= 80 || (cumulativePct - revenuePct) < 80) {
@@ -147,6 +180,7 @@ export function calculateCurvaABC(products: Product[]): ABCAnalysisItem[] {
       revenuePercentage: Math.round(revenuePct * 100) / 100,
       cumulativePercentage: Math.round(cumulativePct * 100) / 100,
       classABC,
+      totalOutputUnits: item.totalOutputUnits,
     };
   });
 }

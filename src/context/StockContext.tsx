@@ -1279,12 +1279,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       };
     }
 
-    const prevProducts = allProducts;
-    const prevTransfers = allTransfers;
-    const prevMovements = allMovements;
+    const tempTransferId = `transf-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const tempMovementId = `mov-transf-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const newTransfer: StockTransfer = {
-      id: `transf-${Date.now()}`,
+      id: tempTransferId,
       productId,
       productName: product.name,
       quantity,
@@ -1297,7 +1296,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
 
     const newMovement: StockMovement = {
-      id: `mov-transf-${Date.now()}`,
+      id: tempMovementId,
       productId,
       productName: product.name,
       type: 'transferencia_deposito_loja',
@@ -1326,6 +1325,33 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       })
     );
 
+    let isTransferRolledBack = false;
+    const rollbackOptimisticTransfer = () => {
+      if (isTransferRolledBack) return;
+      isTransferRolledBack = true;
+
+      // 1. Remove SOMENTE a transferência otimista pelo seu ID estável
+      setAllTransfers((prev) => prev.filter((t) => t.id !== tempTransferId));
+
+      // 2. Remove SOMENTE a movimentação otimista associada
+      setAllMovements((prev) => prev.filter((m) => m.id !== tempMovementId));
+
+      // 3. Reverte os saldos SOMENTE do produto transferido, mantendo intactas alterações concorrentes de outros produtos
+      setAllProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === productId) {
+            return {
+              ...p,
+              stockDeposito: p.stockDeposito + quantity,
+              stockLoja: Math.max(0, p.stockLoja - quantity),
+              lastUpdated: new Date().toISOString(),
+            };
+          }
+          return p;
+        })
+      );
+    };
+
     try {
       const response = await authFetch('/api/transfers', {
         method: 'POST',
@@ -1334,6 +1360,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
 
       if (!response.ok) {
+        rollbackOptimisticTransfer();
+
         if (response.status === 403) {
           handle403PermissionDenied('Transferência Depósito ➔ Loja');
           throw new Error('Você não tem permissão para realizar transferências de estoque.');
@@ -1348,17 +1376,19 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           prev.map((p) => (p.id === productId ? { ...p, ...result.updatedProduct } : p))
         );
       }
+      if (result?.movement) {
+        setAllMovements((prev) =>
+          prev.map((m) => (m.id === tempMovementId ? result.movement : m))
+        );
+      }
 
       return {
         success: true,
         message: `Transferência de ${quantity} ${product.unit} de "${product.name}" para a Loja realizada com sucesso!`,
       };
     } catch (error: any) {
+      rollbackOptimisticTransfer();
       console.error('Falha ao sincronizar transferência no servidor PostgreSQL:', error);
-      // Revert optimistic updates
-      setAllProducts(prevProducts);
-      setAllTransfers(prevTransfers);
-      setAllMovements(prevMovements);
 
       return {
         success: false,
@@ -1378,12 +1408,10 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const product = allProducts.find((p) => p.id === productId);
     if (!product) return;
 
-    // Snapshot current state for rollback on failure
-    const previousProducts = allProducts;
-    const previousMovements = allMovements;
+    const tempMovId = `mov-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const newMov: StockMovement = {
-      id: `mov-${Date.now()}`,
+      id: tempMovId,
       productId,
       productName: product.name,
       type,
@@ -1398,6 +1426,13 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     // Optimistic updates
     setAllMovements((prev) => [newMov, ...prev]);
 
+    let appliedDeltaDeposito = 0;
+    let appliedDeltaLoja = 0;
+    const prevProductStock = {
+      stockDeposito: product.stockDeposito,
+      stockLoja: product.stockLoja,
+    };
+
     setAllProducts((prev) =>
       prev.map((p) => {
         if (p.id === productId) {
@@ -1406,12 +1441,15 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
           if (type === 'venda_loja') {
             newLoja = Math.max(0, newLoja - quantity);
+            appliedDeltaLoja = p.stockLoja - newLoja;
           } else if (type === 'perda_avaria') {
             if (location === 'deposito' || location === 'ambos') {
               newDeposito = Math.max(0, newDeposito - quantity);
+              appliedDeltaDeposito = p.stockDeposito - newDeposito;
             }
             if (location === 'loja' || location === 'ambos') {
               newLoja = Math.max(0, newLoja - quantity);
+              appliedDeltaLoja = p.stockLoja - newLoja;
             }
           } else if (type === 'ajuste_inventario') {
             if (location === 'deposito' || location === 'ambos') newDeposito = quantity;
@@ -1419,6 +1457,8 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           } else if (type === 'transferencia_deposito_loja') {
             newDeposito = Math.max(0, newDeposito - quantity);
             newLoja = newLoja + quantity;
+            appliedDeltaDeposito = p.stockDeposito - newDeposito;
+            appliedDeltaLoja = quantity;
           }
 
           return {
@@ -1432,6 +1472,54 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       })
     );
 
+    let isMovementRolledBack = false;
+    const rollbackOptimisticMovement = () => {
+      if (isMovementRolledBack) return;
+      isMovementRolledBack = true;
+
+      // 1. Remove SOMENTE a movimentação otimista pelo seu ID temporário estável
+      setAllMovements((prev) => prev.filter((m) => m.id !== tempMovId));
+
+      // 2. Reverte SOMENTE o produto afetado, sem substituir o array global nem sobrescrever outros produtos
+      setAllProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === productId) {
+            let restoredDeposito = p.stockDeposito;
+            let restoredLoja = p.stockLoja;
+
+            if (type === 'venda_loja') {
+              restoredLoja = p.stockLoja + appliedDeltaLoja;
+            } else if (type === 'perda_avaria') {
+              if (location === 'deposito' || location === 'ambos') {
+                restoredDeposito = p.stockDeposito + appliedDeltaDeposito;
+              }
+              if (location === 'loja' || location === 'ambos') {
+                restoredLoja = p.stockLoja + appliedDeltaLoja;
+              }
+            } else if (type === 'ajuste_inventario') {
+              if (location === 'deposito' || location === 'ambos') {
+                restoredDeposito = prevProductStock.stockDeposito;
+              }
+              if (location === 'loja' || location === 'ambos') {
+                restoredLoja = prevProductStock.stockLoja;
+              }
+            } else if (type === 'transferencia_deposito_loja') {
+              restoredDeposito = p.stockDeposito + appliedDeltaDeposito;
+              restoredLoja = Math.max(0, p.stockLoja - appliedDeltaLoja);
+            }
+
+            return {
+              ...p,
+              stockDeposito: restoredDeposito,
+              stockLoja: restoredLoja,
+              lastUpdated: new Date().toISOString(),
+            };
+          }
+          return p;
+        })
+      );
+    };
+
     try {
       const response = await authFetch('/api/movements', {
         method: 'POST',
@@ -1440,9 +1528,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
 
       if (!response.ok) {
-        // Rollback optimistic state immediately
-        setAllProducts(previousProducts);
-        setAllMovements(previousMovements);
+        rollbackOptimisticMovement();
 
         if (response.status === 403) {
           handle403PermissionDenied('Registrar Movimentação de Estoque');
@@ -1480,13 +1566,11 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       // Reconcile movement with official server state
       if (resData?.movement) {
         setAllMovements((prev) =>
-          prev.map((m) => (m.id === newMov.id ? resData.movement! : m))
+          prev.map((m) => (m.id === tempMovId ? resData.movement! : m))
         );
       }
     } catch (error) {
-      // Revert optimistic updates on any error (network failure, JSON parse, etc.)
-      setAllProducts(previousProducts);
-      setAllMovements(previousMovements);
+      rollbackOptimisticMovement();
       console.error('Falha ao registrar movimentação no servidor PostgreSQL:', error);
       throw error;
     }

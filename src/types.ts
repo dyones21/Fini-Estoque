@@ -167,6 +167,7 @@ export interface ABCAnalysisItem {
   revenuePercentage: number;
   cumulativePercentage: number;
   classABC: 'A' | 'B' | 'C';
+  totalOutputUnits?: number;
 }
 
 export interface AppNotification {

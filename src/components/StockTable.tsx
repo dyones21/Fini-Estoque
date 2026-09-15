@@ -70,7 +70,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   initialStatus = 'todos',
   initialIsFiltersOpen = false,
 }) => {
-  const { products, categories, deleteProduct, currentUser, checkPermission } = useStock();
+  const { products, movements, categories, deleteProduct, currentUser, checkPermission } = useStock();
 
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory);
@@ -129,11 +129,11 @@ export const StockTable: React.FC<StockTableProps> = ({
 
   // Compute Curva ABC map
   const abcMap = useMemo(() => {
-    const list = calculateCurvaABC(products);
+    const list = calculateCurvaABC(products, movements);
     const map = new Map<string, 'A' | 'B' | 'C'>();
     list.forEach((item) => map.set(item.product.id, item.classABC));
     return map;
-  }, [products]);
+  }, [products, movements]);
 
   // Filtered Products
   const filteredProducts = useMemo(() => {
