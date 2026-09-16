@@ -7,6 +7,7 @@ import {
   text,
   timestamp,
   doublePrecision,
+  unique,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
@@ -164,10 +165,40 @@ export const storeSales = pgTable('store_sales', {
   timestamp: text('timestamp').notNull(),
 });
 
+// Supplier Product Links Table (Memorização de vínculos fornecedor x código de produto na importação de XML)
+export const supplierProductLinks = pgTable(
+  'supplier_product_links',
+  {
+    id: text('id').primaryKey(),
+    supplierCnpj: text('supplier_cnpj').notNull(),
+    supplierProductCode: text('supplier_product_code').notNull(),
+    supplierDescription: text('supplier_description').default(''),
+    productId: text('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [
+    unique('supplier_product_links_cnpj_code_unique').on(
+      table.supplierCnpj,
+      table.supplierProductCode
+    ),
+  ]
+);
+
 // Relations
 export const productsRelations = relations(products, ({ many }) => ({
   movements: many(stockMovements),
   sales: many(storeSales),
+  supplierLinks: many(supplierProductLinks),
+}));
+
+export const supplierProductLinksRelations = relations(supplierProductLinks, ({ one }) => ({
+  product: one(products, {
+    fields: [supplierProductLinks.productId],
+    references: [products.id],
+  }),
 }));
 
 export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({

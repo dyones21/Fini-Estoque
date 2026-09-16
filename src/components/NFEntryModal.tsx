@@ -22,7 +22,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
-import { NFItem, Product, ProductCategory } from '../types';
+import { NFItem, Product, ProductCategory, SupplierProductLink } from '../types';
 import { formatCurrency, parseNumber } from '../utils/inventoryUtils';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { authFetch } from '../utils/apiAuth';
@@ -70,6 +70,7 @@ interface ImportedNFItem {
   // Link status
   linkType: 'existing' | 'new';
   matchedProductId: string;
+  matchSource?: 'supplier_link' | 'ean' | 'description' | 'manual' | 'none';
   // New product form data if linkType === 'new'
   newProductData: {
     sku: string;
@@ -173,18 +174,43 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
   }
 
   // Helper to match an item to existing products in stock
-  const findMatchingProduct = (description: string, codeEAN: string): Product | undefined => {
-    const cleanEan = (codeEAN || '').trim();
-    if (cleanEan && cleanEan !== 'SEM GTIN' && cleanEan !== 'SEMGTIN') {
-      const matchByEan = products.find((p) => (p.ean && p.ean === cleanEan) || (p.codeEAN && p.codeEAN === cleanEan));
-      if (matchByEan) return matchByEan;
+  // Prioridade 1: Vínculo salvo deste fornecedor (código cProd no XML)
+  // Prioridade 2: Código EAN / GTIN
+  // Prioridade 3: Descrição por aproximação
+  const findMatchingProduct = (
+    description: string,
+    codeEAN: string,
+    cProd?: string,
+    supplierLinksMap?: Map<string, SupplierProductLink>
+  ): { product?: Product; source: 'supplier_link' | 'ean' | 'description' | 'none' } => {
+    // 1. Prioridade Máxima: Vínculo memorizado deste fornecedor (código cProd)
+    const cleanCode = (cProd || '').trim().toLowerCase();
+    if (cleanCode && supplierLinksMap && supplierLinksMap.has(cleanCode)) {
+      const link = supplierLinksMap.get(cleanCode)!;
+      const matched = products.find((p) => p.id === link.productId);
+      if (matched) {
+        return { product: matched, source: 'supplier_link' };
+      }
     }
 
+    // 2. Prioridade Secundária: Match por código EAN
+    const cleanEan = (codeEAN || '').trim();
+    if (cleanEan && cleanEan !== 'SEM GTIN' && cleanEan !== 'SEMGTIN') {
+      const matchByEan = products.find(
+        (p) => (p.ean && p.ean === cleanEan) || (p.codeEAN && p.codeEAN === cleanEan)
+      );
+      if (matchByEan) return { product: matchByEan, source: 'ean' };
+    }
+
+    // 3. Prioridade Terciária: Match por similaridade de descrição
     const descLower = description.toLowerCase().trim();
-    return products.find((p) => {
+    const matchByDesc = products.find((p) => {
       const pNameLower = p.name.toLowerCase().trim();
       return pNameLower === descLower || descLower.includes(pNameLower) || pNameLower.includes(descLower);
     });
+    if (matchByDesc) return { product: matchByDesc, source: 'description' };
+
+    return { product: undefined, source: 'none' };
   };
 
   // Helper to map XML unit string to standard product unit
@@ -277,6 +303,15 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
       setDifalInput('0,00');
       setRecoverableTaxesInput('0,00');
 
+      // Vínculos aprendidos para este fornecedor vindos do servidor
+      const supplierLinks: SupplierProductLink[] = result.supplierLinks || [];
+      const supplierLinksMap = new Map<string, SupplierProductLink>();
+      for (const link of supplierLinks) {
+        if (link.supplierProductCode) {
+          supplierLinksMap.set(String(link.supplierProductCode).trim().toLowerCase(), link);
+        }
+      }
+
       // Margem de lucro configurada pela empresa (padrão 85% se não definida)
       const markupPercent =
         companyInfo?.defaultMarkupPercent !== undefined &&
@@ -287,7 +322,9 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
 
       // Mapeia os itens do XML com verificação de vínculo a produtos existentes e alocações de custo real
       const mapped: ImportedNFItem[] = parsedData.items.map((raw: ParsedNFItem) => {
-        const matched = findMatchingProduct(raw.description, raw.codeEAN);
+        const matchResult = findMatchingProduct(raw.description, raw.codeEAN, raw.cProd, supplierLinksMap);
+        const matched = matchResult.product;
+        const matchSource = matchResult.source;
         const standardUnit = mapUnitToStandard(raw.unit);
         const detectedCat = detectCategory(raw.description);
         const suggestedSellPrice =
@@ -318,6 +355,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
           category: matched ? matched.category : detectedCat,
           linkType: matched ? ('existing' as const) : ('new' as const),
           matchedProductId: matched ? matched.id : '',
+          matchSource,
           newProductData: {
             sku: `FINI-${(raw.cProd || raw.description.substring(0, 8)).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
             name: raw.description,
@@ -429,6 +467,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
             linkType === 'existing' && !item.matchedProductId && products.length > 0
               ? products[0].id
               : item.matchedProductId,
+          matchSource: linkType === 'existing' ? 'manual' : 'none',
         };
       })
     );
@@ -437,7 +476,7 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
   // Update matched product for an item
   const handleMatchedProductChange = (index: number, productId: string) => {
     setImportedItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, matchedProductId: productId } : item))
+      prev.map((item, i) => (i === index ? { ...item, matchedProductId: productId, matchSource: 'manual' } : item))
     );
   };
 
@@ -555,6 +594,12 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
         totalCost: item.totalCost || item.quantity * item.costPrice,
         batchNumber: item.batchNumber,
         expirationDate: item.expirationDate,
+
+        // Metadados para memorização do vínculo deste fornecedor com o produto no estoque
+        cProd: item.cProd,
+        supplierProductCode: item.cProd,
+        supplierDescription: item.description,
+        linkType: item.linkType,
       });
     }
 
@@ -1045,6 +1090,12 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                                   Cód: {item.cProd}
                                 </span>
                               )}
+                              {item.matchSource === 'supplier_link' && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  Vínculo salvo deste fornecedor
+                                </span>
+                              )}
                             </div>
 
                             {/* Cost Comparison & Rateio Details */}
@@ -1184,8 +1235,21 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                               </select>
 
                               {matchedProduct && (
-                                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 shrink-0">
-                                  ✓ Vinculado a {matchedProduct.name}
+                                <span
+                                  className={`text-[11px] px-2.5 py-1 rounded-lg border shrink-0 flex items-center gap-1.5 ${
+                                    item.matchSource === 'supplier_link'
+                                      ? 'text-emerald-800 bg-emerald-100/90 border-emerald-300 font-bold'
+                                      : item.matchSource === 'manual'
+                                      ? 'text-sky-800 bg-sky-50 border-sky-200 font-semibold'
+                                      : 'text-emerald-700 bg-emerald-50 border-emerald-200 font-semibold'
+                                  }`}
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  {item.matchSource === 'supplier_link'
+                                    ? `Reconhecido automaticamente: ${matchedProduct.name}`
+                                    : item.matchSource === 'manual'
+                                    ? `Vínculo manual: ${matchedProduct.name} (será memorizado)`
+                                    : `✓ Vinculado a ${matchedProduct.name}`}
                                 </span>
                               )}
                             </div>

@@ -1,7 +1,16 @@
 import { db, pool, isPostgresConfigured, withRetry } from './index.ts';
-import { products, stockMovements, nfEntries, nfItems, storeSales, companyInfo, categories } from './schema.ts';
-import { eq, asc } from 'drizzle-orm';
-import { Product, StockMovement, NFEntry, Sale, CompanyInfo } from '../types.ts';
+import {
+  products,
+  stockMovements,
+  nfEntries,
+  nfItems,
+  storeSales,
+  companyInfo,
+  categories,
+  supplierProductLinks,
+} from './schema.ts';
+import { eq, asc, or } from 'drizzle-orm';
+import { Product, StockMovement, NFEntry, Sale, CompanyInfo, SupplierProductLink } from '../types.ts';
 
 export const DEFAULT_CATEGORIES = [
   'Balas de Gelatina',
@@ -1023,8 +1032,105 @@ export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
         }
       }
 
+      // 8. Salva/Atualiza vínculos de produtos memorizados por fornecedor (supplier_product_links)
+      const cleanSupplierCnpj = (nf.cnpjSupplier || '').replace(/\D/g, '');
+      if (cleanSupplierCnpj && nf.items && nf.items.length > 0) {
+        for (const item of nf.items) {
+          const cleanCode = String(item.supplierProductCode || item.cProd || '').trim();
+          // Salva quando o item foi explicitamente vinculado a um produto existente ('existing')
+          if (cleanCode && item.productId && item.linkType === 'existing') {
+            const linkId = `spl_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            await tx
+              .insert(supplierProductLinks)
+              .values({
+                id: linkId,
+                supplierCnpj: cleanSupplierCnpj,
+                supplierProductCode: cleanCode,
+                supplierDescription: item.supplierDescription || item.productName || '',
+                productId: item.productId,
+                updatedAt: new Date(),
+              })
+              .onConflictDoUpdate({
+                target: [supplierProductLinks.supplierCnpj, supplierProductLinks.supplierProductCode],
+                set: {
+                  productId: item.productId,
+                  supplierDescription: item.supplierDescription || item.productName || '',
+                  updatedAt: new Date(),
+                },
+              });
+          }
+        }
+      }
+
       return nf;
     });
+  });
+}
+
+/**
+ * Recupera todos os vínculos memorizados para um determinado CNPJ de fornecedor.
+ */
+export async function getSupplierProductLinks(cnpj: string): Promise<SupplierProductLink[]> {
+  checkDbConnection();
+  const clean = (cnpj || '').replace(/\D/g, '');
+  if (!clean) return [];
+
+  return await withRetry(async () => {
+    const rows = await db
+      .select({
+        id: supplierProductLinks.id,
+        supplierCnpj: supplierProductLinks.supplierCnpj,
+        supplierProductCode: supplierProductLinks.supplierProductCode,
+        supplierDescription: supplierProductLinks.supplierDescription,
+        productId: supplierProductLinks.productId,
+        productName: products.name,
+      })
+      .from(supplierProductLinks)
+      .leftJoin(products, eq(supplierProductLinks.productId, products.id))
+      .where(
+        or(
+          eq(supplierProductLinks.supplierCnpj, clean),
+          eq(supplierProductLinks.supplierCnpj, cnpj)
+        )
+      );
+
+    return rows.map((r: any) => ({
+      id: r.id,
+      supplierCnpj: r.supplierCnpj,
+      supplierProductCode: r.supplierProductCode,
+      supplierDescription: r.supplierDescription || '',
+      productId: r.productId,
+      productName: r.productName || '',
+    }));
+  });
+}
+
+/**
+ * Recupera todos os vínculos de fornecedor cadastrados no sistema.
+ */
+export async function getAllSupplierProductLinks(): Promise<SupplierProductLink[]> {
+  checkDbConnection();
+  return await withRetry(async () => {
+    const rows = await db
+      .select({
+        id: supplierProductLinks.id,
+        supplierCnpj: supplierProductLinks.supplierCnpj,
+        supplierProductCode: supplierProductLinks.supplierProductCode,
+        supplierDescription: supplierProductLinks.supplierDescription,
+        productId: supplierProductLinks.productId,
+        productName: products.name,
+      })
+      .from(supplierProductLinks)
+      .leftJoin(products, eq(supplierProductLinks.productId, products.id));
+
+    return rows.map((r: any) => ({
+      id: r.id,
+      supplierCnpj: r.supplierCnpj,
+      supplierProductCode: r.supplierProductCode,
+      supplierDescription: r.supplierDescription || '',
+      productId: r.productId,
+      productName: r.productName || '',
+    }));
   });
 }
 

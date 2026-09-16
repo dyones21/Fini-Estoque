@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Boxes,
@@ -67,6 +67,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(() => {
     return activeTab === 'backup' || activeTab === 'usuarios' || activeTab === 'empresa';
   });
+
+  useEffect(() => {
+    if (activeTab === 'backup' || activeTab === 'usuarios' || activeTab === 'empresa') {
+      setIsConfigOpen(true);
+    }
+  }, [activeTab]);
 
   const toggleCollapse = () => {
     setIsCollapsed((prev) => {

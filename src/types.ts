@@ -114,6 +114,23 @@ export interface NFItem {
   iiAllocated?: number;
   difalAllocated?: number;
   recoverableTaxesAllocated?: number;
+
+  // Aprendizado e vínculo com fornecedor (importação de XML)
+  cProd?: string;
+  supplierProductCode?: string;
+  supplierDescription?: string;
+  linkType?: 'existing' | 'new';
+}
+
+export interface SupplierProductLink {
+  id: string;
+  supplierCnpj: string;
+  supplierProductCode: string;
+  supplierDescription?: string;
+  productId: string;
+  productName?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface NFEntry {

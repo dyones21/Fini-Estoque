@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { StockProvider, useStock } from './context/StockContext';
 import { Header } from './components/Header';
@@ -20,9 +20,66 @@ import { ProductHistoryModal } from './components/ProductHistoryModal';
 import { ReportsView } from './components/ReportsView';
 import { NFEntriesView } from './components/NFEntriesView';
 import { PurchaseSuggestionView } from './components/PurchaseSuggestionView';
-import { Product } from './types';
+import { Product, UserPermissions } from './types';
 import { StockFilterOptions } from './components/Dashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+const SESSION_ACTIVE_TAB_KEY = 'FINI_ACTIVE_TAB';
+
+const VALID_TABS: readonly ActiveTab[] = [
+  'dashboard',
+  'estoque_geral',
+  'estoque_loja',
+  'estoque_deposito',
+  'entrada_nf',
+  'notas_fiscais',
+  'sugestao_compra',
+  'relatorios',
+  'curva_abc_ranking',
+  'empresa',
+  'backup',
+  'usuarios',
+] as const;
+
+function isValidTab(tab: unknown): tab is ActiveTab {
+  return typeof tab === 'string' && VALID_TABS.includes(tab as ActiveTab);
+}
+
+function hasPermissionForTab(
+  tab: ActiveTab,
+  checkPermission: (permissionKey: keyof UserPermissions) => boolean
+): boolean {
+  switch (tab) {
+    case 'dashboard':
+      return checkPermission('canViewDashboard');
+    case 'estoque_geral':
+    case 'estoque_loja':
+    case 'estoque_deposito':
+      return checkPermission('canViewStock');
+    case 'entrada_nf':
+      return checkPermission('canAddNFEntries');
+    case 'notas_fiscais':
+      return checkPermission('canAddNFEntries') || checkPermission('canDeleteNFEntries');
+    case 'sugestao_compra':
+      return checkPermission('canViewDashboard') || checkPermission('canManageProducts');
+    case 'relatorios':
+      return checkPermission('canViewDashboard') || checkPermission('canViewStock');
+    case 'curva_abc_ranking':
+      return checkPermission('canViewDashboard');
+    case 'empresa':
+      return (
+        checkPermission('canManageBackup') ||
+        checkPermission('canManageUsers') ||
+        checkPermission('canManageCompany')
+      );
+    case 'backup':
+      return checkPermission('canManageBackup');
+    case 'usuarios':
+      return checkPermission('canManageUsers');
+    default:
+      return false;
+  }
+}
 
 const AccessDeniedMessage: React.FC<{ featureName: string }> = ({ featureName }) => (
   <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm text-center max-w-lg mx-auto my-12 space-y-4">
@@ -46,9 +103,41 @@ const MainApp: React.FC = () => {
     currentUser,
     isAuthenticated,
     isAuthModalOpen,
+    isAuthChecking,
     checkPermission,
   } = useStock();
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+
+  // Inicializa activeTab a partir do sessionStorage se houver valor válido
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    try {
+      const saved = sessionStorage.getItem(SESSION_ACTIVE_TAB_KEY);
+      if (isValidTab(saved)) {
+        return saved;
+      }
+    } catch {
+      // Ignora indisponibilidade do sessionStorage
+    }
+    return 'dashboard';
+  });
+
+  // Salva no sessionStorage sempre que a aba ativa mudar
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SESSION_ACTIVE_TAB_KEY, activeTab);
+    } catch {
+      // Ignora indisponibilidade do sessionStorage
+    }
+  }, [activeTab]);
+
+  // Valida permissão da aba atual quando a autenticação e perfil do usuário forem carregados
+  useEffect(() => {
+    if (isAuthChecking) return;
+
+    // Se o usuário não tiver permissão para a aba atual, cai de volta para o dashboard
+    if (activeTab !== 'dashboard' && !hasPermissionForTab(activeTab, checkPermission)) {
+      setActiveTab('dashboard');
+    }
+  }, [isAuthChecking, currentUser?.id, currentUser?.role, currentUser?.permissions, activeTab, checkPermission]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Stock table filter state for drill-down navigation from Dashboard

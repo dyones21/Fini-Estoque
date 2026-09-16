@@ -24,6 +24,8 @@ import {
   getCompanyCnpj,
   getAllCategories,
   insertCategory,
+  getSupplierProductLinks,
+  getAllSupplierProductLinks,
 } from './src/db/dbService.ts';
 import {
   getOrCreateUser,
@@ -695,10 +697,29 @@ async function startServer() {
         }
       }
 
-      res.json({ success: true, data: parsedData });
+      // Busca vínculos previamente memorizados para o CNPJ do fornecedor desta nota
+      const supplierLinks = await getSupplierProductLinks(parsedData.cnpjSupplier);
+
+      res.json({ success: true, data: parsedData, supplierLinks });
     } catch (error: any) {
       console.warn('API Warning /api/nfe/import-xml:', error.message);
       res.status(400).json({ error: error.message || 'Erro ao processar o arquivo XML da NF-e' });
+    }
+  });
+
+  // Vínculos memorizados de produtos por fornecedor (XML learning)
+  app.get('/api/supplier-product-links', requireAuth, async (req, res) => {
+    try {
+      const cnpj = req.query.supplierCnpj ? String(req.query.supplierCnpj) : '';
+      if (cnpj) {
+        const links = await getSupplierProductLinks(cnpj);
+        return res.json(links);
+      }
+      const allLinks = await getAllSupplierProductLinks();
+      res.json(allLinks);
+    } catch (error: any) {
+      console.error('API Error /api/supplier-product-links:', error);
+      res.status(500).json({ error: error.message || 'Erro ao carregar vínculos de fornecedor' });
     }
   });
 
