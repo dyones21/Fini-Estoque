@@ -316,9 +316,9 @@ async function startServer() {
       const created = await createRoleInDb(roleData);
       res.status(201).json(created);
     } catch (error: any) {
-      const statusCode = error.statusCode || 500;
+      const statusCode = error.statusCode || (error.code === '23505' ? 400 : 500);
       if (statusCode !== 500) {
-        return res.status(statusCode).json({ error: error.message });
+        return res.status(statusCode).json({ error: error.message || 'Já existe um cargo com esse nome.' });
       }
       console.error('API Error POST /api/roles:', error);
       res.status(500).json({ error: error.message || 'Erro ao criar cargo no banco de dados' });
@@ -453,6 +453,10 @@ async function startServer() {
       const savedName = await insertCategory(name);
       res.json({ success: true, name: savedName });
     } catch (error: any) {
+      const statusCode = error.statusCode || (error.code === '23505' ? 400 : 500);
+      if (statusCode !== 500) {
+        return res.status(statusCode).json({ error: error.message || 'Já existe uma categoria com esse nome.' });
+      }
       console.error('API Error POST /api/categories:', error);
       res.status(500).json({ error: error.message || 'Erro ao salvar categoria no Supabase' });
     }

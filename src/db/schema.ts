@@ -33,14 +33,14 @@ export const companyInfo = pgTable('company_info', {
 // Categories Table
 export const categories = pgTable('categories', {
   id: serial('id').primaryKey(),
-  name: text('name').notNull(),
+  name: text('name').notNull().unique(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
 // Roles Table (Dynamic RBAC)
 export const roles = pgTable('roles', {
   id: text('id').primaryKey(),
-  name: text('name').notNull(),
+  name: text('name').notNull().unique(),
   isSystemRole: boolean('is_system_role').notNull().default(false),
   canViewDashboard: boolean('can_view_dashboard').notNull().default(false),
   canViewStock: boolean('can_view_stock').notNull().default(false),

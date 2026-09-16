@@ -1362,19 +1362,38 @@ export async function getAllCategories(): Promise<string[]> {
 
 /**
  * Insere uma nova categoria de produto no PostgreSQL.
+ * Retorna erro claro caso a categoria já exista.
  */
 export async function insertCategory(name: string): Promise<string> {
   checkDbConnection();
   const trimmed = name.trim();
   if (!trimmed) {
-    throw new Error('O nome da categoria não pode ser vazio.');
+    const err: any = new Error('O nome da categoria não pode ser vazio.');
+    err.statusCode = 400;
+    throw err;
   }
 
   return await withRetry(async () => {
-    await db
-      .insert(categories)
-      .values({ name: trimmed })
-      .onConflictDoNothing();
+    // Verifica duplicidade de nome (case-insensitive)
+    const existing = await db.select().from(categories);
+    if (existing.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+      const err: any = new Error(`Já existe uma categoria cadastrada com o nome "${trimmed}".`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    try {
+      await db
+        .insert(categories)
+        .values({ name: trimmed });
+    } catch (dbErr: any) {
+      if (dbErr.code === '23505' || dbErr.message?.includes('duplicate key')) {
+        const err: any = new Error(`Já existe uma categoria cadastrada com o nome "${trimmed}".`);
+        err.statusCode = 400;
+        throw err;
+      }
+      throw dbErr;
+    }
 
     return trimmed;
   });
