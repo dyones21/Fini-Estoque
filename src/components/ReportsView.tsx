@@ -1079,7 +1079,40 @@ export const ReportsView: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-center font-black text-slate-900">
-                        {m.quantity}
+                        {m.type === 'ajuste_inventario' ? (
+                          (() => {
+                            let prev = m.previousQuantity;
+                            if (prev === undefined || prev === null) {
+                              const match = m.reason?.match(/Anterior:\s*(\d+)/i);
+                              if (match) prev = Number(match[1]);
+                            }
+                            if (prev !== undefined && prev !== null) {
+                              const diff = m.quantity - prev;
+                              const sign = diff > 0 ? `+${diff}` : `${diff}`;
+                              return (
+                                <div className="inline-flex flex-col items-center leading-tight">
+                                  <span
+                                    className={
+                                      diff > 0
+                                        ? 'text-emerald-700 font-black'
+                                        : diff < 0
+                                        ? 'text-rose-700 font-black'
+                                        : 'text-slate-600 font-bold'
+                                    }
+                                  >
+                                    {sign}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-medium">
+                                    ({prev} → {m.quantity})
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return m.quantity;
+                          })()
+                        ) : (
+                          m.quantity
+                        )}
                       </td>
                       <td className="py-2.5 px-3 capitalize font-semibold text-slate-700">
                         {m.location}

@@ -80,8 +80,9 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
         badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
         icon: FileSpreadsheet,
         iconColor: 'text-emerald-600',
-        qtyPrefix: '+',
+        displayQty: `+${m.quantity} ${product.unit}`,
         qtyClass: 'text-emerald-700 font-extrabold',
+        subText: undefined,
         defaultOrigin: 'Fornecedor NF',
         defaultDest: 'Depósito Central',
       };
@@ -93,8 +94,9 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
         badgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
         icon: ArrowRightLeft,
         iconColor: 'text-sky-600',
-        qtyPrefix: '',
+        displayQty: `${m.quantity} ${product.unit}`,
         qtyClass: 'text-sky-800 font-bold',
+        subText: undefined,
         defaultOrigin: 'Depósito Central',
         defaultDest: 'Loja GummyStock',
       };
@@ -106,8 +108,9 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
         badgeClass: 'bg-teal-100 text-teal-800 border-teal-300',
         icon: ShoppingBag,
         iconColor: 'text-teal-600',
-        qtyPrefix: '-',
+        displayQty: `-${m.quantity} ${product.unit}`,
         qtyClass: 'text-teal-700 font-extrabold',
+        subText: undefined,
         defaultOrigin: 'Loja GummyStock',
         defaultDest: 'Baleiro (Exposição / Pacote Aberto)',
       };
@@ -119,23 +122,72 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
         badgeClass: 'bg-rose-100 text-rose-800 border-rose-300',
         icon: MinusCircle,
         iconColor: 'text-rose-600',
-        qtyPrefix: '-',
+        displayQty: `-${m.quantity} ${product.unit}`,
         qtyClass: 'text-rose-700 font-bold',
+        subText: undefined,
         defaultOrigin: m.location === 'deposito' ? 'Depósito Central' : 'Loja GummyStock',
         defaultDest: 'Descarte / Baixa Operacional',
       };
     }
 
-    // Ajuste de inventário
+    // Ajuste de inventário: calcula diferença (+/-) com base no previousQuantity
+    let prev = m.previousQuantity;
+    if (prev === undefined || prev === null) {
+      const match = m.reason?.match(/Anterior:\s*(\d+)/i);
+      if (match) {
+        prev = Number(match[1]);
+      }
+    }
+
+    const hasPrev = prev !== undefined && prev !== null;
+    const diff = hasPrev ? m.quantity - prev : undefined;
+
+    let label = 'Ajuste de Inventário';
+    let badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+    let icon = ArrowRightLeft;
+    let iconColor = 'text-amber-600';
+    let displayQty = `${m.quantity} ${product.unit}`;
+    let qtyClass = 'text-amber-700 font-bold';
+    let subText: string | undefined = undefined;
+
+    if (diff !== undefined) {
+      if (diff > 0) {
+        label = 'Ajuste (+ Sobra)';
+        badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+        icon = ArrowUpRight;
+        iconColor = 'text-emerald-600';
+        displayQty = `+${diff} ${product.unit}`;
+        qtyClass = 'text-emerald-700 font-black';
+        subText = `de ${prev} para ${m.quantity} ${product.unit}`;
+      } else if (diff < 0) {
+        label = 'Ajuste (- Falta)';
+        badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+        icon = ArrowDownRight;
+        iconColor = 'text-rose-600';
+        displayQty = `${diff} ${product.unit}`;
+        qtyClass = 'text-rose-700 font-black';
+        subText = `de ${prev} para ${m.quantity} ${product.unit}`;
+      } else {
+        label = 'Ajuste (Sem alteração)';
+        badgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+        icon = ArrowRightLeft;
+        iconColor = 'text-slate-500';
+        displayQty = `0 ${product.unit}`;
+        qtyClass = 'text-slate-600 font-bold';
+        subText = `mantém ${m.quantity} ${product.unit}`;
+      }
+    }
+
     return {
-      label: 'Ajuste de Inventário',
-      badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
-      icon: MinusCircle,
-      iconColor: 'text-amber-600',
-      qtyPrefix: '-',
-      qtyClass: 'text-amber-700 font-bold',
-      defaultOrigin: m.location === 'deposito' ? 'Depósito Central' : 'Loja GummyStock',
-      defaultDest: 'Ajuste de Balanço',
+      label,
+      badgeClass,
+      icon,
+      iconColor,
+      displayQty,
+      qtyClass,
+      subText,
+      defaultOrigin: 'Auditoria / Contagem Física',
+      defaultDest: m.location === 'deposito' ? 'Depósito Central' : 'Loja GummyStock',
     };
   };
 
@@ -240,10 +292,15 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
                           </span>
                         </div>
 
-                        <div className="text-right">
+                        <div className="text-right shrink-0">
                           <span className={`text-sm ${meta.qtyClass}`}>
-                            {meta.qtyPrefix}{mov.quantity} {product.unit}
+                            {meta.displayQty}
                           </span>
+                          {meta.subText && (
+                            <span className="block text-[11px] font-semibold text-slate-500 mt-0.5">
+                              {meta.subText}
+                            </span>
+                          )}
                         </div>
                       </div>
 

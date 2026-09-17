@@ -1419,6 +1419,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       productName: product.name,
       type,
       quantity,
+      previousQuantity:
+        type === 'ajuste_inventario'
+          ? location === 'deposito'
+            ? product.stockDeposito
+            : product.stockLoja
+          : undefined,
       location,
       lossCategory: type === 'perda_avaria' ? (lossCategory || 'Outro') : undefined,
       date: new Date().toISOString(),
