@@ -61,11 +61,11 @@ function hasPermissionForTab(
     case 'notas_fiscais':
       return checkPermission('canAddNFEntries') || checkPermission('canDeleteNFEntries');
     case 'sugestao_compra':
-      return checkPermission('canViewDashboard') || checkPermission('canManageProducts');
+      return checkPermission('canViewReports');
     case 'relatorios':
-      return checkPermission('canViewDashboard') || checkPermission('canViewStock');
+      return checkPermission('canViewReports');
     case 'curva_abc_ranking':
-      return checkPermission('canViewDashboard');
+      return checkPermission('canViewReports');
     case 'empresa':
       return (
         checkPermission('canManageBackup') ||
@@ -305,7 +305,7 @@ const MainApp: React.FC = () => {
               )}
 
               {activeTab === 'sugestao_compra' && (
-                checkPermission('canViewDashboard') || checkPermission('canManageProducts') ? (
+                checkPermission('canViewReports') ? (
                   <PurchaseSuggestionView />
                 ) : (
                   <AccessDeniedMessage featureName="Sugestão de Compra" />
@@ -313,7 +313,7 @@ const MainApp: React.FC = () => {
               )}
 
               {activeTab === 'relatorios' && (
-                checkPermission('canViewDashboard') || checkPermission('canViewStock') ? (
+                checkPermission('canViewReports') ? (
                   <ReportsView />
                 ) : (
                   <AccessDeniedMessage featureName="Relatórios de Movimentação" />
@@ -321,7 +321,7 @@ const MainApp: React.FC = () => {
               )}
 
               {activeTab === 'curva_abc_ranking' && (
-                checkPermission('canViewDashboard') ? (
+                checkPermission('canViewReports') ? (
                   <div className="space-y-8">
                     <CurvaABCView />
                     <RankingView />

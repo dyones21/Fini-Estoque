@@ -174,6 +174,7 @@ export async function getUserByUid(uid: string) {
       permissions = {
         canViewDashboard: Boolean(roleObj.canViewDashboard),
         canViewStock: Boolean(roleObj.canViewStock),
+        canViewReports: Boolean(roleObj.canViewReports),
         canManageProducts: Boolean(roleObj.canManageProducts),
         canAddNFEntries: Boolean(roleObj.canAddNFEntries),
         canDeleteNFEntries: Boolean(roleObj.canDeleteNFEntries),
@@ -235,6 +236,7 @@ export async function getAllUsersFromDb() {
         perms = {
           canViewDashboard: Boolean(matchedRole.canViewDashboard),
           canViewStock: Boolean(matchedRole.canViewStock),
+          canViewReports: Boolean(matchedRole.canViewReports),
           canManageProducts: Boolean(matchedRole.canManageProducts),
           canAddNFEntries: Boolean(matchedRole.canAddNFEntries),
           canDeleteNFEntries: Boolean(matchedRole.canDeleteNFEntries),

@@ -28,6 +28,7 @@ export const INITIAL_ROLES: Role[] = [
     isSystemRole: true,
     canViewDashboard: true,
     canViewStock: true,
+    canViewReports: true,
     canManageProducts: true,
     canAddNFEntries: true,
     canDeleteNFEntries: true,
@@ -44,6 +45,7 @@ export const INITIAL_ROLES: Role[] = [
     isSystemRole: false,
     canViewDashboard: true,
     canViewStock: true,
+    canViewReports: true,
     canManageProducts: true,
     canAddNFEntries: true,
     canDeleteNFEntries: false,
@@ -60,6 +62,7 @@ export const INITIAL_ROLES: Role[] = [
     isSystemRole: false,
     canViewDashboard: false,
     canViewStock: true,
+    canViewReports: false,
     canManageProducts: false,
     canAddNFEntries: true,
     canDeleteNFEntries: false,
@@ -76,6 +79,7 @@ export const INITIAL_ROLES: Role[] = [
     isSystemRole: false,
     canViewDashboard: false,
     canViewStock: true,
+    canViewReports: false,
     canManageProducts: false,
     canAddNFEntries: false,
     canDeleteNFEntries: false,
@@ -92,6 +96,7 @@ export const INITIAL_ROLES: Role[] = [
     isSystemRole: false,
     canViewDashboard: true,
     canViewStock: true,
+    canViewReports: true,
     canManageProducts: false,
     canAddNFEntries: false,
     canDeleteNFEntries: false,
@@ -122,11 +127,11 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
           `
           INSERT INTO roles (
             id, name, is_system_role,
-            can_view_dashboard, can_view_stock, can_manage_products,
+            can_view_dashboard, can_view_stock, can_view_reports, can_manage_products,
             can_add_nf_entries, can_delete_nf_entries, can_transfer_stock,
             can_register_movements, can_manage_users, can_manage_backup,
             can_manage_company, can_wipe_system, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
           ON CONFLICT (id) DO UPDATE SET
             is_system_role = CASE WHEN roles.id = 'role_admin' THEN TRUE ELSE roles.is_system_role END;
         `,
@@ -136,6 +141,7 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
             r.isSystemRole,
             r.canViewDashboard,
             r.canViewStock,
+            r.canViewReports ?? false,
             r.canManageProducts,
             r.canAddNFEntries,
             r.canDeleteNFEntries ?? false,
@@ -148,6 +154,16 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
           ]
         );
       }
+
+      // 1.1 Garante que os cargos padrão existentes tenham can_view_reports ativo conforme sua regra
+      await pool.query(`
+        UPDATE roles 
+        SET can_view_reports = TRUE 
+        WHERE id IN ('role_admin', 'role_gerente_loja', 'role_auditor')
+           OR LOWER(name) LIKE '%admin%' 
+           OR LOWER(name) LIKE '%gerente%' 
+           OR LOWER(name) LIKE '%auditor%';
+      `);
 
       // 2. Migração dos usuários existentes: preenche role_id com base no valor atual de role
       await pool.query(`
@@ -221,6 +237,7 @@ export async function getAllRolesFromDb(): Promise<Role[]> {
         isSystemRole: Boolean(r.isSystemRole),
         canViewDashboard: Boolean(r.canViewDashboard),
         canViewStock: Boolean(r.canViewStock),
+        canViewReports: Boolean(r.canViewReports),
         canManageProducts: Boolean(r.canManageProducts),
         canAddNFEntries: Boolean(r.canAddNFEntries),
         canDeleteNFEntries: Boolean(r.canDeleteNFEntries),
@@ -270,6 +287,7 @@ export async function getRoleByIdFromDb(id: string): Promise<Role | null> {
       isSystemRole: Boolean(r.isSystemRole),
       canViewDashboard: Boolean(r.canViewDashboard),
       canViewStock: Boolean(r.canViewStock),
+      canViewReports: Boolean(r.canViewReports),
       canManageProducts: Boolean(r.canManageProducts),
       canAddNFEntries: Boolean(r.canAddNFEntries),
       canDeleteNFEntries: Boolean(r.canDeleteNFEntries),
@@ -330,6 +348,7 @@ export async function createRoleInDb(roleData: {
   name: string;
   canViewDashboard?: boolean;
   canViewStock?: boolean;
+  canViewReports?: boolean;
   canManageProducts?: boolean;
   canAddNFEntries?: boolean;
   canDeleteNFEntries?: boolean;
@@ -376,6 +395,7 @@ export async function createRoleInDb(roleData: {
         isSystemRole: false, // Sempre false para cargos criados
         canViewDashboard: Boolean(roleData.canViewDashboard),
         canViewStock: Boolean(roleData.canViewStock),
+        canViewReports: Boolean(roleData.canViewReports),
         canManageProducts: Boolean(roleData.canManageProducts),
         canAddNFEntries: Boolean(roleData.canAddNFEntries),
         canDeleteNFEntries: Boolean(roleData.canDeleteNFEntries),
@@ -398,6 +418,7 @@ export async function createRoleInDb(roleData: {
       isSystemRole: false,
       canViewDashboard: Boolean(created.canViewDashboard),
       canViewStock: Boolean(created.canViewStock),
+      canViewReports: Boolean(created.canViewReports),
       canManageProducts: Boolean(created.canManageProducts),
       canAddNFEntries: Boolean(created.canAddNFEntries),
       canDeleteNFEntries: Boolean(created.canDeleteNFEntries),
@@ -471,6 +492,7 @@ export async function updateRoleInDb(
 
     if (updates.canViewDashboard !== undefined) payload.canViewDashboard = Boolean(updates.canViewDashboard);
     if (updates.canViewStock !== undefined) payload.canViewStock = Boolean(updates.canViewStock);
+    if (updates.canViewReports !== undefined) payload.canViewReports = Boolean(updates.canViewReports);
     if (updates.canManageProducts !== undefined) payload.canManageProducts = Boolean(updates.canManageProducts);
     if (updates.canAddNFEntries !== undefined) payload.canAddNFEntries = Boolean(updates.canAddNFEntries);
     if (updates.canDeleteNFEntries !== undefined) payload.canDeleteNFEntries = Boolean(updates.canDeleteNFEntries);
@@ -501,6 +523,7 @@ export async function updateRoleInDb(
       isSystemRole: false,
       canViewDashboard: Boolean(r.canViewDashboard),
       canViewStock: Boolean(r.canViewStock),
+      canViewReports: Boolean(r.canViewReports),
       canManageProducts: Boolean(r.canManageProducts),
       canAddNFEntries: Boolean(r.canAddNFEntries),
       canDeleteNFEntries: Boolean(r.canDeleteNFEntries),

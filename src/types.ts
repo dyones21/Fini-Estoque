@@ -12,6 +12,7 @@ export interface Role {
   isSystemRole: boolean;
   canViewDashboard: boolean;
   canViewStock: boolean;
+  canViewReports?: boolean;
   canManageProducts: boolean;
   canAddNFEntries: boolean;
   canDeleteNFEntries?: boolean;
@@ -46,11 +47,12 @@ export type Tenant = CompanyInfo;
 export interface UserPermissions {
   canViewDashboard: boolean;
   canViewStock: boolean;
+  canViewReports: boolean;
   canManageProducts: boolean; // Criar, editar, excluir produtos
   canAddNFEntries: boolean;   // Entrada por Nota Fiscal
   canDeleteNFEntries?: boolean; // Excluir Nota Fiscal com reversão de estoque
   canTransferStock: boolean;  // Transferência Depósito -> Loja
-  canRegisterMovements: boolean; // Vendas na Loja, Ajustes e Perdas
+  canRegisterMovements: boolean; // Baixas para Baleiro, Ajustes e Perdas
   canManageUsers: boolean;   // Gerenciar Usuários, Permissões e PINs (Admin)
   canManageBackup: boolean;  // Gerenciar Backup e Sincronização
   canManageCompany?: boolean; // Gerenciar Dados da Empresa

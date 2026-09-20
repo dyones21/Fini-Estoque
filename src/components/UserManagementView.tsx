@@ -131,6 +131,7 @@ export const UserManagementView: React.FC = () => {
   const [newUserPermissions, setNewUserPermissions] = useState<UserPermissions>({
     canViewDashboard: true,
     canViewStock: true,
+    canViewReports: false,
     canManageProducts: false,
     canAddNFEntries: true,
     canDeleteNFEntries: false,
@@ -167,6 +168,7 @@ export const UserManagementView: React.FC = () => {
       setNewUserPermissions({
         canViewDashboard: Boolean(defaultRole.canViewDashboard),
         canViewStock: Boolean(defaultRole.canViewStock),
+        canViewReports: Boolean(defaultRole.canViewReports),
         canManageProducts: Boolean(defaultRole.canManageProducts),
         canAddNFEntries: Boolean(defaultRole.canAddNFEntries),
         canDeleteNFEntries: Boolean(defaultRole.canDeleteNFEntries),
@@ -216,6 +218,7 @@ export const UserManagementView: React.FC = () => {
         permissions: {
           canViewDashboard: Boolean(matchedRole.canViewDashboard),
           canViewStock: Boolean(matchedRole.canViewStock),
+          canViewReports: Boolean(matchedRole.canViewReports),
           canManageProducts: Boolean(matchedRole.canManageProducts),
           canAddNFEntries: Boolean(matchedRole.canAddNFEntries),
           canDeleteNFEntries: Boolean(matchedRole.canDeleteNFEntries),
@@ -242,6 +245,7 @@ export const UserManagementView: React.FC = () => {
       setNewUserPermissions({
         canViewDashboard: Boolean(matchedRole.canViewDashboard),
         canViewStock: Boolean(matchedRole.canViewStock),
+        canViewReports: Boolean(matchedRole.canViewReports),
         canManageProducts: Boolean(matchedRole.canManageProducts),
         canAddNFEntries: Boolean(matchedRole.canAddNFEntries),
         canDeleteNFEntries: Boolean(matchedRole.canDeleteNFEntries),
@@ -829,6 +833,29 @@ export const UserManagementView: React.FC = () => {
                 </div>
               </label>
 
+              {/* Permission Item: View Reports */}
+              <label
+                className={`p-3 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
+                  formData.permissions.canViewReports
+                    ? 'bg-emerald-50/60 border-emerald-300 text-emerald-950'
+                    : 'bg-slate-50 border-slate-200 text-slate-400 opacity-75'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={!isEditing}
+                  checked={Boolean(formData.permissions.canViewReports)}
+                  onChange={() => handleTogglePermission('canViewReports')}
+                  className="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                />
+                <div>
+                  <p className="text-xs font-bold">Visualizar Relatórios e Análises</p>
+                  <p className="text-[10px] text-slate-500">
+                    Acessar Relatórios Operacionais, Curva ABC, Ranking e Sugestão de Compra.
+                  </p>
+                </div>
+              </label>
+
               {/* Permission Item: Manage Products */}
               <label
                 className={`p-3 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
@@ -937,9 +964,9 @@ export const UserManagementView: React.FC = () => {
                   className="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
                 />
                 <div>
-                  <p className="text-xs font-bold">Registrar Vendas, Ajustes e Perdas</p>
+                  <p className="text-xs font-bold">Registrar Movimentações (Baixa Baleiro, Perda/Avaria, Ajuste)</p>
                   <p className="text-[10px] text-slate-500">
-                    Dar baixa no estoque da loja por venda de balcão ou avaria.
+                    Dar baixa para o baleiro, registrar perdas/avarias e ajustes de inventário.
                   </p>
                 </div>
               </label>
@@ -1298,6 +1325,18 @@ export const UserManagementView: React.FC = () => {
                   </label>
 
                   <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${
+                    newUserPermissions.canViewReports ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(newUserPermissions.canViewReports)}
+                      onChange={() => handleToggleModalPermission('canViewReports')}
+                      className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                    />
+                    <span>Visualizar Relatórios e Análises</span>
+                  </label>
+
+                  <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${
                     newUserPermissions.canManageProducts ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-500'
                   }`}>
                     <input
@@ -1354,7 +1393,7 @@ export const UserManagementView: React.FC = () => {
                       onChange={() => handleToggleModalPermission('canRegisterMovements')}
                       className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
                     />
-                    <span>Registrar Vendas e Baixas de Estoque</span>
+                    <span>Registrar Movimentações (Baixa Baleiro, Perda/Avaria, Ajuste)</span>
                   </label>
 
                   <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${

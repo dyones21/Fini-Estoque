@@ -234,34 +234,40 @@ export const MovementModal: React.FC<MovementModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[90vh] flex flex-col">
         
-        {/* Header */}
-        <div className="bg-linear-to-r from-slate-900 to-slate-800 p-5 text-white flex items-center justify-between">
+        {/* Header (Fixo no topo) */}
+        <div className="bg-linear-to-r from-slate-900 to-slate-800 p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-slate-700 text-amber-400">
+            <div className="p-2.5 rounded-xl bg-slate-700 text-amber-400 shrink-0">
               <MinusCircle className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-black tracking-tight">
-                Registrar Saída ou Baixa
+              <h2 className="text-base sm:text-lg font-black tracking-tight">
+                {type === 'ajuste_inventario' ? 'Ajuste de Inventário' : 'Registrar Saída ou Baixa'}
               </h2>
               <p className="text-xs text-slate-300">
-                Baixas por Saída p/ Baleiro, Validade Vencida, Avaria ou Ajuste
+                {type === 'ajuste_inventario'
+                  ? 'Ajuste e correção de saldos apurados em contagem física'
+                  : 'Baixas por Saída p/ Baleiro, Validade Vencida ou Avaria'}
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {/* Form com Layout Coluna e Área de Rolagem Interna */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          
+          {/* Corpo do formulário com rolagem */}
+          <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
           
           {/* Movement Type Radio Cards */}
           <div>
@@ -603,12 +609,14 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             />
           </div>
 
-          {/* Footer */}
-          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
+          </div>
+
+          {/* Footer (Fixo no rodapé, sempre visível fora da rolagem) */}
+          <div className="p-3.5 sm:px-5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold cursor-pointer"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold cursor-pointer"
             >
               Cancelar
             </button>

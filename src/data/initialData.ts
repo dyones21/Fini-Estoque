@@ -14,6 +14,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: true,
       canManageProducts: true,
       canAddNFEntries: true,
       canTransferStock: true,
@@ -35,6 +36,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: true,
       canManageProducts: true,
       canAddNFEntries: true,
       canTransferStock: true,
@@ -55,6 +57,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: true,
       canManageProducts: true,
       canAddNFEntries: false,
       canTransferStock: true,
@@ -75,6 +78,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: false,
       canManageProducts: false,
       canAddNFEntries: true,
       canTransferStock: true,
@@ -95,6 +99,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: false,
       canManageProducts: false,
       canAddNFEntries: false,
       canTransferStock: false,
@@ -116,6 +121,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: true,
       canManageProducts: true,
       canAddNFEntries: true,
       canTransferStock: true,
@@ -136,6 +142,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: false,
       canManageProducts: false,
       canAddNFEntries: false,
       canTransferStock: false,
@@ -157,6 +164,7 @@ export const INITIAL_USERS: UserProfile[] = [
     permissions: {
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: true,
       canManageProducts: true,
       canAddNFEntries: true,
       canTransferStock: true,

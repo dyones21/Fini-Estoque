@@ -6,6 +6,7 @@ import { UserPermissions, UserRole } from '../types';
 export const DEFAULT_DENY_PERMISSIONS: UserPermissions = {
   canViewDashboard: false,
   canViewStock: false,
+  canViewReports: false,
   canManageProducts: false,
   canAddNFEntries: false,
   canDeleteNFEntries: false,
@@ -22,6 +23,7 @@ export const DEFAULT_DENY_PERMISSIONS: UserPermissions = {
 export const SYSTEM_ADMIN_PERMISSIONS: UserPermissions = {
   canViewDashboard: true,
   canViewStock: true,
+  canViewReports: true,
   canManageProducts: true,
   canAddNFEntries: true,
   canDeleteNFEntries: true,
@@ -57,10 +59,16 @@ export const PERMISSION_METAS: PermissionMeta[] = [
     description: 'Visualizar lista de produtos, quantidades disponíveis na Loja e Depósito, lotes e validades.',
   },
   {
+    key: 'canViewReports',
+    title: 'Visualizar Relatórios e Análises',
+    category: 'Visualização',
+    description: 'Acesso a Relatórios Operacionais, Curva ABC, Ranking e Sugestão de Compra.',
+  },
+  {
     key: 'canRegisterMovements',
-    title: 'Registrar Vendas e Movimentações',
+    title: 'Registrar Movimentações (Baixa Baleiro, Perda/Avaria, Ajuste)',
     category: 'Operação',
-    description: 'Lançar vendas avulsas de balcão (PDV), registrar perdas/avarias e ajustes manuais.',
+    description: 'Registrar baixas para baleiro/pacote aberto, perdas/avarias e ajustes de inventário.',
   },
   {
     key: 'canTransferStock',
@@ -125,6 +133,7 @@ export function getRolePermissions(roleOrPermissions?: any): UserPermissions {
     return {
       canViewDashboard: Boolean(p.canViewDashboard),
       canViewStock: Boolean(p.canViewStock),
+      canViewReports: Boolean(p.canViewReports),
       canManageProducts: Boolean(p.canManageProducts),
       canAddNFEntries: Boolean(p.canAddNFEntries),
       canDeleteNFEntries: Boolean(p.canDeleteNFEntries),

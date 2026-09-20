@@ -39,7 +39,13 @@ const PERMISSION_METADATA: {
   {
     key: 'canViewStock',
     label: 'Visualizar Estoque',
-    description: 'Consultar saldos, tabelas de produtos e relatórios de estoque.',
+    description: 'Consultar saldos e tabelas de produtos na Loja e Depósito.',
+    category: 'visualizacao',
+  },
+  {
+    key: 'canViewReports',
+    label: 'Visualizar Relatórios e Análises',
+    description: 'Acessar Relatórios Operacionais, Curva ABC, Ranking e Sugestão de Compra.',
     category: 'visualizacao',
   },
   {
@@ -68,8 +74,8 @@ const PERMISSION_METADATA: {
   },
   {
     key: 'canRegisterMovements',
-    label: 'Registrar Movimentações & Vendas',
-    description: 'Registrar saídas para baleiro, vendas e perdas/ajustes de estoque.',
+    label: 'Registrar Movimentações (Baixa Baleiro, Perda/Avaria, Ajuste)',
+    description: 'Registrar saídas para o baleiro, perdas/avarias e ajustes de estoque.',
     category: 'operacao',
   },
   {
@@ -93,7 +99,7 @@ const PERMISSION_METADATA: {
   {
     key: 'canWipeSystem',
     label: 'Zerar Todo o Sistema (Exclusivo)',
-    description: 'Ação crítica de apagar produtos, movimentações, NF e vendas de toda a empresa.',
+    description: 'Ação crítica de apagar produtos, movimentações, NF e dados de toda a empresa.',
     category: 'critica',
   },
 ];
@@ -115,6 +121,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
   const [rolePermissions, setRolePermissions] = useState<Record<keyof UserPermissions, boolean>>({
     canViewDashboard: true,
     canViewStock: true,
+    canViewReports: false,
     canManageProducts: false,
     canAddNFEntries: false,
     canDeleteNFEntries: false,
@@ -153,6 +160,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
     setRolePermissions({
       canViewDashboard: true,
       canViewStock: true,
+      canViewReports: false,
       canManageProducts: false,
       canAddNFEntries: false,
       canDeleteNFEntries: false,
@@ -174,6 +182,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
     setRolePermissions({
       canViewDashboard: Boolean(role.canViewDashboard),
       canViewStock: Boolean(role.canViewStock),
+      canViewReports: Boolean(role.canViewReports),
       canManageProducts: Boolean(role.canManageProducts),
       canAddNFEntries: Boolean(role.canAddNFEntries),
       canDeleteNFEntries: Boolean(role.canDeleteNFEntries),
@@ -208,6 +217,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
     setRolePermissions({
       canViewDashboard: value,
       canViewStock: value,
+      canViewReports: value,
       canManageProducts: value,
       canAddNFEntries: value,
       canDeleteNFEntries: value,
@@ -399,7 +409,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
                                 role.isSystemRole ? 'text-slate-400' : 'text-slate-500'
                               }`}
                             >
-                              {activePermsCount} de 10 permissões ativas
+                              {activePermsCount} de {PERMISSION_METADATA.length} permissões ativas
                             </p>
                           </div>
 
@@ -518,7 +528,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
                   disabled={editingRole?.isSystemRole || isSaving}
                   value={roleName}
                   onChange={(e) => setRoleName(e.target.value)}
-                  placeholder="Ex: Supervisor de Vendas, Encarregado de Estoque..."
+                  placeholder="Ex: Operador de Caixa, Repositor, Encarregado de Estoque..."
                   className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
                 />
                 {editingRole?.isSystemRole && (

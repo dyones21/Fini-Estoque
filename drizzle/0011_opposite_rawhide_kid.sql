@@ -1,0 +1,1 @@
+ALTER TABLE "roles" ADD COLUMN "can_view_reports" boolean DEFAULT false NOT NULL;

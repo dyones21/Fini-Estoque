@@ -119,7 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           },
         ]
       : []),
-    ...(checkPermission('canViewDashboard') || checkPermission('canManageProducts')
+    ...(checkPermission('canViewReports')
       ? [
           {
             id: 'sugestao_compra',
@@ -129,7 +129,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           },
         ]
       : []),
-    ...(checkPermission('canViewDashboard') || checkPermission('canViewStock')
+    ...(checkPermission('canViewReports')
       ? [
           {
             id: 'relatorios',
@@ -139,7 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           },
         ]
       : []),
-    ...(checkPermission('canViewDashboard')
+    ...(checkPermission('canViewReports')
       ? [
           {
             id: 'curva_abc_ranking',

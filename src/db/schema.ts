@@ -45,6 +45,7 @@ export const roles = pgTable('roles', {
   isSystemRole: boolean('is_system_role').notNull().default(false),
   canViewDashboard: boolean('can_view_dashboard').notNull().default(false),
   canViewStock: boolean('can_view_stock').notNull().default(false),
+  canViewReports: boolean('can_view_reports').notNull().default(false),
   canManageProducts: boolean('can_manage_products').notNull().default(false),
   canAddNFEntries: boolean('can_add_nf_entries').notNull().default(false),
   canDeleteNFEntries: boolean('can_delete_nf_entries').notNull().default(false),
