@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Boxes,
   Store,
@@ -13,6 +13,8 @@ import {
   Filter,
   CheckCircle2,
   Layers,
+  ArrowRight,
+  AlertCircle,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -28,7 +30,9 @@ import {
 } from 'recharts';
 import { useStock } from '../context/StockContext';
 import { formatCurrency, getDaysToExpiration } from '../utils/inventoryUtils';
+import { authFetch } from '../utils/apiAuth';
 import { ActiveTab } from './Sidebar';
+import { Payable } from '../types';
 
 export interface StockFilterOptions {
   searchQuery?: string;
@@ -42,9 +46,67 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateToStock }) => {
-  const { products, nfEntries } = useStock();
+  const { products, nfEntries, checkPermission } = useStock();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('todos');
+
+  // Contas a Pagar Summary state (only loaded if user has permission)
+  const canManagePayables = checkPermission('canManagePayables');
+  const [payablesSummary, setPayablesSummary] = useState<{
+    overdueAmount: number;
+    next7DaysAmount: number;
+    overdueCount: number;
+    next7DaysCount: number;
+  }>({
+    overdueAmount: 0,
+    next7DaysAmount: 0,
+    overdueCount: 0,
+    next7DaysCount: 0,
+  });
+
+  useEffect(() => {
+    if (!canManagePayables) return;
+
+    let isMounted = true;
+    authFetch('/api/payables')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: Payable[]) => {
+        if (!isMounted || !Array.isArray(data)) return;
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const next7DaysStr = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+        let overdueAmt = 0;
+        let overdueCnt = 0;
+        let next7Amt = 0;
+        let next7Cnt = 0;
+
+        for (const p of data) {
+          if (p.status === 'cancelado') continue;
+          const remaining = Number(p.remainingAmount ?? (p.originalAmount - p.paidAmount)) || 0;
+          if (remaining > 0) {
+            if (p.dueDate < todayStr) {
+              overdueAmt += remaining;
+              overdueCnt++;
+            } else if (p.dueDate >= todayStr && p.dueDate <= next7DaysStr) {
+              next7Amt += remaining;
+              next7Cnt++;
+            }
+          }
+        }
+
+        setPayablesSummary({
+          overdueAmount: overdueAmt,
+          next7DaysAmount: next7Amt,
+          overdueCount: overdueCnt,
+          next7DaysCount: next7Cnt,
+        });
+      })
+      .catch((err) => console.warn('Erro ao carregar resumo de contas a pagar no dashboard:', err));
+
+    return () => {
+      isMounted = false;
+    };
+  }, [canManagePayables]);
 
   // Helper to trigger navigation
   const handleDrillDown = (filters: StockFilterOptions = {}) => {
@@ -366,6 +428,93 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
         </div>
 
       </div>
+
+      {/* Card Executivo de Contas a Pagar (visível apenas com canManagePayables) */}
+      {canManagePayables && (
+        <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 rounded-3xl p-5 text-white shadow-md border border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                <DollarSign className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black tracking-tight text-white flex items-center gap-2">
+                  <span>Compromissos Financeiros — Contas a Pagar</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase">
+                    Financeiro
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Resumo de pagamentos pendentes, contas vencidas e projeção para a semana
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                sessionStorage.removeItem('FINI_PAYABLES_FILTER');
+                setActiveTab('contas_a_pagar');
+              }}
+              className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1 self-start sm:self-auto cursor-pointer transition-colors"
+            >
+              <span>Ver todas as contas</span>
+              <span className="text-base leading-none">➔</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+            {/* Vencendo nos próximos 7 dias */}
+            <div
+              onClick={() => {
+                sessionStorage.setItem('FINI_PAYABLES_FILTER', 'proximos_7_dias');
+                setActiveTab('contas_a_pagar');
+              }}
+              className="p-4 rounded-2xl bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-amber-500/50 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-amber-400" /> Vencendo nos Próximos 7 Dias:
+                </span>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {payablesSummary.next7DaysCount} {payablesSummary.next7DaysCount === 1 ? 'conta' : 'contas'}
+                </span>
+              </div>
+              <p className="text-2xl font-black text-amber-300">
+                {formatCurrency(payablesSummary.next7DaysAmount)}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-between group-hover:text-amber-200 transition-colors">
+                <span>Vencimento até os próximos 7 dias</span>
+                <span className="font-bold text-amber-400 text-xs">Filtrar ➔</span>
+              </p>
+            </div>
+
+            {/* Total já vencido */}
+            <div
+              onClick={() => {
+                sessionStorage.setItem('FINI_PAYABLES_FILTER', 'vencido');
+                setActiveTab('contas_a_pagar');
+              }}
+              className="p-4 rounded-2xl bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-rose-500/50 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-rose-400" /> Total Já Vencido:
+                </span>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                  {payablesSummary.overdueCount} {payablesSummary.overdueCount === 1 ? 'conta' : 'contas'}
+                </span>
+              </div>
+              <p className="text-2xl font-black text-rose-400">
+                {formatCurrency(payablesSummary.overdueAmount)}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-between group-hover:text-rose-200 transition-colors">
+                <span>Contas atrasadas aguardando quitação</span>
+                <span className="font-bold text-rose-400 text-xs">Filtrar ➔</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Visual Analytics Graphs Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

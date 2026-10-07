@@ -38,6 +38,7 @@ export const INITIAL_ROLES: Role[] = [
     canManageBackup: true,
     canManageCompany: true,
     canWipeSystem: true,
+    canManagePayables: true,
   },
   {
     id: 'role_gerente_loja',
@@ -55,6 +56,7 @@ export const INITIAL_ROLES: Role[] = [
     canManageBackup: true,
     canManageCompany: false,
     canWipeSystem: false,
+    canManagePayables: true,
   },
   {
     id: 'role_operador_deposito',
@@ -72,6 +74,7 @@ export const INITIAL_ROLES: Role[] = [
     canManageBackup: false,
     canManageCompany: false,
     canWipeSystem: false,
+    canManagePayables: false,
   },
   {
     id: 'role_caixa',
@@ -89,6 +92,7 @@ export const INITIAL_ROLES: Role[] = [
     canManageBackup: false,
     canManageCompany: false,
     canWipeSystem: false,
+    canManagePayables: false,
   },
   {
     id: 'role_auditor',
@@ -106,6 +110,7 @@ export const INITIAL_ROLES: Role[] = [
     canManageBackup: false,
     canManageCompany: false,
     canWipeSystem: false,
+    canManagePayables: false,
   },
 ];
 
@@ -121,6 +126,34 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
 
   rolesSchemaInitPromise = (async () => {
     try {
+      // 0. Garante que a tabela roles e suas colunas existam
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS roles (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          is_system_role BOOLEAN NOT NULL DEFAULT FALSE,
+          can_view_dashboard BOOLEAN NOT NULL DEFAULT FALSE,
+          can_view_stock BOOLEAN NOT NULL DEFAULT FALSE,
+          can_view_reports BOOLEAN NOT NULL DEFAULT FALSE,
+          can_manage_products BOOLEAN NOT NULL DEFAULT FALSE,
+          can_add_nf_entries BOOLEAN NOT NULL DEFAULT FALSE,
+          can_delete_nf_entries BOOLEAN NOT NULL DEFAULT FALSE,
+          can_transfer_stock BOOLEAN NOT NULL DEFAULT FALSE,
+          can_register_movements BOOLEAN NOT NULL DEFAULT FALSE,
+          can_manage_users BOOLEAN NOT NULL DEFAULT FALSE,
+          can_manage_backup BOOLEAN NOT NULL DEFAULT FALSE,
+          can_manage_company BOOLEAN NOT NULL DEFAULT FALSE,
+          can_wipe_system BOOLEAN NOT NULL DEFAULT FALSE,
+          can_manage_payables BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_view_reports BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_manage_company BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_wipe_system BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_manage_payables BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id TEXT;
+      `);
+
       // 1. Garante a existência do ADMIN fixo e dos cargos iniciais (Seed de dados)
       for (const r of INITIAL_ROLES) {
         await pool.query(
@@ -130,8 +163,8 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
             can_view_dashboard, can_view_stock, can_view_reports, can_manage_products,
             can_add_nf_entries, can_delete_nf_entries, can_transfer_stock,
             can_register_movements, can_manage_users, can_manage_backup,
-            can_manage_company, can_wipe_system, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+            can_manage_company, can_wipe_system, can_manage_payables, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
           ON CONFLICT (id) DO UPDATE SET
             is_system_role = CASE WHEN roles.id = 'role_admin' THEN TRUE ELSE roles.is_system_role END;
         `,
@@ -151,11 +184,12 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
             r.canManageBackup,
             r.canManageCompany ?? false,
             r.canWipeSystem ?? false,
+            r.canManagePayables ?? false,
           ]
         );
       }
 
-      // 1.1 Garante que os cargos padrão existentes tenham can_view_reports ativo conforme sua regra
+      // 1.1 Garante que os cargos padrão existentes tenham can_view_reports e can_manage_payables ativos conforme sua regra
       await pool.query(`
         UPDATE roles 
         SET can_view_reports = TRUE 
@@ -163,6 +197,12 @@ export async function ensureRolesTableAndSeed(): Promise<void> {
            OR LOWER(name) LIKE '%admin%' 
            OR LOWER(name) LIKE '%gerente%' 
            OR LOWER(name) LIKE '%auditor%';
+
+        UPDATE roles 
+        SET can_manage_payables = TRUE 
+        WHERE id IN ('role_admin', 'role_gerente_loja')
+           OR LOWER(name) LIKE '%admin%' 
+           OR LOWER(name) LIKE '%gerente%';
       `);
 
       // 2. Migração dos usuários existentes: preenche role_id com base no valor atual de role
@@ -246,6 +286,7 @@ export async function getAllRolesFromDb(): Promise<Role[]> {
         canManageUsers: Boolean(r.canManageUsers),
         canManageBackup: Boolean(r.canManageBackup),
         canWipeSystem: Boolean(r.canWipeSystem),
+        canManagePayables: Boolean(r.canManagePayables),
         createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
         userCount: uCount,
       };
@@ -296,6 +337,7 @@ export async function getRoleByIdFromDb(id: string): Promise<Role | null> {
       canManageUsers: Boolean(r.canManageUsers),
       canManageBackup: Boolean(r.canManageBackup),
       canWipeSystem: Boolean(r.canWipeSystem),
+      canManagePayables: Boolean(r.canManagePayables),
       createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
     };
 
@@ -358,6 +400,7 @@ export async function createRoleInDb(roleData: {
   canManageBackup?: boolean;
   canManageCompany?: boolean;
   canWipeSystem?: boolean;
+  canManagePayables?: boolean;
 }): Promise<Role> {
   checkDbConnection();
 
@@ -405,6 +448,7 @@ export async function createRoleInDb(roleData: {
         canManageBackup: Boolean(roleData.canManageBackup),
         canManageCompany: Boolean(roleData.canManageCompany),
         canWipeSystem: Boolean(roleData.canWipeSystem),
+        canManagePayables: Boolean(roleData.canManagePayables),
         createdAt: new Date(),
       })
       .returning();
@@ -428,6 +472,7 @@ export async function createRoleInDb(roleData: {
       canManageBackup: Boolean(created.canManageBackup),
       canManageCompany: Boolean(created.canManageCompany),
       canWipeSystem: Boolean(created.canWipeSystem),
+      canManagePayables: Boolean(created.canManagePayables),
       createdAt: created.createdAt ? new Date(created.createdAt).toISOString() : new Date().toISOString(),
       userCount: 0,
     };
@@ -502,6 +547,7 @@ export async function updateRoleInDb(
     if (updates.canManageBackup !== undefined) payload.canManageBackup = Boolean(updates.canManageBackup);
     if (updates.canManageCompany !== undefined) payload.canManageCompany = Boolean(updates.canManageCompany);
     if (updates.canWipeSystem !== undefined) payload.canWipeSystem = Boolean(updates.canWipeSystem);
+    if (updates.canManagePayables !== undefined) payload.canManagePayables = Boolean(updates.canManagePayables);
 
     const updated = await db
       .update(roles)
@@ -533,6 +579,7 @@ export async function updateRoleInDb(
       canManageBackup: Boolean(r.canManageBackup),
       canManageCompany: Boolean(r.canManageCompany),
       canWipeSystem: Boolean(r.canWipeSystem),
+      canManagePayables: Boolean(r.canManagePayables),
       createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
     };
   });

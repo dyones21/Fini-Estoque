@@ -142,6 +142,22 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
   const [manualNotes, setManualNotes] = useState('');
   const [manualItems, setManualItems] = useState<NFItem[]>([]);
 
+  // Contas a Pagar Integration state (default: marcado, vencimento = emissão + 30 dias)
+  const calculateDefaultDueDate = (issueDateStr?: string) => {
+    try {
+      const base = issueDateStr ? new Date(issueDateStr) : new Date();
+      if (!isNaN(base.getTime())) {
+        const d = new Date(base.getTime() + 30 * 24 * 60 * 60 * 1000);
+        return d.toISOString().slice(0, 10);
+      }
+    } catch {}
+    const now = new Date();
+    return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  };
+
+  const [generatePayable, setGeneratePayable] = useState<boolean>(true);
+  const [payableDueDate, setPayableDueDate] = useState<string>(() => calculateDefaultDueDate());
+
   // Manual item builder inputs
   const [selectedProductId, setSelectedProductId] = useState('');
   const [itemQuantity, setItemQuantity] = useState<string | number>(10);
@@ -302,6 +318,9 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
       setXmlTotals(parsedData.totals);
       setDifalInput('0,00');
       setRecoverableTaxesInput('0,00');
+      if (parsedData.issueDate) {
+        setPayableDueDate(calculateDefaultDueDate(parsedData.issueDate));
+      }
 
       // Vínculos aprendidos para este fornecedor vindos do servidor
       const supplierLinks: SupplierProductLink[] = result.supplierLinks || [];
@@ -605,19 +624,27 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
 
     // Save NF Entry
     try {
-      await addNFEntry({
-        numberNF: xmlHeader.numberNF,
-        accessKey: xmlHeader.accessKey,
-        supplier: xmlHeader.supplier,
-        cnpjSupplier: xmlHeader.cnpjSupplier,
-        issueDate: xmlHeader.issueDate,
-        items: finalNFItems,
-        totalValue: xmlTotals.vNF > 0 ? xmlTotals.vNF : xmlTotalRealCost,
-        notes: `${xmlHeader.notes} (${newProductsCreatedCount} novos produtos cadastrados auto)`,
-        createdBy: currentUser.name,
-      });
+      await addNFEntry(
+        {
+          numberNF: xmlHeader.numberNF,
+          accessKey: xmlHeader.accessKey,
+          supplier: xmlHeader.supplier,
+          cnpjSupplier: xmlHeader.cnpjSupplier,
+          issueDate: xmlHeader.issueDate,
+          items: finalNFItems,
+          totalValue: xmlTotals.vNF > 0 ? xmlTotals.vNF : xmlTotalRealCost,
+          notes: `${xmlHeader.notes} (${newProductsCreatedCount} novos produtos cadastrados auto)`,
+          createdBy: currentUser.name,
+        },
+        {
+          generatePayable,
+          payableDueDate: generatePayable ? payableDueDate : undefined,
+        }
+      );
 
       const successMsg = `Entrada de NF-e #${xmlHeader.numberNF} CONCLUÍDA! ${finalNFItems.length} itens lançados no DEPÓSITO CENTRAL. ${
+        generatePayable ? 'Conta a pagar gerada no financeiro. ' : ''
+      }${
         newProductsCreatedCount > 0
           ? `${newProductsCreatedCount} novo(s) produto(s) cadastrado(s) automaticamente no sistema.`
           : ''
@@ -684,20 +711,28 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     }
 
     try {
-      await addNFEntry({
-        numberNF: manualNumberNF,
-        accessKey: manualAccessKey,
-        supplier: manualSupplier,
-        cnpjSupplier: manualCnpj,
-        issueDate: manualIssueDate,
-        items: manualItems,
-        totalValue: manualTotalValue,
-        notes: manualNotes,
-        createdBy: currentUser.name,
-      });
+      await addNFEntry(
+        {
+          numberNF: manualNumberNF,
+          accessKey: manualAccessKey,
+          supplier: manualSupplier,
+          cnpjSupplier: manualCnpj,
+          issueDate: manualIssueDate,
+          items: manualItems,
+          totalValue: manualTotalValue,
+          notes: manualNotes,
+          createdBy: currentUser.name,
+        },
+        {
+          generatePayable,
+          payableDueDate: generatePayable ? payableDueDate : undefined,
+        }
+      );
 
       alert(
-        `Entrada de Nota Fiscal #${manualNumberNF} realizada com SUCESSO! O estoque do DEPÓSITO CENTRAL foi atualizado.`
+        `Entrada de Nota Fiscal #${manualNumberNF} realizada com SUCESSO! O estoque do DEPÓSITO CENTRAL foi atualizado.${
+          generatePayable ? ' Conta a pagar gerada no financeiro.' : ''
+        }`
       );
       onClose();
     } catch (err: any) {
@@ -1351,6 +1386,43 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
               )}
             </div>
 
+            {/* Integração Financeira: Contas a Pagar */}
+            <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-4 space-y-3">
+              <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={generatePayable}
+                    onChange={(e) => setGeneratePayable(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500"
+                  />
+                  <div>
+                    <span className="text-xs font-black text-slate-800">
+                      Gerar conta a pagar para esta entrada
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      Lança automaticamente o valor total da NF no módulo de Contas a Pagar vinculado ao fornecedor.
+                    </p>
+                  </div>
+                </label>
+
+                {generatePayable && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                      Data de Vencimento:
+                    </label>
+                    <input
+                      type="date"
+                      value={payableDueDate}
+                      onChange={(e) => setPayableDueDate(e.target.value)}
+                      required={generatePayable}
+                      className="text-xs p-2 rounded-xl border border-sky-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-sky-500/20"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Submit Bar */}
             <div className="bg-slate-900 text-white p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
@@ -1624,6 +1696,43 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+
+            {/* Integração Financeira: Contas a Pagar */}
+            <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-4 space-y-3">
+              <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={generatePayable}
+                    onChange={(e) => setGeneratePayable(e.target.checked)}
+                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500"
+                  />
+                  <div>
+                    <span className="text-xs font-black text-slate-800">
+                      Gerar conta a pagar para esta entrada
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      Lança automaticamente o valor total da NF no módulo de Contas a Pagar.
+                    </p>
+                  </div>
+                </label>
+
+                {generatePayable && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                      Data de Vencimento:
+                    </label>
+                    <input
+                      type="date"
+                      value={payableDueDate}
+                      onChange={(e) => setPayableDueDate(e.target.value)}
+                      required={generatePayable}
+                      className="text-xs p-2 rounded-xl border border-sky-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-sky-500/20"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 

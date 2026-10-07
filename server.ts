@@ -26,6 +26,17 @@ import {
   insertCategory,
   getSupplierProductLinks,
   getAllSupplierProductLinks,
+  getAllSuppliers,
+  createSupplier,
+  updateSupplier,
+  getAllPayables,
+  getPayableById,
+  createPayable,
+  updatePayable,
+  deletePayable,
+  registerPayablePayment,
+  voidPayablePayment,
+  ensureDbSchema,
 } from './src/db/dbService.ts';
 import {
   getOrCreateUser,
@@ -49,10 +60,11 @@ import { requirePermission, requireSystemAdmin } from './src/middleware/requireP
 import { parseNFeXml } from './src/utils/nfeXmlParser.ts';
 
 async function startServer() {
-  // 1. Aplica migrations formais do Drizzle
-  await runDrizzleMigrations().catch((e) => console.warn('Drizzle migrations notice:', e.message));
-  // 2. Garante o seed de dados dos cargos e sincronização dos usuários existentes
+  // 1. Garante tabelas e colunas no banco de dados
   await ensureRolesTableAndSeed().catch((e) => console.warn('Roles seed notice:', e.message));
+  await ensureDbSchema().catch((e) => console.warn('DB schema check notice:', e.message));
+  // 2. Aplica migrations formais do Drizzle se aplicável
+  await runDrizzleMigrations().catch((e) => console.warn('Drizzle migrations notice:', e.message));
 
   const app = express();
   const PORT = 3000;
@@ -744,7 +756,13 @@ async function startServer() {
         }
       }
 
-      const saved = await processNFEntry(nfData);
+      const generatePayable = Boolean(req.body?.generatePayable);
+      const payableDueDate = req.body?.payableDueDate ? String(req.body.payableDueDate).trim() : undefined;
+
+      const saved = await processNFEntry(nfData, {
+        generatePayable,
+        payableDueDate,
+      });
       res.status(201).json(saved);
     } catch (error: any) {
       console.error('API Error POST /api/nf-entries:', error);
@@ -857,6 +875,186 @@ async function startServer() {
     } catch (error: any) {
       console.error('API Error DELETE /api/system/wipe:', error);
       res.status(500).json({ error: error.message || 'Erro ao zerar dados do sistema no banco PostgreSQL / Supabase' });
+    }
+  });
+
+  // ==========================================
+  // SUPPLIERS API (FORNECEDORES)
+  // ==========================================
+
+  // Leitura: Exige requireAuth
+  app.get('/api/suppliers', requireAuth, async (req, res) => {
+    try {
+      const all = await getAllSuppliers();
+      res.json(all);
+    } catch (error: any) {
+      console.error('API Error GET /api/suppliers:', error);
+      res.status(500).json({ error: error.message || 'Erro ao carregar fornecedores' });
+    }
+  });
+
+  // Criação: Exige requireAuth + canManagePayables
+  app.post('/api/suppliers', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
+    try {
+      const { name, cnpj, phone, email, address } = req.body || {};
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Nome do fornecedor é obrigatório.' });
+      }
+
+      const created = await createSupplier({
+        name: name.trim(),
+        cnpj: cnpj ? String(cnpj).trim() : null,
+        phone: phone ? String(phone).trim() : null,
+        email: email ? String(email).trim() : null,
+        address: address ? String(address).trim() : null,
+      });
+
+      res.status(201).json(created);
+    } catch (error: any) {
+      console.error('API Error POST /api/suppliers:', error);
+      res.status(error.statusCode || 400).json({ error: error.message || 'Erro ao cadastrar fornecedor' });
+    }
+  });
+
+  // Atualização: Exige requireAuth + canManagePayables
+  app.put('/api/suppliers/:id', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const updated = await updateSupplier(id, req.body || {});
+      res.json(updated);
+    } catch (error: any) {
+      console.error(`API Error PUT /api/suppliers/${req.params.id}:`, error);
+      res.status(error.statusCode || 400).json({ error: error.message || 'Erro ao atualizar fornecedor' });
+    }
+  });
+
+  // ==========================================
+  // PAYABLES API (CONTAS A PAGAR)
+  // ==========================================
+
+  // Leitura: Exige requireAuth
+  app.get('/api/payables', requireAuth, async (req, res) => {
+    try {
+      const { status, supplierId, startDate, endDate } = req.query as Record<string, string>;
+      const all = await getAllPayables({
+        status,
+        supplierId,
+        startDate,
+        endDate,
+      });
+      res.json(all);
+    } catch (error: any) {
+      console.error('API Error GET /api/payables:', error);
+      res.status(500).json({ error: error.message || 'Erro ao listar contas a pagar' });
+    }
+  });
+
+  // Detalhes por ID: Exige requireAuth
+  app.get('/api/payables/:id', requireAuth, async (req, res) => {
+    try {
+      const item = await getPayableById(req.params.id);
+      if (!item) {
+        return res.status(404).json({ error: 'Conta a pagar não encontrada.' });
+      }
+      res.json(item);
+    } catch (error: any) {
+      console.error(`API Error GET /api/payables/${req.params.id}:`, error);
+      res.status(500).json({ error: error.message || 'Erro ao buscar conta a pagar' });
+    }
+  });
+
+  // Lançamento Manual: Exige requireAuth + canManagePayables
+  app.post('/api/payables', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
+    try {
+      const {
+        supplierId,
+        description,
+        category,
+        documentNumber,
+        issueDate,
+        dueDate,
+        originalAmount,
+        notes,
+      } = req.body || {};
+
+      const operatorName = req.user?.name || 'Operador';
+
+      const created = await createPayable({
+        supplierId: supplierId ? String(supplierId).trim() : null,
+        description: description ? String(description).trim() : '',
+        category: category ? String(category).trim() : 'Outros',
+        documentNumber: documentNumber ? String(documentNumber).trim() : null,
+        issueDate: issueDate ? String(issueDate).trim() : null,
+        dueDate: dueDate ? String(dueDate).trim() : '',
+        originalAmount: Number(originalAmount),
+        notes: notes ? String(notes).trim() : null,
+        createdBy: operatorName,
+      });
+
+      res.status(201).json(created);
+    } catch (error: any) {
+      console.error('API Error POST /api/payables:', error);
+      res.status(error.statusCode || 400).json({ error: error.message || 'Erro ao lançar conta a pagar' });
+    }
+  });
+
+  // Edição: Exige requireAuth + canManagePayables
+  app.put('/api/payables/:id', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const updated = await updatePayable(id, req.body || {});
+      res.json(updated);
+    } catch (error: any) {
+      console.error(`API Error PUT /api/payables/${req.params.id}:`, error);
+      res.status(error.statusCode || 400).json({ error: error.message || 'Erro ao atualizar conta a pagar' });
+    }
+  });
+
+  // Exclusão: Exige requireAuth + canManagePayables
+  app.delete('/api/payables/:id', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const result = await deletePayable(id);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`API Error DELETE /api/payables/${req.params.id}:`, error);
+      res.status(error.statusCode || 400).json({ error: error.message || 'Erro ao excluir conta a pagar' });
+    }
+  });
+
+  // Baixa (Pagamento): Exige requireAuth + canManagePayables
+  app.post('/api/payables/:id/pay', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { paymentDate, amountPaid, discount, interest, paymentMethod, notes } = req.body || {};
+      const operatorName = req.user?.name || 'Operador';
+
+      const updated = await registerPayablePayment(id, {
+        paymentDate: paymentDate ? String(paymentDate).trim() : new Date().toISOString().slice(0, 10),
+        amountPaid: Number(amountPaid),
+        discount: Number(discount) || 0,
+        interest: Number(interest) || 0,
+        paymentMethod: paymentMethod ? String(paymentMethod).trim() : 'Pix',
+        notes: notes ? String(notes).trim() : null,
+        createdBy: operatorName,
+      });
+
+      res.status(201).json(updated);
+    } catch (error: any) {
+      console.error(`API Error POST /api/payables/${req.params.id}/pay:`, error);
+      res.status(error.statusCode || 400).json({ error: error.message || 'Erro ao registrar baixa de pagamento' });
+    }
+  });
+
+  // Estorno de Baixa: Exige requireAuth + canManagePayables
+  app.delete('/api/payables/:id/payments/:paymentId', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
+    try {
+      const { id, paymentId } = req.params;
+      const updated = await voidPayablePayment(id, paymentId);
+      res.json(updated);
+    } catch (error: any) {
+      console.error(`API Error DELETE /api/payables/${req.params.id}/payments/${req.params.paymentId}:`, error);
+      res.status(error.statusCode || 400).json({ error: error.message || 'Erro ao estornar baixa de pagamento' });
     }
   });
 

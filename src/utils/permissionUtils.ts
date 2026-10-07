@@ -15,6 +15,7 @@ export const DEFAULT_DENY_PERMISSIONS: UserPermissions = {
   canManageUsers: false,
   canManageBackup: false,
   canWipeSystem: false,
+  canManagePayables: false,
 };
 
 /**
@@ -32,6 +33,7 @@ export const SYSTEM_ADMIN_PERMISSIONS: UserPermissions = {
   canManageUsers: true,
   canManageBackup: true,
   canWipeSystem: true,
+  canManagePayables: true,
 };
 
 /**
@@ -113,6 +115,12 @@ export const PERMISSION_METAS: PermissionMeta[] = [
     description: 'Autorização suprema para apagar todos os produtos, movimentações e notas fiscais com PIN.',
     isDangerous: true,
   },
+  {
+    key: 'canManagePayables',
+    title: 'Contas a Pagar e Fornecedores',
+    category: 'Operação',
+    description: 'Lançar, editar, dar baixa e estornar contas a pagar e gerenciar fornecedores.',
+  },
 ];
 
 /**
@@ -142,6 +150,7 @@ export function getRolePermissions(roleOrPermissions?: any): UserPermissions {
       canManageUsers: Boolean(p.canManageUsers),
       canManageBackup: Boolean(p.canManageBackup),
       canWipeSystem: Boolean(p.canWipeSystem),
+      canManagePayables: Boolean(p.canManagePayables),
     };
   }
 

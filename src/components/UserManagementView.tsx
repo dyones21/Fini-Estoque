@@ -140,6 +140,7 @@ export const UserManagementView: React.FC = () => {
     canManageUsers: false,
     canManageBackup: false,
     canWipeSystem: false,
+    canManagePayables: false,
   });
 
   const handleSelectUser = (u: UserProfile) => {
@@ -227,6 +228,7 @@ export const UserManagementView: React.FC = () => {
           canManageUsers: Boolean(matchedRole.canManageUsers),
           canManageBackup: Boolean(matchedRole.canManageBackup),
           canWipeSystem: Boolean(matchedRole.canWipeSystem),
+          canManagePayables: Boolean(matchedRole.canManagePayables),
         },
       }));
     } else {
@@ -254,6 +256,7 @@ export const UserManagementView: React.FC = () => {
         canManageUsers: Boolean(matchedRole.canManageUsers),
         canManageBackup: Boolean(matchedRole.canManageBackup),
         canWipeSystem: Boolean(matchedRole.canWipeSystem),
+        canManagePayables: Boolean(matchedRole.canManagePayables),
       });
     } else {
       setNewUserRole(roleNameOrId as UserRole);
@@ -1017,6 +1020,29 @@ export const UserManagementView: React.FC = () => {
                 </div>
               </label>
 
+              {/* Permission Item: Manage Payables */}
+              <label
+                className={`p-3 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
+                  formData.permissions.canManagePayables
+                    ? 'bg-emerald-50/60 border-emerald-300 text-emerald-950'
+                    : 'bg-slate-50 border-slate-200 text-slate-400 opacity-75'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={!isEditing}
+                  checked={Boolean(formData.permissions.canManagePayables)}
+                  onChange={() => handleTogglePermission('canManagePayables')}
+                  className="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                />
+                <div>
+                  <p className="text-xs font-bold">Contas a Pagar e Fornecedores</p>
+                  <p className="text-[10px] text-slate-500">
+                    Lançar, editar, dar baixa e estornar contas a pagar e fornecedores.
+                  </p>
+                </div>
+              </label>
+
               {/* Permission Item: Wipe System */}
               <label
                 className={`p-3 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
@@ -1418,6 +1444,18 @@ export const UserManagementView: React.FC = () => {
                       className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
                     />
                     <span>Backup e Sincronização em Nuvem</span>
+                  </label>
+
+                  <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${
+                    newUserPermissions.canManagePayables ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(newUserPermissions.canManagePayables)}
+                      onChange={() => handleToggleModalPermission('canManagePayables')}
+                      className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                    />
+                    <span>Contas a Pagar e Fornecedores</span>
                   </label>
 
                   <label className={`p-2.5 rounded-xl border flex items-center gap-2.5 cursor-pointer text-xs font-bold transition-all ${

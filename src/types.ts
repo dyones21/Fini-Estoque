@@ -22,6 +22,7 @@ export interface Role {
   canManageBackup: boolean;
   canManageCompany?: boolean;
   canWipeSystem?: boolean;
+  canManagePayables?: boolean;
   createdAt?: string;
   userCount?: number;
 }
@@ -57,6 +58,7 @@ export interface UserPermissions {
   canManageBackup: boolean;  // Gerenciar Backup e Sincronização
   canManageCompany?: boolean; // Gerenciar Dados da Empresa
   canWipeSystem?: boolean;   // Permissão exclusiva para zerar/apagar todo o banco de dados
+  canManagePayables?: boolean; // Módulo de Contas a Pagar e Fornecedores
 }
 
 export interface UserProfile {
@@ -226,3 +228,62 @@ export interface Sale {
   sellerName: string;
   timestamp: string;
 }
+
+export type PayableStatus = 'aberto' | 'pago_parcial' | 'pago' | 'vencido' | 'cancelado';
+
+export interface Supplier {
+  id: string;
+  name: string;
+  cnpj?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PayablePayment {
+  id: string;
+  payableId: string;
+  paymentDate: string; // YYYY-MM-DD
+  amountPaid: number;
+  discount: number;
+  interest: number;
+  paymentMethod: string; // 'Pix' | 'Boleto' | 'Dinheiro' | 'Cartão' | 'Transferência' | 'Outro'
+  notes?: string | null;
+  createdBy?: string | null;
+  createdAt?: string;
+}
+
+export interface Payable {
+  id: string;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  supplierCnpj?: string | null;
+  description: string;
+  category: string;
+  documentNumber?: string | null;
+  issueDate?: string | null;
+  dueDate: string; // YYYY-MM-DD
+  originalAmount: number;
+  paidAmount: number;
+  remainingAmount?: number;
+  status: PayableStatus;
+  nfEntryId?: string | null;
+  notes?: string | null;
+  createdBy?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  payments?: PayablePayment[];
+}
+
+export const PAYABLE_CATEGORIES = [
+  'Mercadoria/Fornecedor',
+  'Aluguel',
+  'Energia',
+  'Água',
+  'Internet/Telefone',
+  'Impostos',
+  'Salários',
+  'Outros',
+];

@@ -97,6 +97,12 @@ const PERMISSION_METADATA: {
     category: 'gestao',
   },
   {
+    key: 'canManagePayables',
+    label: 'Contas a Pagar e Fornecedores',
+    description: 'Lançar, editar, dar baixa e estornar contas a pagar e gerenciar fornecedores.',
+    category: 'gestao',
+  },
+  {
     key: 'canWipeSystem',
     label: 'Zerar Todo o Sistema (Exclusivo)',
     description: 'Ação crítica de apagar produtos, movimentações, NF e dados de toda a empresa.',
@@ -131,6 +137,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
     canManageBackup: false,
     canManageCompany: false,
     canWipeSystem: false,
+    canManagePayables: false,
   });
 
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -170,6 +177,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
       canManageBackup: false,
       canManageCompany: false,
       canWipeSystem: false,
+      canManagePayables: false,
     });
     setErrorMessage('');
     setSuccessMessage('');
@@ -192,6 +200,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
       canManageBackup: Boolean(role.canManageBackup),
       canManageCompany: Boolean(role.canManageCompany),
       canWipeSystem: Boolean(role.canWipeSystem),
+      canManagePayables: Boolean(role.canManagePayables),
     });
     setErrorMessage('');
     setSuccessMessage('');
@@ -227,6 +236,7 @@ export const RoleManagementModal: React.FC<RoleManagementModalProps> = ({ isOpen
       canManageBackup: value,
       canManageCompany: value,
       canWipeSystem: value,
+      canManagePayables: value,
     });
   };
 

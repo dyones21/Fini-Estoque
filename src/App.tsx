@@ -20,6 +20,8 @@ import { ProductHistoryModal } from './components/ProductHistoryModal';
 import { ReportsView } from './components/ReportsView';
 import { NFEntriesView } from './components/NFEntriesView';
 import { PurchaseSuggestionView } from './components/PurchaseSuggestionView';
+import { PayablesView } from './components/PayablesView';
+import { SuppliersView } from './components/SuppliersView';
 import { Product, UserPermissions } from './types';
 import { StockFilterOptions } from './components/Dashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -33,6 +35,8 @@ const VALID_TABS: readonly ActiveTab[] = [
   'estoque_deposito',
   'entrada_nf',
   'notas_fiscais',
+  'contas_a_pagar',
+  'fornecedores',
   'sugestao_compra',
   'relatorios',
   'curva_abc_ranking',
@@ -60,6 +64,9 @@ function hasPermissionForTab(
       return checkPermission('canAddNFEntries');
     case 'notas_fiscais':
       return checkPermission('canAddNFEntries') || checkPermission('canDeleteNFEntries');
+    case 'contas_a_pagar':
+    case 'fornecedores':
+      return checkPermission('canManagePayables');
     case 'sugestao_compra':
       return checkPermission('canViewReports');
     case 'relatorios':
@@ -301,6 +308,22 @@ const MainApp: React.FC = () => {
                   <NFEntriesView onOpenNFModal={() => setIsNFModalOpen(true)} />
                 ) : (
                   <AccessDeniedMessage featureName="Notas Fiscais Lançadas" />
+                )
+              )}
+
+              {activeTab === 'contas_a_pagar' && (
+                checkPermission('canManagePayables') ? (
+                  <PayablesView onNavigateToSuppliers={() => setActiveTab('fornecedores')} />
+                ) : (
+                  <AccessDeniedMessage featureName="Contas a Pagar" />
+                )
+              )}
+
+              {activeTab === 'fornecedores' && (
+                checkPermission('canManagePayables') ? (
+                  <SuppliersView />
+                ) : (
+                  <AccessDeniedMessage featureName="Fornecedores" />
                 )
               )}
 

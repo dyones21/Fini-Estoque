@@ -55,6 +55,7 @@ export const roles = pgTable('roles', {
   canManageBackup: boolean('can_manage_backup').notNull().default(false),
   canManageCompany: boolean('can_manage_company').notNull().default(false),
   canWipeSystem: boolean('can_wipe_system').notNull().default(false),
+  canManagePayables: boolean('can_manage_payables').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -188,11 +189,89 @@ export const supplierProductLinks = pgTable(
   ]
 );
 
+// Suppliers Table (Fornecedores)
+export const suppliers = pgTable(
+  'suppliers',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    cnpj: text('cnpj'),
+    phone: text('phone'),
+    email: text('email'),
+    address: text('address'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('suppliers_cnpj_unique_idx')
+      .on(table.cnpj)
+      .where(sql`${table.cnpj} != '' AND ${table.cnpj} IS NOT NULL`),
+  ]
+);
+
+// Payables Table (Contas a Pagar)
+export const payables = pgTable('payables', {
+  id: text('id').primaryKey(),
+  supplierId: text('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
+  description: text('description').notNull(),
+  category: text('category').notNull(),
+  documentNumber: text('document_number'),
+  issueDate: text('issue_date'),
+  dueDate: text('due_date').notNull(),
+  originalAmount: doublePrecision('original_amount').notNull(),
+  paidAmount: doublePrecision('paid_amount').notNull().default(0),
+  status: text('status').notNull(), // 'aberto' | 'pago_parcial' | 'pago' | 'vencido' | 'cancelado'
+  nfEntryId: text('nf_entry_id').references(() => nfEntries.id, { onDelete: 'set null' }),
+  notes: text('notes'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Payable Payments Table (Baixas de Contas a Pagar)
+export const payablePayments = pgTable('payable_payments', {
+  id: text('id').primaryKey(),
+  payableId: text('payable_id')
+    .notNull()
+    .references(() => payables.id, { onDelete: 'cascade' }),
+  paymentDate: text('payment_date').notNull(),
+  amountPaid: doublePrecision('amount_paid').notNull(),
+  discount: doublePrecision('discount').notNull().default(0),
+  interest: doublePrecision('interest').notNull().default(0),
+  paymentMethod: text('payment_method').notNull(), // 'Pix' | 'Boleto' | 'Dinheiro' | 'Cartão' | 'Transferência' | 'Outro'
+  notes: text('notes'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Relations
 export const productsRelations = relations(products, ({ many }) => ({
   movements: many(stockMovements),
   sales: many(storeSales),
   supplierLinks: many(supplierProductLinks),
+}));
+
+export const suppliersRelations = relations(suppliers, ({ many }) => ({
+  payables: many(payables),
+}));
+
+export const payablesRelations = relations(payables, ({ one, many }) => ({
+  supplier: one(suppliers, {
+    fields: [payables.supplierId],
+    references: [suppliers.id],
+  }),
+  nfEntry: one(nfEntries, {
+    fields: [payables.nfEntryId],
+    references: [nfEntries.id],
+  }),
+  payments: many(payablePayments),
+}));
+
+export const payablePaymentsRelations = relations(payablePayments, ({ one }) => ({
+  payable: one(payables, {
+    fields: [payablePayments.payableId],
+    references: [payables.id],
+  }),
 }));
 
 export const supplierProductLinksRelations = relations(supplierProductLinks, ({ one }) => ({

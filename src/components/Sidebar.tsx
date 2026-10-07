@@ -22,6 +22,8 @@ import {
   Settings,
   Building2,
   Sparkles,
+  DollarSign,
+  Users,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { LocationType } from '../types';
@@ -33,6 +35,8 @@ export type ActiveTab =
   | 'estoque_deposito'
   | 'entrada_nf'
   | 'notas_fiscais'
+  | 'contas_a_pagar'
+  | 'fornecedores'
   | 'sugestao_compra'
   | 'relatorios'
   | 'curva_abc_ranking'
@@ -115,6 +119,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
             id: 'notas_fiscais',
             label: 'Notas Fiscais Lançadas',
             icon: Receipt,
+            badge: null,
+          },
+        ]
+      : []),
+    ...(checkPermission('canManagePayables')
+      ? [
+          {
+            id: 'contas_a_pagar',
+            label: 'Contas a Pagar',
+            icon: DollarSign,
+            badge: null,
+          },
+          {
+            id: 'fornecedores',
+            label: 'Fornecedores',
+            icon: Building2,
             badge: null,
           },
         ]

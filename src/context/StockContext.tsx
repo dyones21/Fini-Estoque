@@ -86,7 +86,10 @@ interface StockContextType {
   deleteProduct: (id: string) => Promise<void>;
 
   // Inventory Operations
-  addNFEntry: (nf: (Omit<NFEntry, 'id' | 'receiveDate'> & { id?: string; receiveDate?: string }) | NFEntry) => Promise<void>;
+  addNFEntry: (
+    nf: (Omit<NFEntry, 'id' | 'receiveDate'> & { id?: string; receiveDate?: string }) | NFEntry,
+    options?: { generatePayable?: boolean; payableDueDate?: string }
+  ) => Promise<void>;
   updateNFEntry?: (nf: NFEntry) => Promise<void>;
   deleteNFEntry: (id: string) => Promise<{ success: boolean; message: string }>;
   transferStock: (productId: string, quantity: number, notes?: string) => Promise<{ success: boolean; message: string }>;
@@ -1176,15 +1179,20 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   };
 
-  const addNFEntry = async (nfData: (Omit<NFEntry, 'id' | 'receiveDate'> & { id?: string; receiveDate?: string }) | NFEntry) => {
+  const addNFEntry = async (
+    nfData: (Omit<NFEntry, 'id' | 'receiveDate'> & { id?: string; receiveDate?: string }) | NFEntry,
+    options?: { generatePayable?: boolean; payableDueDate?: string }
+  ) => {
     const isEdit = Boolean(nfData.id && allNfEntries.some((e) => e.id === nfData.id));
     const targetId = nfData.id || `nf-${Date.now()}`;
     const targetDate = nfData.receiveDate || new Date().toISOString().slice(0, 10);
 
-    const entryToSave: NFEntry = {
+    const entryToSave: any = {
       ...nfData,
       id: targetId,
       receiveDate: targetDate,
+      generatePayable: options?.generatePayable,
+      payableDueDate: options?.payableDueDate,
     };
 
     // Salva estados anteriores para rollback em caso de falha

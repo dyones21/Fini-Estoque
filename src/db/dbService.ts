@@ -8,9 +8,23 @@ import {
   companyInfo,
   categories,
   supplierProductLinks,
+  suppliers,
+  payables,
+  payablePayments,
 } from './schema.ts';
-import { eq, asc, or } from 'drizzle-orm';
-import { Product, StockMovement, NFEntry, Sale, CompanyInfo, SupplierProductLink } from '../types.ts';
+import { eq, asc, desc, or, sql } from 'drizzle-orm';
+import {
+  Product,
+  StockMovement,
+  NFEntry,
+  Sale,
+  CompanyInfo,
+  SupplierProductLink,
+  Supplier,
+  Payable,
+  PayablePayment,
+  PayableStatus,
+} from '../types.ts';
 
 export const DEFAULT_CATEGORIES = [
   'Balas de Gelatina',
@@ -39,6 +53,54 @@ export async function ensureDbSchema(): Promise<void> {
           ON nf_entries (access_key) 
           WHERE access_key != '' AND access_key IS NOT NULL;
         ALTER TABLE company_info ADD COLUMN IF NOT EXISTS default_markup_percent DOUBLE PRECISION DEFAULT 85;
+
+        CREATE TABLE IF NOT EXISTS suppliers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          cnpj TEXT,
+          phone TEXT,
+          email TEXT,
+          address TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS suppliers_cnpj_unique_idx
+          ON suppliers (cnpj)
+          WHERE cnpj != '' AND cnpj IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS payables (
+          id TEXT PRIMARY KEY,
+          supplier_id TEXT REFERENCES suppliers(id) ON DELETE SET NULL,
+          description TEXT NOT NULL,
+          category TEXT NOT NULL,
+          document_number TEXT,
+          issue_date TEXT,
+          due_date TEXT NOT NULL,
+          original_amount DOUBLE PRECISION NOT NULL,
+          paid_amount DOUBLE PRECISION DEFAULT 0 NOT NULL,
+          status TEXT NOT NULL,
+          nf_entry_id TEXT REFERENCES nf_entries(id) ON DELETE SET NULL,
+          notes TEXT,
+          created_by TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS payable_payments (
+          id TEXT PRIMARY KEY,
+          payable_id TEXT NOT NULL REFERENCES payables(id) ON DELETE CASCADE,
+          payment_date TEXT NOT NULL,
+          amount_paid DOUBLE PRECISION NOT NULL,
+          discount DOUBLE PRECISION DEFAULT 0 NOT NULL,
+          interest DOUBLE PRECISION DEFAULT 0 NOT NULL,
+          payment_method TEXT NOT NULL,
+          notes TEXT,
+          created_by TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_manage_payables BOOLEAN DEFAULT FALSE NOT NULL;
       `);
     } catch (err: any) {
       console.warn('Auto-schema check notice:', err.message);
@@ -844,7 +906,13 @@ export async function getNFEntryByAccessKey(accessKey: string): Promise<NFEntry 
  * - Se uma redução for solicitada e o estoque disponível no depósito for inferior, a operação é rejeitada.
  * - Registra movimentações em stock_movements com vínculo nfEntryId e auditoria completa.
  */
-export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
+export async function processNFEntry(
+  nf: NFEntry,
+  options?: {
+    generatePayable?: boolean;
+    payableDueDate?: string;
+  }
+): Promise<NFEntry> {
   checkDbConnection();
 
   return await withRetry(async () => {
@@ -1059,6 +1127,79 @@ export async function processNFEntry(nf: NFEntry): Promise<NFEntry> {
                 },
               });
           }
+        }
+      }
+
+      // 9. Se solicitado, gera automaticamente a conta a pagar vinculada a esta NF na mesma transação
+      if (options?.generatePayable && Number(nf.totalValue) > 0) {
+        // Resolve ou cadastra fornecedor
+        const supplierObj = await findOrCreateSupplier(
+          tx,
+          nf.cnpjSupplier || '',
+          nf.supplier || 'Fornecedor NF'
+        );
+
+        // Define data de vencimento: fornecida ou data de emissão + 30 dias
+        let dueDateVal = options.payableDueDate?.trim();
+        if (!dueDateVal) {
+          const baseDate = nf.issueDate ? new Date(nf.issueDate) : new Date();
+          const targetDueDate = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+          dueDateVal = targetDueDate.toISOString().slice(0, 10);
+        }
+
+        const totalNFValue = Number(nf.totalValue);
+        const initialStatus = calculatePayableStatus(totalNFValue, 0, dueDateVal);
+
+        // Se já existir uma conta a pagar vinculada a esta NF (ex: edição de NF), atualiza seus dados básicos
+        const existingPayables = await tx
+          .select()
+          .from(payables)
+          .where(eq(payables.nfEntryId, nf.id))
+          .limit(1);
+
+        if (existingPayables && existingPayables.length > 0) {
+          const ep = existingPayables[0];
+          // Só altera originalAmount se não houver baixas nessa conta
+          const pPayments = await tx
+            .select()
+            .from(payablePayments)
+            .where(eq(payablePayments.payableId, ep.id));
+
+          if (!pPayments || pPayments.length === 0) {
+            await tx
+              .update(payables)
+              .set({
+                supplierId: supplierObj.id,
+                description: `Compra NF nº ${nf.numberNF} - ${supplierObj.name}`,
+                documentNumber: nf.numberNF,
+                issueDate: nf.issueDate || null,
+                dueDate: dueDateVal,
+                originalAmount: totalNFValue,
+                status: initialStatus,
+                updatedAt: new Date(),
+              })
+              .where(eq(payables.id, ep.id));
+          }
+        } else {
+          // Cria nova conta a pagar vinculada
+          const payableId = `pay_nf_${nf.id}_${Date.now()}`;
+          await tx.insert(payables).values({
+            id: payableId,
+            supplierId: supplierObj.id,
+            description: `Compra NF nº ${nf.numberNF} - ${supplierObj.name}`,
+            category: 'Mercadoria/Fornecedor',
+            documentNumber: nf.numberNF,
+            issueDate: nf.issueDate || new Date().toISOString().slice(0, 10),
+            dueDate: dueDateVal,
+            originalAmount: totalNFValue,
+            paidAmount: 0,
+            status: initialStatus,
+            nfEntryId: nf.id,
+            notes: `Gerado automaticamente a partir da importação da NF-e nº ${nf.numberNF}.`,
+            createdBy: nf.createdBy || 'Operador',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
         }
       }
 
@@ -1502,6 +1643,840 @@ export async function insertCategory(name: string): Promise<string> {
     }
 
     return trimmed;
+  });
+}
+
+// ==========================================
+// MÓDULO DE CONTAS A PAGAR & FORNECEDORES
+// ==========================================
+
+export const PAYABLE_CATEGORIES = [
+  'Mercadoria/Fornecedor',
+  'Aluguel',
+  'Energia',
+  'Água',
+  'Internet/Telefone',
+  'Impostos',
+  'Salários',
+  'Outros',
+];
+
+/**
+ * Calcula o status de uma conta a pagar de acordo com as regras de negócio:
+ * - 'pago' se paidAmount >= originalAmount (com tolerância para ponto flutuante)
+ * - 'pago_parcial' se paidAmount > 0 e menor que o total
+ * - 'vencido' se paidAmount === 0 e dueDate < hoje (data atual no fuso local)
+ * - 'aberto' caso contrário
+ * *Nota*: 'cancelado' só é definido manualmente, nunca calculado automaticamente.
+ */
+export function calculatePayableStatus(
+  originalAmount: number,
+  paidAmount: number,
+  dueDate: string,
+  currentStatus?: string
+): PayableStatus {
+  if (currentStatus === 'cancelado') {
+    return 'cancelado';
+  }
+
+  const roundedOriginal = Math.round(originalAmount * 100) / 100;
+  const roundedPaid = Math.round(paidAmount * 100) / 100;
+
+  if (roundedPaid >= roundedOriginal && roundedOriginal > 0) {
+    return 'pago';
+  }
+
+  if (roundedPaid > 0 && roundedPaid < roundedOriginal) {
+    return 'pago_parcial';
+  }
+
+  // Se nada foi pago, verifica se está vencido comparando com a data atual (YYYY-MM-DD)
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const cleanDueDate = (dueDate || '').slice(0, 10);
+
+  if (cleanDueDate && cleanDueDate < todayStr) {
+    return 'vencido';
+  }
+
+  return 'aberto';
+}
+
+/**
+ * Retorna todos os fornecedores cadastrados.
+ */
+export async function getAllSuppliers(): Promise<Supplier[]> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  return await withRetry(async () => {
+    const rows = await db
+      .select()
+      .from(suppliers)
+      .orderBy(asc(suppliers.name));
+
+    return rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      cnpj: r.cnpj || null,
+      phone: r.phone || null,
+      email: r.email || null,
+      address: r.address || null,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
+      updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : undefined,
+    }));
+  });
+}
+
+/**
+ * Cria um novo fornecedor. Retorna erro claro se o CNPJ já estiver cadastrado.
+ */
+export async function createSupplier(data: {
+  name: string;
+  cnpj?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+}): Promise<Supplier> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  const cleanName = (data.name || '').trim();
+  if (!cleanName) {
+    const err: any = new Error('O nome do fornecedor é obrigatório.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const cleanCnpj = data.cnpj ? data.cnpj.trim() : null;
+
+  return await withRetry(async () => {
+    if (cleanCnpj) {
+      const existing = await db
+        .select()
+        .from(suppliers)
+        .where(eq(suppliers.cnpj, cleanCnpj))
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        const err: any = new Error(
+          `Já existe um fornecedor cadastrado com o CNPJ "${cleanCnpj}" (${existing[0].name}).`
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const supplierId = `sup_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const [inserted] = await db
+      .insert(suppliers)
+      .values({
+        id: supplierId,
+        name: cleanName,
+        cnpj: cleanCnpj,
+        phone: data.phone?.trim() || null,
+        email: data.email?.trim() || null,
+        address: data.address?.trim() || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return {
+      id: inserted.id,
+      name: inserted.name,
+      cnpj: inserted.cnpj || null,
+      phone: inserted.phone || null,
+      email: inserted.email || null,
+      address: inserted.address || null,
+      createdAt: inserted.createdAt ? new Date(inserted.createdAt).toISOString() : undefined,
+      updatedAt: inserted.updatedAt ? new Date(inserted.updatedAt).toISOString() : undefined,
+    };
+  });
+}
+
+/**
+ * Atualiza um fornecedor existente. Bloqueia duplicação de CNPJ.
+ */
+export async function updateSupplier(
+  id: string,
+  data: Partial<{
+    name: string;
+    cnpj?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+  }>
+): Promise<Supplier> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  return await withRetry(async () => {
+    const [existing] = await db.select().from(suppliers).where(eq(suppliers.id, id));
+    if (!existing) {
+      const err: any = new Error('Fornecedor não encontrado.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const cleanCnpj = data.cnpj !== undefined ? (data.cnpj ? data.cnpj.trim() : null) : existing.cnpj;
+
+    if (cleanCnpj && cleanCnpj !== existing.cnpj) {
+      const conflict = await db
+        .select()
+        .from(suppliers)
+        .where(eq(suppliers.cnpj, cleanCnpj))
+        .limit(1);
+
+      if (conflict && conflict.length > 0 && conflict[0].id !== id) {
+        const err: any = new Error(
+          `Já existe outro fornecedor cadastrado com o CNPJ "${cleanCnpj}" (${conflict[0].name}).`
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const [updated] = await db
+      .update(suppliers)
+      .set({
+        name: data.name !== undefined ? data.name.trim() : existing.name,
+        cnpj: cleanCnpj,
+        phone: data.phone !== undefined ? (data.phone?.trim() || null) : existing.phone,
+        email: data.email !== undefined ? (data.email?.trim() || null) : existing.email,
+        address: data.address !== undefined ? (data.address?.trim() || null) : existing.address,
+        updatedAt: new Date(),
+      })
+      .where(eq(suppliers.id, id))
+      .returning();
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      cnpj: updated.cnpj || null,
+      phone: updated.phone || null,
+      email: updated.email || null,
+      address: updated.address || null,
+      createdAt: updated.createdAt ? new Date(updated.createdAt).toISOString() : undefined,
+      updatedAt: updated.updatedAt ? new Date(updated.updatedAt).toISOString() : undefined,
+    };
+  });
+}
+
+/**
+ * Busca ou cria um fornecedor automaticamente a partir de CNPJ e Nome (usado na importação de NF).
+ */
+export async function findOrCreateSupplier(
+  tx: any,
+  cnpj: string,
+  name: string
+): Promise<Supplier> {
+  const cleanCnpj = (cnpj || '').trim();
+  const cleanName = (name || '').trim() || 'Fornecedor sem nome';
+
+  if (cleanCnpj) {
+    const existing = await tx
+      .select()
+      .from(suppliers)
+      .where(eq(suppliers.cnpj, cleanCnpj))
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      const s = existing[0];
+      return {
+        id: s.id,
+        name: s.name,
+        cnpj: s.cnpj || null,
+        phone: s.phone || null,
+        email: s.email || null,
+        address: s.address || null,
+      };
+    }
+  }
+
+  // Tenta achar por nome exato se não tiver CNPJ
+  if (!cleanCnpj) {
+    const existingByName = await tx
+      .select()
+      .from(suppliers)
+      .where(eq(suppliers.name, cleanName))
+      .limit(1);
+
+    if (existingByName && existingByName.length > 0) {
+      const s = existingByName[0];
+      return {
+        id: s.id,
+        name: s.name,
+        cnpj: s.cnpj || null,
+        phone: s.phone || null,
+        email: s.email || null,
+        address: s.address || null,
+      };
+    }
+  }
+
+  const supplierId = `sup_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const [created] = await tx
+    .insert(suppliers)
+    .values({
+      id: supplierId,
+      name: cleanName,
+      cnpj: cleanCnpj || null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  return {
+    id: created.id,
+    name: created.name,
+    cnpj: created.cnpj || null,
+    phone: created.phone || null,
+    email: created.email || null,
+    address: created.address || null,
+  };
+}
+
+/**
+ * Busca todas as contas a pagar, incluindo fornecedor e baixas.
+ */
+export async function getAllPayables(filters?: {
+  status?: string;
+  supplierId?: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<Payable[]> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  return await withRetry(async () => {
+    const allPayables = await db.select().from(payables).orderBy(asc(payables.dueDate));
+    const allSuppliersList = await db.select().from(suppliers);
+    const allPayments = await db.select().from(payablePayments).orderBy(asc(payablePayments.paymentDate));
+
+    const supplierMap = new Map<string, any>();
+    for (const s of allSuppliersList) {
+      supplierMap.set(s.id, s);
+    }
+
+    const paymentsByPayable = new Map<string, PayablePayment[]>();
+    for (const p of allPayments) {
+      const list = paymentsByPayable.get(p.payableId) || [];
+      list.push({
+        id: p.id,
+        payableId: p.payableId,
+        paymentDate: p.paymentDate,
+        amountPaid: Number(p.amountPaid) || 0,
+        discount: Number(p.discount) || 0,
+        interest: Number(p.interest) || 0,
+        paymentMethod: p.paymentMethod,
+        notes: p.notes || null,
+        createdBy: p.createdBy || null,
+        createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : undefined,
+      });
+      paymentsByPayable.set(p.payableId, list);
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    const result: Payable[] = [];
+
+    for (const r of allPayables) {
+      const supplier = r.supplierId ? supplierMap.get(r.supplierId) : null;
+      const payments = paymentsByPayable.get(r.id) || [];
+
+      // Recalcula dinamicamente se estiver vencido hoje e não pago
+      const paid = Number(r.paidAmount) || 0;
+      const original = Number(r.originalAmount) || 0;
+      let calculatedStatus = (r.status as PayableStatus);
+
+      if (calculatedStatus !== 'cancelado') {
+        calculatedStatus = calculatePayableStatus(original, paid, r.dueDate, calculatedStatus);
+      }
+
+      const payableItem: Payable = {
+        id: r.id,
+        supplierId: r.supplierId || null,
+        supplierName: supplier?.name || null,
+        supplierCnpj: supplier?.cnpj || null,
+        description: r.description,
+        category: r.category,
+        documentNumber: r.documentNumber || null,
+        issueDate: r.issueDate || null,
+        dueDate: r.dueDate,
+        originalAmount: original,
+        paidAmount: paid,
+        remainingAmount: Math.max(0, Math.round((original - paid) * 100) / 100),
+        status: calculatedStatus,
+        nfEntryId: r.nfEntryId || null,
+        notes: r.notes || null,
+        createdBy: r.createdBy || null,
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
+        updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : undefined,
+        payments,
+      };
+
+      // Aplica filtros se solicitados
+      if (filters?.status && filters.status !== 'todos') {
+        if (payableItem.status !== filters.status) continue;
+      }
+
+      if (filters?.supplierId && filters.supplierId !== 'todos') {
+        if (payableItem.supplierId !== filters.supplierId) continue;
+      }
+
+      if (filters?.startDate) {
+        if (payableItem.dueDate < filters.startDate) continue;
+      }
+
+      if (filters?.endDate) {
+        if (payableItem.dueDate > filters.endDate) continue;
+      }
+
+      result.push(payableItem);
+    }
+
+    return result;
+  });
+}
+
+/**
+ * Busca uma conta a pagar por ID com seus pagamentos.
+ */
+export async function getPayableById(id: string): Promise<Payable | null> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  return await withRetry(async () => {
+    const rows = await db.select().from(payables).where(eq(payables.id, id)).limit(1);
+    if (!rows || rows.length === 0) return null;
+
+    const r = rows[0];
+    let supplier: any = null;
+    if (r.supplierId) {
+      const sRows = await db.select().from(suppliers).where(eq(suppliers.id, r.supplierId)).limit(1);
+      if (sRows && sRows.length > 0) supplier = sRows[0];
+    }
+
+    const paymentRows = await db
+      .select()
+      .from(payablePayments)
+      .where(eq(payablePayments.payableId, id))
+      .orderBy(asc(payablePayments.paymentDate));
+
+    const payments: PayablePayment[] = paymentRows.map((p) => ({
+      id: p.id,
+      payableId: p.payableId,
+      paymentDate: p.paymentDate,
+      amountPaid: Number(p.amountPaid) || 0,
+      discount: Number(p.discount) || 0,
+      interest: Number(p.interest) || 0,
+      paymentMethod: p.paymentMethod,
+      notes: p.notes || null,
+      createdBy: p.createdBy || null,
+      createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : undefined,
+    }));
+
+    const paid = Number(r.paidAmount) || 0;
+    const original = Number(r.originalAmount) || 0;
+    let status = r.status as PayableStatus;
+    if (status !== 'cancelado') {
+      status = calculatePayableStatus(original, paid, r.dueDate, status);
+    }
+
+    return {
+      id: r.id,
+      supplierId: r.supplierId || null,
+      supplierName: supplier?.name || null,
+      supplierCnpj: supplier?.cnpj || null,
+      description: r.description,
+      category: r.category,
+      documentNumber: r.documentNumber || null,
+      issueDate: r.issueDate || null,
+      dueDate: r.dueDate,
+      originalAmount: original,
+      paidAmount: paid,
+      remainingAmount: Math.max(0, Math.round((original - paid) * 100) / 100),
+      status,
+      nfEntryId: r.nfEntryId || null,
+      notes: r.notes || null,
+      createdBy: r.createdBy || null,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
+      updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : undefined,
+      payments,
+    };
+  });
+}
+
+/**
+ * Cria uma nova conta a pagar manualmente.
+ */
+export async function createPayable(data: {
+  supplierId?: string | null;
+  description: string;
+  category: string;
+  documentNumber?: string | null;
+  issueDate?: string | null;
+  dueDate: string;
+  originalAmount: number;
+  notes?: string | null;
+  createdBy?: string | null;
+  nfEntryId?: string | null;
+}): Promise<Payable> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  const cleanDescription = (data.description || '').trim();
+  if (!cleanDescription) {
+    const err: any = new Error('A descrição da conta a pagar é obrigatória.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const cleanDueDate = (data.dueDate || '').trim();
+  if (!cleanDueDate) {
+    const err: any = new Error('A data de vencimento é obrigatória.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const numAmount = Number(data.originalAmount);
+  if (!Number.isFinite(numAmount) || numAmount <= 0) {
+    const err: any = new Error('O valor original da conta deve ser um número maior que zero.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const category = (data.category || '').trim() || 'Outros';
+  const initialStatus = calculatePayableStatus(numAmount, 0, cleanDueDate);
+  const payableId = `pay_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+  return await withRetry(async () => {
+    const [inserted] = await db
+      .insert(payables)
+      .values({
+        id: payableId,
+        supplierId: data.supplierId?.trim() || null,
+        description: cleanDescription,
+        category,
+        documentNumber: data.documentNumber?.trim() || null,
+        issueDate: data.issueDate?.trim() || new Date().toISOString().slice(0, 10),
+        dueDate: cleanDueDate,
+        originalAmount: numAmount,
+        paidAmount: 0,
+        status: initialStatus,
+        nfEntryId: data.nfEntryId || null,
+        notes: data.notes?.trim() || null,
+        createdBy: data.createdBy || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return (await getPayableById(inserted.id))!;
+  });
+}
+
+/**
+ * Atualiza uma conta a pagar.
+ * BLOQUEIA a alteração de `originalAmount` caso já existam baixas registradas.
+ */
+export async function updatePayable(
+  id: string,
+  data: Partial<{
+    supplierId?: string | null;
+    description: string;
+    category: string;
+    documentNumber?: string | null;
+    issueDate?: string | null;
+    dueDate: string;
+    originalAmount: number;
+    status: PayableStatus;
+    notes?: string | null;
+  }>
+): Promise<Payable> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  return await withRetry(async () => {
+    const existing = await getPayableById(id);
+    if (!existing) {
+      const err: any = new Error('Conta a pagar não encontrada.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const hasPayments = existing.payments && existing.payments.length > 0;
+
+    // Se o cliente tentar alterar originalAmount e já existirem baixas:
+    if (
+      data.originalAmount !== undefined &&
+      Math.abs(Number(data.originalAmount) - existing.originalAmount) > 0.001
+    ) {
+      if (hasPayments) {
+        const err: any = new Error(
+          'Não é permitido alterar o valor original de uma conta que já possui baixas registradas. Estorne as baixas antes de alterar o valor.'
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+      if (Number(data.originalAmount) <= 0) {
+        const err: any = new Error('O valor original da conta deve ser maior que zero.');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const newOriginalAmount =
+      data.originalAmount !== undefined ? Number(data.originalAmount) : existing.originalAmount;
+    const newDueDate = data.dueDate !== undefined ? data.dueDate.trim() : existing.dueDate;
+
+    let targetStatus = existing.status;
+    if (data.status === 'cancelado') {
+      targetStatus = 'cancelado';
+    } else {
+      targetStatus = calculatePayableStatus(
+        newOriginalAmount,
+        existing.paidAmount,
+        newDueDate,
+        data.status !== undefined ? data.status : targetStatus
+      );
+    }
+
+    await db
+      .update(payables)
+      .set({
+        supplierId: data.supplierId !== undefined ? (data.supplierId ? data.supplierId.trim() : null) : existing.supplierId,
+        description: data.description !== undefined ? data.description.trim() : existing.description,
+        category: data.category !== undefined ? data.category.trim() : existing.category,
+        documentNumber: data.documentNumber !== undefined ? (data.documentNumber ? data.documentNumber.trim() : null) : existing.documentNumber,
+        issueDate: data.issueDate !== undefined ? (data.issueDate ? data.issueDate.trim() : null) : existing.issueDate,
+        dueDate: newDueDate,
+        originalAmount: newOriginalAmount,
+        status: targetStatus,
+        notes: data.notes !== undefined ? (data.notes ? data.notes.trim() : null) : existing.notes,
+        updatedAt: new Date(),
+      })
+      .where(eq(payables.id, id));
+
+    return (await getPayableById(id))!;
+  });
+}
+
+/**
+ * Exclui uma conta a pagar.
+ * SÓ PERMITE se NÃO houver baixas registradas; caso contrário oriente a cancelar.
+ */
+export async function deletePayable(id: string): Promise<{ success: boolean; message: string }> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  return await withRetry(async () => {
+    const existing = await getPayableById(id);
+    if (!existing) {
+      const err: any = new Error('Conta a pagar não encontrada.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (existing.payments && existing.payments.length > 0) {
+      const err: any = new Error(
+        'Esta conta não pode ser excluída pois já possui baixas registradas. Para invalidá-la, altere o status para "Cancelado".'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    await db.delete(payables).where(eq(payables.id, id));
+
+    return {
+      success: true,
+      message: 'Conta a pagar excluída com sucesso.',
+    };
+  });
+}
+
+/**
+ * Registra uma baixa (pagamento total ou parcial) em uma conta a pagar.
+ * Executa em transação atômica com SELECT FOR UPDATE para proteger concorrência.
+ */
+export async function registerPayablePayment(
+  payableId: string,
+  paymentData: {
+    paymentDate: string;
+    amountPaid: number;
+    discount?: number;
+    interest?: number;
+    paymentMethod: string;
+    notes?: string | null;
+    createdBy?: string | null;
+  }
+): Promise<Payable> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  const numAmountPaid = Number(paymentData.amountPaid);
+  if (!Number.isFinite(numAmountPaid) || numAmountPaid <= 0) {
+    const err: any = new Error('O valor pago deve ser um número maior que zero.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const numDiscount = Number(paymentData.discount) || 0;
+  const numInterest = Number(paymentData.interest) || 0;
+  const paymentMethod = (paymentData.paymentMethod || '').trim() || 'Pix';
+  const paymentDate = (paymentData.paymentDate || '').trim() || new Date().toISOString().slice(0, 10);
+
+  return await withRetry(async () => {
+    await db.transaction(async (tx: any) => {
+      // 1. Lock da conta a pagar
+      const rows = await tx
+        .select()
+        .from(payables)
+        .where(eq(payables.id, payableId))
+        .for('update');
+
+      if (!rows || rows.length === 0) {
+        const err: any = new Error('Conta a pagar não localizada no banco.');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const p = rows[0];
+
+      if (p.status === 'cancelado') {
+        const err: any = new Error('Não é possível dar baixa em uma conta que foi cancelada.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      // 2. Insere registro de baixa
+      const paymentId = `paym_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+      await tx.insert(payablePayments).values({
+        id: paymentId,
+        payableId,
+        paymentDate,
+        amountPaid: numAmountPaid,
+        discount: numDiscount,
+        interest: numInterest,
+        paymentMethod,
+        notes: paymentData.notes?.trim() || null,
+        createdBy: paymentData.createdBy || null,
+        createdAt: new Date(),
+      });
+
+      // 3. Recalcula a soma total de todas as baixas
+      const currentPayments = await tx
+        .select()
+        .from(payablePayments)
+        .where(eq(payablePayments.payableId, payableId));
+
+      const totalPaid = currentPayments.reduce(
+        (acc: number, item: any) => acc + (Number(item.amountPaid) || 0),
+        0
+      );
+
+      const roundedPaid = Math.round(totalPaid * 100) / 100;
+      const roundedOriginal = Math.round(Number(p.originalAmount) * 100) / 100;
+
+      // 4. Calcula novo status
+      const newStatus = calculatePayableStatus(roundedOriginal, roundedPaid, p.dueDate);
+
+      // 5. Atualiza a conta
+      await tx
+        .update(payables)
+        .set({
+          paidAmount: roundedPaid,
+          status: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(payables.id, payableId));
+
+      return { id: payableId };
+    });
+
+    // Busca dados completos formatados para retorno após commit da transação
+    const updatedAccount = await getPayableById(payableId);
+    return updatedAccount!;
+  });
+}
+
+/**
+ * Estorna uma baixa de conta a pagar.
+ * Remove a baixa e recalcula paidAmount e status dentro de transação com SELECT FOR UPDATE.
+ */
+export async function voidPayablePayment(
+  payableId: string,
+  paymentId: string
+): Promise<Payable> {
+  checkDbConnection();
+  await ensureDbSchema();
+
+  return await withRetry(async () => {
+    await db.transaction(async (tx: any) => {
+      // 1. Lock da conta a pagar
+      const rows = await tx
+        .select()
+        .from(payables)
+        .where(eq(payables.id, payableId))
+        .for('update');
+
+      if (!rows || rows.length === 0) {
+        const err: any = new Error('Conta a pagar não localizada no banco.');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const p = rows[0];
+
+      // 2. Remove o registro da baixa
+      const delResult = await tx
+        .delete(payablePayments)
+        .where(eq(payablePayments.id, paymentId))
+        .returning();
+
+      if (!delResult || delResult.length === 0) {
+        const err: any = new Error('Registro de pagamento/baixa não localizado.');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      // 3. Recalcula o saldo de pagamentos restantes
+      const currentPayments = await tx
+        .select()
+        .from(payablePayments)
+        .where(eq(payablePayments.payableId, payableId));
+
+      const totalPaid = currentPayments.reduce(
+        (acc: number, item: any) => acc + (Number(item.amountPaid) || 0),
+        0
+      );
+
+      const roundedPaid = Math.round(totalPaid * 100) / 100;
+      const roundedOriginal = Math.round(Number(p.originalAmount) * 100) / 100;
+
+      // 4. Recalcula status
+      let newStatus: PayableStatus = calculatePayableStatus(
+        roundedOriginal,
+        roundedPaid,
+        p.dueDate,
+        p.status
+      );
+
+      // 5. Atualiza a conta
+      await tx
+        .update(payables)
+        .set({
+          paidAmount: roundedPaid,
+          status: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(payables.id, payableId));
+
+      return { id: payableId };
+    });
+
+    const updatedAccount = await getPayableById(payableId);
+    return updatedAccount!;
   });
 }
 
