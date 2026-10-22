@@ -17,6 +17,7 @@ import {
 import { Supplier } from '../types';
 import { authFetch } from '../utils/apiAuth';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
+import { maskCnpj, maskPhone } from '../utils/maskUtils';
 
 interface SuppliersViewProps {
   onSelectSupplier?: (supplierId: string) => void;
@@ -75,8 +76,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = () => {
     setEditingSupplier(s);
     setFormData({
       name: s.name,
-      cnpj: s.cnpj || '',
-      phone: s.phone || '',
+      cnpj: maskCnpj(s.cnpj || ''),
+      phone: maskPhone(s.phone || ''),
       email: s.email || '',
       address: s.address || '',
     });
@@ -206,13 +207,13 @@ export const SuppliersView: React.FC<SuppliersViewProps> = () => {
                       </div>
                     </td>
                     <td className="py-3 px-4 text-slate-600 font-mono text-[11px]">
-                      {s.cnpj || '—'}
+                      {s.cnpj ? maskCnpj(s.cnpj) : '—'}
                     </td>
                     <td className="py-3 px-4 text-slate-600">
                       {s.phone ? (
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 font-mono text-[11px]">
                           <Phone className="w-3 h-3 text-slate-400" />
-                          <span>{s.phone}</span>
+                          <span>{maskPhone(s.phone)}</span>
                         </div>
                       ) : (
                         '—'
@@ -303,23 +304,27 @@ export const SuppliersView: React.FC<SuppliersViewProps> = () => {
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     placeholder="00.000.000/0000-00"
+                    maxLength={18}
                     value={formData.cnpj}
-                    onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
+                    onChange={(e) => setFormData({ ...formData, cnpj: maskCnpj(e.target.value) })}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono tracking-wide"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Telefone / WhatsApp
+                    Telefone / WhatsApp (com DDD)
                   </label>
                   <input
                     type="text"
+                    inputMode="tel"
                     placeholder="(00) 00000-0000"
+                    maxLength={15}
                     value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    onChange={(e) => setFormData({ ...formData, phone: maskPhone(e.target.value) })}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono tracking-wide"
                   />
                 </div>
               </div>

@@ -963,9 +963,44 @@ async function startServer() {
     }
   });
 
-  // Lançamento Manual: Exige requireAuth + canManagePayables
+  // Lançamento Manual (Individual ou em Lote de Parcelas/Recorrências): Exige requireAuth + canManagePayables
   app.post('/api/payables', requireAuth, requirePermission('canManagePayables'), async (req: AuthRequest, res) => {
     try {
+      const operatorName = req.user?.name || 'Operador';
+
+      if (Array.isArray(req.body)) {
+        if (req.body.length === 0) {
+          return res.status(400).json({ error: 'Nenhum lançamento fornecido no lote.' });
+        }
+        const createdList = [];
+        for (const item of req.body) {
+          const {
+            supplierId,
+            description,
+            category,
+            documentNumber,
+            issueDate,
+            dueDate,
+            originalAmount,
+            notes,
+          } = item || {};
+
+          const created = await createPayable({
+            supplierId: supplierId ? String(supplierId).trim() : null,
+            description: description ? String(description).trim() : '',
+            category: category ? String(category).trim() : 'Outros',
+            documentNumber: documentNumber ? String(documentNumber).trim() : null,
+            issueDate: issueDate ? String(issueDate).trim() : null,
+            dueDate: dueDate ? String(dueDate).trim() : '',
+            originalAmount: Number(originalAmount),
+            notes: notes ? String(notes).trim() : null,
+            createdBy: operatorName,
+          });
+          createdList.push(created);
+        }
+        return res.status(201).json(createdList);
+      }
+
       const {
         supplierId,
         description,
@@ -976,8 +1011,6 @@ async function startServer() {
         originalAmount,
         notes,
       } = req.body || {};
-
-      const operatorName = req.user?.name || 'Operador';
 
       const created = await createPayable({
         supplierId: supplierId ? String(supplierId).trim() : null,

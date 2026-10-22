@@ -285,16 +285,27 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         displayName: name,
       });
 
-      const role = ((syncedUser && syncedUser.role) || localUser?.role || (email.toLowerCase().includes('admin') || email.toLowerCase() === 'dyones21@gmail.com' ? 'super_admin' : 'gerente_loja')) as UserRole;
+      const emailLower = email.toLowerCase();
+      const isMasterAdmin =
+        emailLower === 'dyones21@gmail.com' ||
+        emailLower === 'fininovafriburgo@gmail.com' ||
+        emailLower.includes('admin') ||
+        (syncedUser && (syncedUser.role === 'ADMIN' || syncedUser.role === 'Administrador' || syncedUser.roleId === 'role_admin'));
+
+      const role = ((syncedUser && syncedUser.role) || localUser?.role || (isMasterAdmin ? 'ADMIN' : 'gerente_loja')) as UserRole;
+      const roleId = (syncedUser && syncedUser.roleId) || (isMasterAdmin ? 'role_admin' : localUser?.roleId);
+
       const updatedProfile: UserProfile = {
         id: (syncedUser && syncedUser.uid) || userPayload.uid,
         name: (syncedUser && syncedUser.name) || name,
         email: (syncedUser && syncedUser.email) || email,
         role: role,
-        pin: localUser?.pin || '',
+        roleId: roleId,
+        isSystemRole: Boolean(isMasterAdmin || syncedUser?.isSystemRole),
+        pin: localUser?.pin || (syncedUser && syncedUser.pin) || '',
         active: true,
-        avatarUrl: localUser?.avatarUrl || (role === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
-        permissions: getRolePermissions(role),
+        avatarUrl: localUser?.avatarUrl || (isMasterAdmin ? 'emoji:👑' : 'emoji:🍬'),
+        permissions: (syncedUser && syncedUser.permissions) || getRolePermissions(role),
       };
 
       setAllUsers((prev) => {
@@ -320,15 +331,19 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       fetchServerData();
     } catch (error) {
       console.warn('Aviso: Falha ao sincronizar usuário via API, usando perfil local:', error);
-      const fallbackRole: UserRole = (localUser?.role || (email.toLowerCase().includes('admin') || email.toLowerCase() === 'dyones21@gmail.com' ? 'super_admin' : 'gerente_loja')) as UserRole;
+      const emailLower = email.toLowerCase();
+      const isMasterAdmin = emailLower === 'dyones21@gmail.com' || emailLower === 'fininovafriburgo@gmail.com' || emailLower.includes('admin');
+      const fallbackRole: UserRole = (localUser?.role || (isMasterAdmin ? 'ADMIN' : 'gerente_loja')) as UserRole;
       const fallbackProfile: UserProfile = {
         id: userPayload.uid,
         name: name,
         email: email,
         role: fallbackRole,
+        roleId: isMasterAdmin ? 'role_admin' : localUser?.roleId,
+        isSystemRole: isMasterAdmin,
         pin: localUser?.pin || '',
         active: true,
-        avatarUrl: localUser?.avatarUrl || (fallbackRole === 'super_admin' ? 'emoji:👑' : 'emoji:🍬'),
+        avatarUrl: localUser?.avatarUrl || (isMasterAdmin ? 'emoji:👑' : 'emoji:🍬'),
         permissions: getRolePermissions(fallbackRole),
       };
       setCurrentUser(fallbackProfile);
@@ -540,13 +555,19 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const checkPermission = (permissionKey: keyof UserPermissions): boolean => {
     if (!currentUser) return false;
-    if (
-      currentUser.isSystemRole ||
-      currentUser.role === 'ADMIN' ||
-      currentUser.role === 'super_admin' ||
-      currentUser.role === 'admin' ||
-      (currentUser.email && currentUser.email.toLowerCase() === 'dyones21@gmail.com')
-    ) {
+    const roleLower = (currentUser.role || '').toLowerCase();
+    const emailLower = (currentUser.email || '').toLowerCase();
+    const isMasterAdmin =
+      Boolean(currentUser.isSystemRole) ||
+      roleLower === 'admin' ||
+      roleLower === 'administrador' ||
+      roleLower === 'super_admin' ||
+      currentUser.roleId === 'role_admin' ||
+      emailLower === 'dyones21@gmail.com' ||
+      emailLower === 'fininovafriburgo@gmail.com' ||
+      emailLower.includes('admin');
+
+    if (isMasterAdmin) {
       return true;
     }
     return Boolean(currentUser.permissions?.[permissionKey]);
@@ -816,7 +837,18 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (Array.isArray(dataUsers)) {
         const mappedUsers: UserProfile[] = dataUsers.map((u: any) => {
           const role = (u.role || 'Operador Depósito/Loja') as UserRole;
-          const isSys = Boolean(u.isSystemRole || role === 'super_admin' || role === 'ADMIN' || u.roleId === 'role_admin');
+          const roleLower = String(role).toLowerCase();
+          const emailLower = (u.email || '').toLowerCase();
+          const isSys = Boolean(
+            u.isSystemRole ||
+            roleLower === 'super_admin' ||
+            roleLower === 'admin' ||
+            roleLower === 'administrador' ||
+            u.roleId === 'role_admin' ||
+            emailLower === 'dyones21@gmail.com' ||
+            emailLower === 'fininovafriburgo@gmail.com' ||
+            emailLower.includes('admin')
+          );
           return {
             id: u.uid || `usr-${u.id}`,
             name: u.name || 'Usuário GummyStock',

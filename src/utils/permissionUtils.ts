@@ -156,8 +156,62 @@ export function getRolePermissions(roleOrPermissions?: any): UserPermissions {
 
   // Se for uma string de role legada
   const str = String(roleOrPermissions).trim().toLowerCase();
-  if (str === 'super_admin' || str === 'admin' || str === 'administrador') {
+  if (
+    str === 'super_admin' ||
+    str === 'admin' ||
+    str === 'administrador' ||
+    str === 'role_admin'
+  ) {
     return { ...SYSTEM_ADMIN_PERMISSIONS };
+  }
+
+  if (
+    str === 'gerente_loja' ||
+    str === 'role_gerente_loja' ||
+    str === 'gerente de loja'
+  ) {
+    return {
+      ...DEFAULT_DENY_PERMISSIONS,
+      canViewDashboard: true,
+      canViewStock: true,
+      canViewReports: true,
+      canManageProducts: true,
+      canAddNFEntries: true,
+      canTransferStock: true,
+      canRegisterMovements: true,
+      canManageBackup: true,
+      canManagePayables: true,
+    };
+  }
+
+  if (
+    str === 'caixa' ||
+    str === 'role_caixa' ||
+    str === 'caixa / vendas' ||
+    str === 'caixa/vendas'
+  ) {
+    return {
+      ...DEFAULT_DENY_PERMISSIONS,
+      canViewDashboard: true,
+      canViewStock: true,
+      canRegisterMovements: true,
+      canManagePayables: true,
+    };
+  }
+
+  if (
+    str === 'operador_deposito' ||
+    str === 'role_operador_deposito' ||
+    str === 'operador depósito/loja' ||
+    str === 'operador deposito/loja'
+  ) {
+    return {
+      ...DEFAULT_DENY_PERMISSIONS,
+      canViewStock: true,
+      canAddNFEntries: true,
+      canTransferStock: true,
+      canRegisterMovements: true,
+    };
   }
 
   // Qualquer outro cargo por string pura sem objeto de banco -> nega por padrão para segurança

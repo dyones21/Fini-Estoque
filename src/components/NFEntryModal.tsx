@@ -557,40 +557,95 @@ export const NFEntryModal: React.FC<NFEntryModalProps> = ({ isOpen, onClose }) =
     const finalNFItems: NFItem[] = [];
     let newProductsCreatedCount = 0;
 
+    // Cache local para consolidar produtos novos criados ou vinculados neste mesmo lote de importação
+    const batchProcessedProducts: Array<{
+      id: string;
+      ean: string;
+      name: string;
+      cProd?: string;
+    }> = [];
+
     for (const item of importedItems) {
       let finalProductId = item.matchedProductId;
       let finalProductName = item.description;
 
-      // If user chose "Cadastrar como Novo Produto", create it in database first!
-      if (item.linkType === 'new' || !finalProductId) {
-        const newPData = item.newProductData;
-        const newProdId = `prod-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const cleanEan = (item.codeEAN || '').trim();
+      const hasValidEan = cleanEan !== '' && cleanEan !== 'SEM GTIN' && cleanEan !== 'SEMGTIN';
+      const cleanDesc = (item.newProductData?.name || item.description || '').trim().toLowerCase();
+      const cleanCProd = (item.cProd || '').trim().toLowerCase();
 
-        const createdProd = await addProduct({
-          id: newProdId,
-          sku: newPData.sku || `SKU-${Date.now().toString().slice(-6)}`,
-          ean: item.codeEAN || '',
-          codeEAN: item.codeEAN || '',
-          name: newPData.name,
-          category: newPData.category,
-          unit: newPData.unit,
-          stockDeposito: 0, // Stock will be added by addNFEntry
-          stockLoja: 0,
-          minStockDeposito: Number(newPData.minStockDeposito) || 30,
-          minStockLoja: Number(newPData.minStockLoja) || 10,
-          costPrice: item.costPrice,
-          sellPrice: Number(newPData.sellPrice) || Math.round(item.costPrice * 1.8 * 100) / 100,
-          expirationDate: item.expirationDate,
-          batchNumber: item.batchNumber,
-        });
+      // 1. Verificar se outra linha deste mesmo lote de XML já cadastrou ou vinculou este mesmo produto
+      const foundInBatch = batchProcessedProducts.find(
+        (b) =>
+          (hasValidEan && b.ean === cleanEan) ||
+          (cleanDesc && b.name.toLowerCase() === cleanDesc) ||
+          (cleanCProd && b.cProd === cleanCProd)
+      );
 
-        finalProductId = createdProd?.id || newProdId;
-        finalProductName = newPData.name;
-        newProductsCreatedCount++;
+      if (foundInBatch) {
+        finalProductId = foundInBatch.id;
+        finalProductName = foundInBatch.name;
       } else {
-        const existing = products.find((p) => p.id === finalProductId);
-        if (existing) {
-          finalProductName = existing.name;
+        // 2. Verificar se o produto já existe previamente no catálogo por EAN válido ou nome idêntico
+        const existingInCatalog = products.find(
+          (p) =>
+            (hasValidEan && ((p.ean && p.ean === cleanEan) || ((p as any).codeEAN && (p as any).codeEAN === cleanEan))) ||
+            (cleanDesc && p.name.trim().toLowerCase() === cleanDesc)
+        );
+
+        if (existingInCatalog) {
+          finalProductId = existingInCatalog.id;
+          finalProductName = existingInCatalog.name;
+          batchProcessedProducts.push({
+            id: existingInCatalog.id,
+            ean: cleanEan,
+            name: existingInCatalog.name,
+            cProd: cleanCProd,
+          });
+        } else if (item.linkType === 'new' || !finalProductId) {
+          // 3. Cadastrar como novo produto caso realmente não exista no sistema
+          const newPData = item.newProductData;
+          const newProdId = `prod-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+          const createdProd = await addProduct({
+            id: newProdId,
+            sku: newPData.sku || `SKU-${Date.now().toString().slice(-6)}`,
+            ean: item.codeEAN || '',
+            codeEAN: item.codeEAN || '',
+            name: newPData.name,
+            category: newPData.category,
+            unit: newPData.unit,
+            stockDeposito: 0, // Stock will be added by addNFEntry
+            stockLoja: 0,
+            minStockDeposito: Number(newPData.minStockDeposito) || 30,
+            minStockLoja: Number(newPData.minStockLoja) || 10,
+            costPrice: item.costPrice,
+            sellPrice: Number(newPData.sellPrice) || Math.round(item.costPrice * 1.8 * 100) / 100,
+            expirationDate: item.expirationDate,
+            batchNumber: item.batchNumber,
+          });
+
+          finalProductId = createdProd?.id || newProdId;
+          finalProductName = createdProd?.name || newPData.name;
+          newProductsCreatedCount++;
+
+          batchProcessedProducts.push({
+            id: finalProductId,
+            ean: cleanEan,
+            name: finalProductName,
+            cProd: cleanCProd,
+          });
+        } else {
+          const existing = products.find((p) => p.id === finalProductId);
+          if (existing) {
+            finalProductName = existing.name;
+          }
+          batchProcessedProducts.push({
+            id: finalProductId,
+            ean: cleanEan,
+            name: finalProductName,
+            cProd: cleanCProd,
+          });
         }
       }
 

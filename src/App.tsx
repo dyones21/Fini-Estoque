@@ -138,13 +138,13 @@ const MainApp: React.FC = () => {
 
   // Valida permissão da aba atual quando a autenticação e perfil do usuário forem carregados
   useEffect(() => {
-    if (isAuthChecking) return;
+    if (isAuthChecking || !currentUser || (!currentUser.id && !currentUser.email)) return;
 
-    // Se o usuário não tiver permissão para a aba atual, cai de volta para o dashboard
+    // Se o usuário autenticado não tiver permissão para a aba atual, cai de volta para o dashboard
     if (activeTab !== 'dashboard' && !hasPermissionForTab(activeTab, checkPermission)) {
       setActiveTab('dashboard');
     }
-  }, [isAuthChecking, currentUser?.id, currentUser?.role, currentUser?.permissions, activeTab, checkPermission]);
+  }, [isAuthChecking, currentUser?.id, currentUser?.email, currentUser?.role, currentUser?.permissions, activeTab, checkPermission]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Stock table filter state for drill-down navigation from Dashboard

@@ -33,16 +33,19 @@ export function invalidateUserCache(uid?: string) {
  */
 export function getSuperAdminEmails(): string[] {
   const envEmails = process.env.SUPER_ADMIN_EMAILS;
+  const list = ['dyones21@gmail.com', 'fininovafriburgo@gmail.com'];
   if (!envEmails || !envEmails.trim()) {
-    return ['dyones21@gmail.com'];
+    return list;
   }
   const parsed = envEmails
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
 
-  if (!parsed.includes('dyones21@gmail.com')) {
-    parsed.push('dyones21@gmail.com');
+  for (const admin of list) {
+    if (!parsed.includes(admin)) {
+      parsed.push(admin);
+    }
   }
   return parsed;
 }
@@ -183,6 +186,7 @@ export async function getUserByUid(uid: string) {
         canManageUsers: Boolean(roleObj.canManageUsers),
         canManageBackup: Boolean(roleObj.canManageBackup),
         canWipeSystem: Boolean(roleObj.canWipeSystem),
+        canManagePayables: Boolean(roleObj.canManagePayables),
       };
     } else {
       // Se não encontrado na tabela de roles, NEGA todas as permissões por padrão
@@ -245,6 +249,7 @@ export async function getAllUsersFromDb() {
           canManageUsers: Boolean(matchedRole.canManageUsers),
           canManageBackup: Boolean(matchedRole.canManageBackup),
           canWipeSystem: Boolean(matchedRole.canWipeSystem),
+          canManagePayables: Boolean(matchedRole.canManagePayables),
         };
       } else {
         perms = { ...DEFAULT_DENY_PERMISSIONS };

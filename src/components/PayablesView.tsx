@@ -21,12 +21,19 @@ import {
   Tag,
   Receipt,
   FileText,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Repeat,
+  Layers,
+  CalendarDays,
 } from 'lucide-react';
 import { Payable, Supplier, PayablePayment, PayableStatus, PAYABLE_CATEGORIES } from '../types';
 import { authFetch } from '../utils/apiAuth';
 import { formatCurrency, parseNumber } from '../utils/inventoryUtils';
 import { exportToExcel } from '../utils/exportUtils';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
+import { maskCurrency, parseCurrencyToNumber, formatDisplayDate } from '../utils/maskUtils';
 
 interface PayablesViewProps {
   initialFilterStatus?: string;
@@ -58,6 +65,29 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
   const [endDate, setEndDate] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  // Table Sorting State (Padrão: Vencimento mais próximo primeiro)
+  type SortField =
+    | 'supplierOrDesc'
+    | 'document'
+    | 'dueDate'
+    | 'originalAmount'
+    | 'paidAmount'
+    | 'remaining'
+    | 'status';
+  type SortDirection = 'asc' | 'desc';
+
+  const [sortField, setSortField] = useState<SortField>('dueDate');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
   // Create / Edit Modal State
   const [isFormModalOpen, setIsFormModalOpen] = useState<boolean>(false);
   const [editingPayable, setEditingPayable] = useState<Payable | null>(null);
@@ -71,8 +101,172 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
     originalAmount: '',
     notes: '',
   });
+  // Lançamento Parcelado e Recorrente State
+  type EntryType = 'unico' | 'parcelado' | 'recorrente';
+  type IntervalType = 'semanal' | 'quinzenal' | 'mensal' | 'trimestral' | 'semestral' | 'anual';
+
+  const [entryType, setEntryType] = useState<EntryType>('unico');
+  const [installmentsCount, setInstallmentsCount] = useState<number>(2);
+  const [recurrenceCount, setRecurrenceCount] = useState<number>(12);
+  const [intervalType, setIntervalType] = useState<IntervalType>('mensal');
+
+  function intervalLabel(type: IntervalType): string {
+    switch (type) {
+      case 'semanal': return 'Semanal';
+      case 'quinzenal': return 'Quinzenal';
+      case 'mensal': return 'Mensal';
+      case 'trimestral': return 'Trimestral';
+      case 'semestral': return 'Semestral';
+      case 'anual': return 'Anual';
+      default: return type;
+    }
+  }
+
+  function computeIntervalDate(baseDateStr: string, index: number, interval: IntervalType): string {
+    if (index === 0) return baseDateStr;
+    const parts = baseDateStr.split('-');
+    if (parts.length !== 3) return baseDateStr;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+
+    if (interval === 'semanal') {
+      const d = new Date(year, month, day);
+      d.setDate(d.getDate() + index * 7);
+      const yStr = d.getFullYear();
+      const mStr = String(d.getMonth() + 1).padStart(2, '0');
+      const dStr = String(d.getDate()).padStart(2, '0');
+      return `${yStr}-${mStr}-${dStr}`;
+    }
+
+    if (interval === 'quinzenal') {
+      const d = new Date(year, month, day);
+      d.setDate(d.getDate() + index * 15);
+      const yStr = d.getFullYear();
+      const mStr = String(d.getMonth() + 1).padStart(2, '0');
+      const dStr = String(d.getDate()).padStart(2, '0');
+      return `${yStr}-${mStr}-${dStr}`;
+    }
+
+    let monthsMultiplier = 1;
+    if (interval === 'trimestral') monthsMultiplier = 3;
+    else if (interval === 'semestral') monthsMultiplier = 6;
+    else if (interval === 'anual') monthsMultiplier = 12;
+
+    const totalMonths = month + index * monthsMultiplier;
+    const targetYear = year + Math.floor(totalMonths / 12);
+    const targetMonth = ((totalMonths % 12) + 12) % 12;
+
+    const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+    const targetDay = Math.min(day, daysInTargetMonth);
+
+    const yStr = String(targetYear).padStart(4, '0');
+    const mStr = String(targetMonth + 1).padStart(2, '0');
+    const dStr = String(targetDay).padStart(2, '0');
+    return `${yStr}-${mStr}-${dStr}`;
+  }
+
+  // Helper de análise de lote e rastreamento de parcelas / recorrências
+  const parsePayableBatchInfo = (notes?: string | null) => {
+    if (!notes) {
+      return {
+        isBatch: false,
+        batchId: null,
+        seq: null,
+        total: null,
+        batchType: null as 'parcelado' | 'recorrente' | null,
+        displayTag: null as string | null,
+        cleanNotes: '',
+      };
+    }
+
+    const loteMatch = notes.match(/\[lote:([^\]]+)\]/i);
+    const seqMatch = notes.match(/\[(?:seq|parc):(\d+)\/(\d+)\]/i);
+    const tipoMatch = notes.match(/\[tipo:(parcelado|recorrente)\]/i);
+
+    const oldParcelaMatch = notes.match(/\[Parcela (\d+) de (\d+) \| ([^\]]+)\]/i);
+    const oldRecorrenteMatch = notes.match(/\[Recorrência (\d+) de (\d+) \| ([^\]]+)\]/i);
+
+    let batchId = loteMatch ? loteMatch[1].trim() : null;
+    let seq = seqMatch ? parseInt(seqMatch[1], 10) : null;
+    let total = seqMatch ? parseInt(seqMatch[2], 10) : null;
+    let batchType: 'parcelado' | 'recorrente' | null = tipoMatch
+      ? (tipoMatch[1].toLowerCase() as any)
+      : null;
+
+    if (!batchId && oldParcelaMatch) {
+      seq = parseInt(oldParcelaMatch[1], 10);
+      total = parseInt(oldParcelaMatch[2], 10);
+      batchType = 'parcelado';
+    } else if (!batchId && oldRecorrenteMatch) {
+      seq = parseInt(oldRecorrenteMatch[1], 10);
+      total = parseInt(oldRecorrenteMatch[2], 10);
+      batchType = 'recorrente';
+    }
+
+    const isBatch = Boolean(batchId || seq);
+    let displayTag: string | null = null;
+    if (seq && total) {
+      displayTag = batchType === 'recorrente' ? `Recorrente (${seq}/${total})` : `Parcela (${seq}/${total})`;
+    } else if (batchType === 'recorrente') {
+      displayTag = 'Recorrente';
+    } else if (isBatch) {
+      displayTag = 'Parcelado';
+    }
+
+    const cleanNotes = notes
+      .replace(/\[lote:[^\]]+\]/gi, '')
+      .replace(/\[(?:seq|parc):\d+\/\d+\]/gi, '')
+      .replace(/\[tipo:[^\]]+\]/gi, '')
+      .replace(/\[(Parcela|Recorrência) \d+ de \d+ \| [^\]]+\]/gi, '')
+      .trim();
+
+    return {
+      isBatch,
+      batchId,
+      seq,
+      total,
+      batchType,
+      displayTag,
+      cleanNotes,
+    };
+  };
+
+  const getRelatedPayablesInSeries = (p: Payable, allList: Payable[]) => {
+    const info = parsePayableBatchInfo(p.notes);
+    if (!info.isBatch) return [p];
+
+    if (info.batchId) {
+      const matched = allList.filter((item) => {
+        const itemInfo = parsePayableBatchInfo(item.notes);
+        return itemInfo.batchId === info.batchId;
+      });
+      if (matched.length > 0) return matched;
+    }
+
+    // Fallback: se não tiver batchId mas tiver indicação de série no nome ou notas
+    const baseDesc = p.description.replace(/\s*\(\d+\/\d+\)/, '').trim().toLowerCase();
+    const fallbackList = allList.filter((item) => {
+      const itemInfo = parsePayableBatchInfo(item.notes);
+      const itemBase = item.description.replace(/\s*\(\d+\/\d+\)/, '').trim().toLowerCase();
+      return (
+        item.supplierId === p.supplierId &&
+        item.category === p.category &&
+        itemBase === baseDesc &&
+        (itemInfo.isBatch || Boolean(item.description.match(/\(\d+\/\d+\)/)))
+      );
+    });
+
+    return fallbackList.length > 1 ? fallbackList : [p];
+  };
+
   const [formError, setFormError] = useState<string>('');
   const [isSavingForm, setIsSavingForm] = useState<boolean>(false);
+
+  // Estado para Edição de Séries Vinculadas
+  const [editingSeriesPayables, setEditingSeriesPayables] = useState<Payable[]>([]);
+  const [futurePendingInSeries, setFuturePendingInSeries] = useState<Payable[]>([]);
+  const [editScope, setEditScope] = useState<'single' | 'series_future'>('single');
 
   // Payment (Baixa) Modal State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
@@ -80,8 +274,8 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
   const [paymentData, setPaymentData] = useState({
     amountPaid: '',
     paymentDate: new Date().toISOString().slice(0, 10),
-    discount: '0,00',
-    interest: '0,00',
+    discount: 'R$ 0,00',
+    interest: 'R$ 0,00',
     paymentMethod: 'Pix',
     notes: '',
   });
@@ -92,17 +286,25 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState<boolean>(false);
   const [selectedPayable, setSelectedPayable] = useState<Payable | null>(null);
 
-  // In-app Delete / Cancel Account Confirmation Modal State
+  // In-app Delete / Cancel Account Confirmation Modal State (com suporte a ações em série)
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     payable: Payable | null;
     actionType: 'delete' | 'cancel';
+    scope: 'single' | 'series';
+    seriesCount: number;
+    pendingInSeries: Payable[];
+    paidInSeriesCount: number;
     error: string;
     isExecuting: boolean;
   }>({
     isOpen: false,
     payable: null,
     actionType: 'delete',
+    scope: 'single',
+    seriesCount: 0,
+    pendingInSeries: [],
+    paidInSeriesCount: 0,
     error: '',
     isExecuting: false,
   });
@@ -197,39 +399,167 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
     return { totalOpen, totalOverdue, totalNext7Days, totalPaid };
   }, [payables, todayStr, next7DaysStr]);
 
-  // Filtered & Sorted Payables (Nearest dueDate first)
+  // Filtered & Sorted Payables (Padrão: Vencimento mais próximo primeiro)
   const filteredPayables = useMemo(() => {
-    return payables
-      .filter((p) => {
-        // Status filter
-        if (statusFilter === 'proximos_7_dias') {
-          const remaining = Number(p.remainingAmount ?? (p.originalAmount - p.paidAmount)) || 0;
-          if (remaining <= 0 || p.dueDate < todayStr || p.dueDate > next7DaysStr || p.status === 'cancelado') return false;
-        } else if (statusFilter !== 'todos' && p.status !== statusFilter) {
-          return false;
+    const list = payables.filter((p) => {
+      // Status filter
+      if (statusFilter === 'proximos_7_dias') {
+        const remaining = Number(p.remainingAmount ?? (p.originalAmount - p.paidAmount)) || 0;
+        if (remaining <= 0 || p.dueDate < todayStr || p.dueDate > next7DaysStr || p.status === 'cancelado') return false;
+      } else if (statusFilter !== 'todos' && p.status !== statusFilter) {
+        return false;
+      }
+      // Supplier filter
+      if (supplierFilter !== 'todos' && p.supplierId !== supplierFilter) return false;
+      // Period filter
+      if (startDate && p.dueDate < startDate) return false;
+      if (endDate && p.dueDate > endDate) return false;
+      // Search filter
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const matchDesc = p.description.toLowerCase().includes(term);
+        const matchSup = (p.supplierName || '').toLowerCase().includes(term);
+        const matchDoc = (p.documentNumber || '').toLowerCase().includes(term);
+        const matchCat = p.category.toLowerCase().includes(term);
+        if (!matchDesc && !matchSup && !matchDoc && !matchCat) return false;
+      }
+      return true;
+    });
+
+    return list.sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case 'supplierOrDesc': {
+          const aKey = (a.supplierName || a.description || '').toLowerCase();
+          const bKey = (b.supplierName || b.description || '').toLowerCase();
+          comparison = aKey.localeCompare(bKey, 'pt-BR');
+          if (comparison === 0) {
+            comparison = a.description.toLowerCase().localeCompare(b.description.toLowerCase(), 'pt-BR');
+          }
+          break;
         }
-        // Supplier filter
-        if (supplierFilter !== 'todos' && p.supplierId !== supplierFilter) return false;
-        // Period filter
-        if (startDate && p.dueDate < startDate) return false;
-        if (endDate && p.dueDate > endDate) return false;
-        // Search filter
-        if (searchTerm.trim()) {
-          const term = searchTerm.toLowerCase();
-          const matchDesc = p.description.toLowerCase().includes(term);
-          const matchSup = (p.supplierName || '').toLowerCase().includes(term);
-          const matchDoc = (p.documentNumber || '').toLowerCase().includes(term);
-          const matchCat = p.category.toLowerCase().includes(term);
-          if (!matchDesc && !matchSup && !matchDoc && !matchCat) return false;
+        case 'document': {
+          const aDoc = (a.documentNumber || '').toLowerCase();
+          const bDoc = (b.documentNumber || '').toLowerCase();
+          comparison = aDoc.localeCompare(bDoc, 'pt-BR', { numeric: true });
+          break;
         }
-        return true;
-      })
-      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  }, [payables, statusFilter, supplierFilter, startDate, endDate, searchTerm]);
+        case 'dueDate': {
+          comparison = (a.dueDate || '').localeCompare(b.dueDate || '');
+          break;
+        }
+        case 'originalAmount': {
+          comparison = (Number(a.originalAmount) || 0) - (Number(b.originalAmount) || 0);
+          break;
+        }
+        case 'paidAmount': {
+          comparison = (Number(a.paidAmount) || 0) - (Number(b.paidAmount) || 0);
+          break;
+        }
+        case 'remaining': {
+          const aRem = a.remainingAmount ?? Math.max(0, a.originalAmount - a.paidAmount);
+          const bRem = b.remainingAmount ?? Math.max(0, b.originalAmount - b.paidAmount);
+          comparison = aRem - bRem;
+          break;
+        }
+        case 'status': {
+          comparison = (a.status || '').localeCompare(b.status || '');
+          break;
+        }
+        default:
+          comparison = 0;
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [
+    payables,
+    statusFilter,
+    supplierFilter,
+    startDate,
+    endDate,
+    searchTerm,
+    sortField,
+    sortDirection,
+    todayStr,
+    next7DaysStr,
+  ]);
+
+  // Prévia das parcelas ou recorrências geradas em tempo real
+  const generatedEntriesPreview = useMemo(() => {
+    if (editingPayable || entryType === 'unico') return [];
+    if (!formData.dueDate) return [];
+
+    const totalAmount = parseCurrencyToNumber(formData.originalAmount);
+    const count = entryType === 'parcelado' ? installmentsCount : recurrenceCount;
+    if (count < 2) return [];
+
+    const list: Array<{
+      index: number;
+      label: string;
+      description: string;
+      documentNumber: string;
+      dueDate: string;
+      amount: number;
+    }> = [];
+
+    if (entryType === 'parcelado') {
+      const totalCents = Math.round(totalAmount * 100);
+      const baseCents = Math.floor(totalCents / count);
+      const remainderCents = totalCents - baseCents * count;
+
+      for (let i = 0; i < count; i++) {
+        const itemCents = baseCents + (i === 0 ? remainderCents : 0);
+        const itemAmount = itemCents / 100;
+        const dueDate = computeIntervalDate(formData.dueDate, i, intervalType);
+        const descSuffix = ` (${i + 1}/${count})`;
+        const docSuffix = formData.documentNumber ? ` - ${i + 1}/${count}` : '';
+
+        list.push({
+          index: i + 1,
+          label: `Parcela ${i + 1} de ${count}`,
+          description: formData.description ? `${formData.description}${descSuffix}` : `Parcela ${i + 1}/${count}`,
+          documentNumber: formData.documentNumber ? `${formData.documentNumber}${docSuffix}` : '',
+          dueDate,
+          amount: itemAmount,
+        });
+      }
+    } else if (entryType === 'recorrente') {
+      for (let i = 0; i < count; i++) {
+        const dueDate = computeIntervalDate(formData.dueDate, i, intervalType);
+        const descSuffix = ` (${i + 1}/${count})`;
+        const docSuffix = formData.documentNumber ? ` - ${i + 1}/${count}` : '';
+
+        list.push({
+          index: i + 1,
+          label: `Ocorrência ${i + 1} de ${count}`,
+          description: formData.description ? `${formData.description}${descSuffix}` : `Recorrência ${i + 1}/${count}`,
+          documentNumber: formData.documentNumber ? `${formData.documentNumber}${docSuffix}` : '',
+          dueDate,
+          amount: totalAmount,
+        });
+      }
+    }
+
+    return list;
+  }, [
+    editingPayable,
+    entryType,
+    formData.dueDate,
+    formData.originalAmount,
+    formData.description,
+    formData.documentNumber,
+    installmentsCount,
+    recurrenceCount,
+    intervalType,
+  ]);
 
   // Open Create Modal
   const handleOpenCreate = () => {
     setEditingPayable(null);
+    setEntryType('unico');
+    setInstallmentsCount(2);
+    setRecurrenceCount(12);
+    setIntervalType('mensal');
     setFormData({
       supplierId: '',
       description: '',
@@ -247,6 +577,27 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
   // Open Edit Modal
   const handleOpenEdit = (p: Payable) => {
     setEditingPayable(p);
+    setEntryType('unico');
+
+    const related = getRelatedPayablesInSeries(p, payables);
+    const info = parsePayableBatchInfo(p.notes);
+
+    // Contas futuras pendentes desta série (vencimento >= atual e sem baixa registrada)
+    const futurePending = related
+      .filter((item) => {
+        const itemInfo = parsePayableBatchInfo(item.notes);
+        const isFutureOrCurrent =
+          info.seq && itemInfo.seq ? itemInfo.seq >= info.seq : item.dueDate >= p.dueDate;
+        const isPending =
+          item.paidAmount === 0 && item.status !== 'pago' && item.status !== 'pago_parcial';
+        return isFutureOrCurrent && isPending;
+      })
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+    setEditingSeriesPayables(related);
+    setFuturePendingInSeries(futurePending);
+    setEditScope('single');
+
     setFormData({
       supplierId: p.supplierId || '',
       description: p.description,
@@ -254,8 +605,8 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
       documentNumber: p.documentNumber || '',
       issueDate: p.issueDate || '',
       dueDate: p.dueDate,
-      originalAmount: String(p.originalAmount),
-      notes: p.notes || '',
+      originalAmount: maskCurrency(p.originalAmount),
+      notes: info.cleanNotes || p.notes || '',
     });
     setFormError('');
     setIsFormModalOpen(true);
@@ -276,7 +627,7 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
       return;
     }
 
-    const numAmount = parseNumber(formData.originalAmount, 0);
+    const numAmount = parseCurrencyToNumber(formData.originalAmount);
     if (numAmount <= 0) {
       setFormError('Valor original deve ser maior que zero.');
       return;
@@ -284,8 +635,133 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
 
     try {
       setIsSavingForm(true);
+
+      // Lançamento em Lote: Parcelado ou Recorrente (com batchId único para rastreamento)
+      if (!editingPayable && entryType !== 'unico') {
+        if (generatedEntriesPreview.length < 2) {
+          setFormError('Configure ao menos 2 parcelas ou recorrências.');
+          setIsSavingForm(false);
+          return;
+        }
+
+        const batchId = `lote_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const totalItems = generatedEntriesPreview.length;
+
+        const batchPayload = generatedEntriesPreview.map((item, idx) => {
+          const metaTag = `[lote:${batchId}] [seq:${idx + 1}/${totalItems}] [tipo:${entryType}] [${item.label} | ${intervalLabel(intervalType)}]`;
+          return {
+            supplierId: formData.supplierId ? formData.supplierId.trim() : null,
+            description: item.description,
+            category: formData.category,
+            documentNumber: item.documentNumber || null,
+            issueDate: formData.issueDate || null,
+            dueDate: item.dueDate,
+            originalAmount: item.amount,
+            notes: formData.notes
+              ? `${formData.notes.trim()} ${metaTag}`
+              : metaTag,
+          };
+        });
+
+        const res = await authFetch('/api/payables', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(batchPayload),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || 'Erro ao lançar parcelas.');
+        }
+
+        setIsFormModalOpen(false);
+        showToast(
+          entryType === 'parcelado'
+            ? `${batchPayload.length} parcelas lançadas com sucesso!`
+            : `${batchPayload.length} contas recorrentes lançadas com sucesso!`,
+          'success'
+        );
+        await fetchData();
+        return;
+      }
+
+      // Edição de Série: Alterar esta e todas as parcelas futuras pendentes
+      if (editingPayable && editScope === 'series_future' && futurePendingInSeries.length > 1) {
+        const currentBatchInfo = parsePayableBatchInfo(editingPayable.notes);
+        const currentBatchId = currentBatchInfo.batchId || `lote_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const currentMetaTag = `[lote:${currentBatchId}] [seq:${currentBatchInfo.seq || 1}/${currentBatchInfo.total || futurePendingInSeries.length}] [tipo:${currentBatchInfo.batchType || 'parcelado'}]`;
+
+        const updatedCurrentNotes = formData.notes
+          ? `${formData.notes.trim()} ${currentMetaTag}`
+          : currentMetaTag;
+
+        // 1. Atualiza a conta selecionada
+        const currentRes = await authFetch(`/api/payables/${editingPayable.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...formData,
+            originalAmount: numAmount,
+            notes: updatedCurrentNotes,
+          }),
+        });
+
+        if (!currentRes.ok) {
+          const errData = await currentRes.json();
+          throw new Error(errData?.error || 'Erro ao atualizar conta selecionada.');
+        }
+
+        // 2. Atualiza em cadeia as contas futuras pendentes da série
+        const baseDesc = formData.description.replace(/\s*\(\d+\/\d+\)$/, '').trim();
+        let updatedCount = 1;
+
+        for (const futureItem of futurePendingInSeries) {
+          if (futureItem.id === editingPayable.id) continue;
+
+          const fInfo = parsePayableBatchInfo(futureItem.notes);
+          const fMetaTag = `[lote:${currentBatchId}] [seq:${fInfo.seq || 'N'}/${fInfo.total || 'N'}] [tipo:${fInfo.batchType || currentBatchInfo.batchType || 'parcelado'}]`;
+          const fNotes = formData.notes
+            ? `${formData.notes.trim()} ${fMetaTag}`
+            : fMetaTag;
+
+          const fDesc = fInfo.seq && fInfo.total
+            ? `${baseDesc} (${fInfo.seq}/${fInfo.total})`
+            : (futureItem.description.match(/\(\d+\/\d+\)$/)
+                ? `${baseDesc} ${futureItem.description.match(/\(\d+\/\d+\)$/)![0]}`
+                : `${baseDesc} - ${formatDisplayDate(futureItem.dueDate)}`);
+
+          const fRes = await authFetch(`/api/payables/${futureItem.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              supplierId: formData.supplierId ? formData.supplierId.trim() : null,
+              description: fDesc,
+              category: formData.category,
+              originalAmount: numAmount,
+              notes: fNotes,
+            }),
+          });
+          if (fRes.ok) updatedCount++;
+        }
+
+        setIsFormModalOpen(false);
+        showToast(`${updatedCount} parcelas da série atualizadas com sucesso!`, 'success');
+        await fetchData();
+        return;
+      }
+
+      // Lançamento Único ou Edição de Parcela Individual
       const url = editingPayable ? `/api/payables/${editingPayable.id}` : '/api/payables';
       const method = editingPayable ? 'PUT' : 'POST';
+
+      let finalNotes = formData.notes;
+      if (editingPayable) {
+        const pInfo = parsePayableBatchInfo(editingPayable.notes);
+        if (pInfo.isBatch) {
+          const preservedMeta = `[lote:${pInfo.batchId || 'grp_' + editingPayable.id}] [seq:${pInfo.seq || 1}/${pInfo.total || 1}] [tipo:${pInfo.batchType || 'parcelado'}]`;
+          finalNotes = formData.notes ? `${formData.notes.trim()} ${preservedMeta}` : preservedMeta;
+        }
+      }
 
       const res = await authFetch(url, {
         method,
@@ -293,6 +769,7 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
         body: JSON.stringify({
           ...formData,
           originalAmount: numAmount,
+          notes: finalNotes,
         }),
       });
 
@@ -302,6 +779,7 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
       }
 
       setIsFormModalOpen(false);
+      showToast(editingPayable ? 'Conta atualizada com sucesso!' : 'Conta lançada com sucesso!', 'success');
       await fetchData();
     } catch (err: any) {
       setFormError(getFriendlyErrorMessage(err, 'Erro ao salvar conta a pagar.'));
@@ -311,46 +789,93 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
   };
 
   // Open In-App Confirmation Modal for Cancel / Delete Account
-  const handleOpenDeleteOrCancel = (p: Payable) => {
-    const hasPayments = p.payments && p.payments.length > 0;
+  const handleOpenDeleteOrCancel = (p: Payable, forceAction?: 'delete' | 'cancel') => {
+    const related = getRelatedPayablesInSeries(p, payables);
+    const paidInSeries = related.filter(
+      (item) => item.paidAmount > 0 || item.status === 'pago' || item.status === 'pago_parcial'
+    );
+    const pendingInSeries = related.filter(
+      (item) => item.paidAmount === 0 && item.status !== 'pago' && item.status !== 'pago_parcial'
+    );
+
     setConfirmModal({
       isOpen: true,
       payable: p,
-      actionType: hasPayments ? 'cancel' : 'delete',
+      actionType: forceAction || 'delete',
+      scope: 'single',
+      seriesCount: related.length,
+      pendingInSeries,
+      paidInSeriesCount: paidInSeries.length,
       error: '',
       isExecuting: false,
     });
   };
 
-  // Confirm and Execute Cancel / Delete Account
+  // Confirm and Execute Cancel / Delete Account (com suporte a escopo individual ou lote de série)
   const handleConfirmDeleteOrCancel = async () => {
-    const { payable, actionType } = confirmModal;
+    const { payable, actionType, scope, pendingInSeries, paidInSeriesCount } = confirmModal;
     if (!payable) return;
 
     try {
       setConfirmModal((prev) => ({ ...prev, isExecuting: true, error: '' }));
 
-      if (actionType === 'cancel') {
-        const res = await authFetch(`/api/payables/${payable.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'cancelado' }),
-        });
-        const errData = !res.ok ? await res.json() : null;
-        if (!res.ok) {
-          throw new Error(errData?.error || 'Erro ao cancelar conta a pagar.');
+      if (scope === 'series' && pendingInSeries.length > 1) {
+        let successCount = 0;
+        for (const target of pendingInSeries) {
+          if (actionType === 'cancel') {
+            const res = await authFetch(`/api/payables/${target.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'cancelado' }),
+            });
+            if (res.ok) successCount++;
+          } else {
+            const res = await authFetch(`/api/payables/${target.id}`, { method: 'DELETE' });
+            if (res.ok) successCount++;
+          }
         }
-        showToast('Conta a pagar cancelada com sucesso.', 'info');
+
+        const paidNotice = paidInSeriesCount > 0 ? ` (${paidInSeriesCount} paga(s) foram preservadas)` : '';
+        showToast(
+          actionType === 'delete'
+            ? `${successCount} parcelas da série excluídas com sucesso!${paidNotice}`
+            : `${successCount} parcelas da série canceladas com sucesso!${paidNotice}`,
+          'success'
+        );
       } else {
-        const res = await authFetch(`/api/payables/${payable.id}`, { method: 'DELETE' });
-        const errData = !res.ok ? await res.json() : null;
-        if (!res.ok) {
-          throw new Error(errData?.error || 'Erro ao excluir conta a pagar.');
+        if (actionType === 'cancel') {
+          const res = await authFetch(`/api/payables/${payable.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'cancelado' }),
+          });
+          const errData = !res.ok ? await res.json() : null;
+          if (!res.ok) {
+            throw new Error(errData?.error || 'Erro ao cancelar conta a pagar.');
+          }
+          showToast('Conta a pagar cancelada com sucesso.', 'info');
+        } else {
+          const res = await authFetch(`/api/payables/${payable.id}`, { method: 'DELETE' });
+          const errData = !res.ok ? await res.json() : null;
+          if (!res.ok) {
+            throw new Error(errData?.error || 'Erro ao excluir conta a pagar.');
+          }
+          showToast('Conta a pagar excluída permanentemente.', 'success');
         }
-        showToast('Conta a pagar excluída permanentemente.', 'success');
       }
 
-      setConfirmModal({ isOpen: false, payable: null, actionType: 'delete', error: '', isExecuting: false });
+      setConfirmModal({
+        isOpen: false,
+        payable: null,
+        actionType: 'delete',
+        scope: 'single',
+        seriesCount: 0,
+        pendingInSeries: [],
+        paidInSeriesCount: 0,
+        error: '',
+        isExecuting: false,
+      });
+
       if (selectedPayable?.id === payable.id) {
         setIsDetailsModalOpen(false);
         setSelectedPayable(null);
@@ -370,10 +895,10 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
     setTargetPayable(p);
     const remaining = p.remainingAmount ?? Math.max(0, p.originalAmount - p.paidAmount);
     setPaymentData({
-      amountPaid: String(remaining.toFixed(2)).replace('.', ','),
+      amountPaid: maskCurrency(remaining),
       paymentDate: new Date().toISOString().slice(0, 10),
-      discount: '0,00',
-      interest: '0,00',
+      discount: 'R$ 0,00',
+      interest: 'R$ 0,00',
       paymentMethod: 'Pix',
       notes: '',
     });
@@ -387,14 +912,14 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
     if (!targetPayable) return;
     setPaymentError('');
 
-    const numAmount = parseNumber(paymentData.amountPaid, 0);
+    const numAmount = parseCurrencyToNumber(paymentData.amountPaid);
     if (numAmount <= 0) {
       setPaymentError('O valor a pagar deve ser maior que zero.');
       return;
     }
 
-    const numDiscount = parseNumber(paymentData.discount, 0);
-    const numInterest = parseNumber(paymentData.interest, 0);
+    const numDiscount = parseCurrencyToNumber(paymentData.discount);
+    const numInterest = parseCurrencyToNumber(paymentData.interest);
 
     try {
       setIsSubmittingPayment(true);
@@ -741,16 +1266,129 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
       {/* Payables Table */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
+          {/* Table */}
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-black uppercase tracking-wider text-slate-600">
-                <th className="py-3.5 px-4">Fornecedor / Descrição</th>
-                <th className="py-3.5 px-3">Documento</th>
-                <th className="py-3.5 px-3 text-center">Vencimento</th>
-                <th className="py-3.5 px-3 text-right">Valor Original</th>
-                <th className="py-3.5 px-3 text-right">Valor Pago</th>
-                <th className="py-3.5 px-3 text-right font-black">Saldo</th>
-                <th className="py-3.5 px-3 text-center">Status</th>
+                <th
+                  onClick={() => handleSort('supplierOrDesc')}
+                  className="py-3.5 px-4 select-none cursor-pointer group hover:bg-slate-100 transition-colors text-left"
+                  title="Ordenar por Fornecedor / Descrição"
+                >
+                  <div className="inline-flex items-center gap-1.5">
+                    <span className={sortField === 'supplierOrDesc' ? 'text-sky-700 font-black' : 'group-hover:text-slate-900'}>
+                      Fornecedor / Descrição
+                    </span>
+                    {sortField === 'supplierOrDesc' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-600" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                    )}
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort('document')}
+                  className="py-3.5 px-3 select-none cursor-pointer group hover:bg-slate-100 transition-colors text-left"
+                  title="Ordenar por Documento"
+                >
+                  <div className="inline-flex items-center gap-1.5">
+                    <span className={sortField === 'document' ? 'text-sky-700 font-black' : 'group-hover:text-slate-900'}>
+                      Documento
+                    </span>
+                    {sortField === 'document' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-600" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                    )}
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort('dueDate')}
+                  className="py-3.5 px-3 select-none cursor-pointer group hover:bg-slate-100 transition-colors text-center"
+                  title="Ordenar por Vencimento"
+                >
+                  <div className="inline-flex items-center gap-1.5 justify-center">
+                    <span className={sortField === 'dueDate' ? 'text-sky-700 font-black' : 'group-hover:text-slate-900'}>
+                      Vencimento
+                    </span>
+                    {sortField === 'dueDate' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-600" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                    )}
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort('originalAmount')}
+                  className="py-3.5 px-3 select-none cursor-pointer group hover:bg-slate-100 transition-colors text-right"
+                  title="Ordenar por Valor Original"
+                >
+                  <div className="inline-flex items-center gap-1.5 justify-end">
+                    <span className={sortField === 'originalAmount' ? 'text-sky-700 font-black' : 'group-hover:text-slate-900'}>
+                      Valor Original
+                    </span>
+                    {sortField === 'originalAmount' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-600" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                    )}
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort('paidAmount')}
+                  className="py-3.5 px-3 select-none cursor-pointer group hover:bg-slate-100 transition-colors text-right"
+                  title="Ordenar por Valor Pago"
+                >
+                  <div className="inline-flex items-center gap-1.5 justify-end">
+                    <span className={sortField === 'paidAmount' ? 'text-sky-700 font-black' : 'group-hover:text-slate-900'}>
+                      Valor Pago
+                    </span>
+                    {sortField === 'paidAmount' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-600" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                    )}
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort('remaining')}
+                  className="py-3.5 px-3 select-none cursor-pointer group hover:bg-slate-100 transition-colors text-right"
+                  title="Ordenar por Saldo"
+                >
+                  <div className="inline-flex items-center gap-1.5 justify-end">
+                    <span className={sortField === 'remaining' ? 'text-sky-700 font-black' : 'group-hover:text-slate-900'}>
+                      Saldo
+                    </span>
+                    {sortField === 'remaining' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-600" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                    )}
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort('status')}
+                  className="py-3.5 px-3 select-none cursor-pointer group hover:bg-slate-100 transition-colors text-center"
+                  title="Ordenar por Status"
+                >
+                  <div className="inline-flex items-center gap-1.5 justify-center">
+                    <span className={sortField === 'status' ? 'text-sky-700 font-black' : 'group-hover:text-slate-900'}>
+                      Status
+                    </span>
+                    {sortField === 'status' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-sky-600" /> : <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                    )}
+                  </div>
+                </th>
+
                 <th className="py-3.5 px-4 text-center">Ações</th>
               </tr>
             </thead>
@@ -785,13 +1423,28 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                       }}
                     >
                       <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                           <span>{p.description}</span>
                           {p.nfEntryId && (
                             <span className="text-[10px] bg-sky-100 text-sky-800 font-extrabold px-1.5 py-0.2 rounded">
                               NF-e
                             </span>
                           )}
+                          {(() => {
+                            const bInfo = parsePayableBatchInfo(p.notes);
+                            if (!bInfo.isBatch && !p.description.match(/\(\d+\/\d+\)/)) return null;
+                            const tagText = bInfo.displayTag || (p.description.match(/\((\d+\/\d+)\)/)?.[1] ? `Parcela ${p.description.match(/\((\d+\/\d+)\)/)![1]}` : 'Série');
+                            const isRec = bInfo.batchType === 'recorrente' || tagText.toLowerCase().includes('recorr');
+                            return (
+                              <span
+                                className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200/70 font-bold px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 shadow-2xs"
+                                title={isRec ? 'Lançamento recorrente vinculado' : 'Lançamento parcelado vinculado'}
+                              >
+                                {isRec ? <Repeat className="w-2.5 h-2.5 text-indigo-500" /> : <Layers className="w-2.5 h-2.5 text-indigo-500" />}
+                                {tagText}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
                           <span className="font-semibold text-slate-700">
@@ -808,13 +1461,13 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
 
                       <td className="py-3 px-3 text-center">
                         <span
-                          className={`font-bold ${
+                          className={`font-bold font-mono text-[11px] ${
                             p.dueDate < todayStr && !isPaid && !isCanceled
                               ? 'text-rose-600'
                               : 'text-slate-700'
                           }`}
                         >
-                          {p.dueDate}
+                          {formatDisplayDate(p.dueDate)}
                         </span>
                       </td>
 
@@ -880,7 +1533,7 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
       {/* MODAL 1: Create / Edit Account */}
       {isFormModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-200">
             <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-sky-500/20 border border-sky-400/30 rounded-xl text-sky-300">
@@ -888,10 +1541,20 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-black">
-                    {editingPayable ? 'Editar Conta a Pagar' : 'Nova Conta a Pagar'}
+                    {editingPayable
+                      ? 'Editar Conta a Pagar'
+                      : entryType === 'parcelado'
+                      ? 'Nova Conta a Pagar (Parcelada)'
+                      : entryType === 'recorrente'
+                      ? 'Nova Conta a Pagar (Recorrente)'
+                      : 'Nova Conta a Pagar'}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Lançamento de compromisso financeiro com fornecedor
+                    {entryType === 'parcelado'
+                      ? 'Lançamento com divisão automática do valor em parcelas'
+                      : entryType === 'recorrente'
+                      ? 'Lançamento repetido por ciclos periódicos'
+                      : 'Lançamento de compromisso financeiro com fornecedor'}
                   </p>
                 </div>
               </div>
@@ -903,11 +1566,173 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveForm} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleSaveForm} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
               {formError && (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{formError}</span>
+                </div>
+              )}
+
+              {/* Seletor de Tipo de Lançamento: Único, Parcelado ou Recorrente */}
+              {!editingPayable && (
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2.5">
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600">
+                    Tipo de Lançamento
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEntryType('unico')}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
+                        entryType === 'unico'
+                          ? 'bg-sky-600 text-white shadow-xs'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      <DollarSign className="w-3.5 h-3.5" />
+                      <span>Único</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEntryType('parcelado')}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
+                        entryType === 'parcelado'
+                          ? 'bg-sky-600 text-white shadow-xs'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Parcelado</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEntryType('recorrente')}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
+                        entryType === 'recorrente'
+                          ? 'bg-sky-600 text-white shadow-xs'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      <Repeat className="w-3.5 h-3.5" />
+                      <span>Recorrente</span>
+                    </button>
+                  </div>
+
+                  {/* Configurações do Parcelamento ou Recorrência */}
+                  {entryType !== 'unico' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2.5 border-t border-slate-200 animate-in fade-in duration-150">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          {entryType === 'parcelado' ? 'Qtd. de Parcelas *' : 'Qtd. de Ocorrências *'}
+                        </label>
+                        <input
+                          type="number"
+                          min={2}
+                          max={entryType === 'parcelado' ? 60 : 48}
+                          value={entryType === 'parcelado' ? installmentsCount : recurrenceCount}
+                          onChange={(e) => {
+                            const val = Math.max(2, Math.min(60, parseInt(e.target.value, 10) || 2));
+                            if (entryType === 'parcelado') setInstallmentsCount(val);
+                            else setRecurrenceCount(val);
+                          }}
+                          className="w-full text-xs p-2 rounded-xl border border-slate-200 font-bold text-slate-800 bg-white focus:ring-2 focus:ring-sky-500/20"
+                        />
+                        <span className="text-[10px] text-slate-400 mt-0.5 block">
+                          {entryType === 'parcelado'
+                            ? 'Mínimo 2 e máximo 60 parcelas'
+                            : 'Mínimo 2 e máximo 48 ciclos'}
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Intervalo de Vencimento *
+                        </label>
+                        <select
+                          value={intervalType}
+                          onChange={(e) => setIntervalType(e.target.value as IntervalType)}
+                          className="w-full text-xs p-2 rounded-xl border border-slate-200 font-bold text-slate-800 bg-white focus:ring-2 focus:ring-sky-500/20"
+                        >
+                          <option value="semanal">Semanal (a cada 7 dias)</option>
+                          <option value="quinzenal">Quinzenal (a cada 15 dias)</option>
+                          <option value="mensal">Mensal (a cada 1 mês - padrão)</option>
+                          <option value="trimestral">Trimestral (a cada 3 meses)</option>
+                          <option value="semestral">Semestral (a cada 6 meses)</option>
+                          <option value="anual">Anual (a cada 1 ano)</option>
+                        </select>
+                        <span className="text-[10px] text-slate-400 mt-0.5 block">
+                          Frequência entre cada vencimento
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Opções de Escopo para Edição de Séries (Parceladas ou Recorrentes) */}
+              {editingPayable && editingSeriesPayables.length > 1 && (
+                <div className="p-3.5 bg-indigo-50/80 border border-indigo-200/90 rounded-2xl space-y-2.5">
+                  <div className="flex items-center gap-2 text-indigo-950 font-bold text-xs">
+                    <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>Lançamento em Série Vinculado ({editingSeriesPayables.length} contas no lote)</span>
+                  </div>
+                  <p className="text-[11px] text-indigo-800 leading-relaxed">
+                    Esta conta faz parte de um lançamento em grupo. Escolha como deseja aplicar as alterações:
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                    <div
+                      onClick={() => setEditScope('single')}
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                        editScope === 'single'
+                          ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20 text-indigo-950 font-bold shadow-xs'
+                          : 'bg-white/60 border-indigo-200/60 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        id="editScopeSingle"
+                        name="editScope"
+                        checked={editScope === 'single'}
+                        onChange={() => setEditScope('single')}
+                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <label htmlFor="editScopeSingle" className="cursor-pointer">
+                        <span className="block font-bold">Apenas esta parcela</span>
+                        <span className="text-[10px] text-slate-500 font-normal">
+                          Altera apenas esta conta individual (vencimento {formatDisplayDate(editingPayable.dueDate)})
+                        </span>
+                      </label>
+                    </div>
+
+                    <div
+                      onClick={() => setEditScope('series_future')}
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                        editScope === 'series_future'
+                          ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20 text-indigo-950 font-bold shadow-xs'
+                          : 'bg-white/60 border-indigo-200/60 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        id="editScopeFuture"
+                        name="editScope"
+                        checked={editScope === 'series_future'}
+                        onChange={() => setEditScope('series_future')}
+                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <label htmlFor="editScopeFuture" className="cursor-pointer">
+                        <span className="block font-bold">
+                          Esta e todas adiante ({futurePendingInSeries.length} pendentes)
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-normal">
+                          Atualiza fornecedor, categoria, valor e descrição nas contas futuras pendentes
+                        </span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -978,20 +1803,35 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Valor Original (R$) *
+                    {entryType === 'parcelado'
+                      ? 'Valor Total da Compra (R$) *'
+                      : entryType === 'recorrente'
+                      ? 'Valor por Ciclo (R$) *'
+                      : 'Valor Original (R$) *'}
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     required
                     disabled={Boolean(editingPayable?.payments && editingPayable.payments.length > 0)}
-                    placeholder="0,00"
+                    placeholder="R$ 0,00"
                     value={formData.originalAmount}
-                    onChange={(e) => setFormData({ ...formData, originalAmount: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-black text-slate-900 focus:ring-2 focus:ring-sky-500/20 disabled:bg-slate-100 disabled:text-slate-400"
+                    onChange={(e) => setFormData({ ...formData, originalAmount: maskCurrency(e.target.value) })}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-black text-slate-900 focus:ring-2 focus:ring-sky-500/20 disabled:bg-slate-100 disabled:text-slate-400 font-mono"
                   />
                   {editingPayable?.payments && editingPayable.payments.length > 0 && (
                     <span className="text-[10px] text-amber-600 font-bold">
                       Bloqueado (já possui baixas)
+                    </span>
+                  )}
+                  {!editingPayable && entryType === 'parcelado' && installmentsCount > 1 && (
+                    <span className="text-[10px] text-sky-700 font-semibold block mt-0.5">
+                      Dividido em {installmentsCount} parcelas
+                    </span>
+                  )}
+                  {!editingPayable && entryType === 'recorrente' && recurrenceCount > 1 && (
+                    <span className="text-[10px] text-emerald-700 font-semibold block mt-0.5">
+                      {recurrenceCount} ciclos de {intervalLabel(intervalType).toLowerCase()}
                     </span>
                   )}
                 </div>
@@ -1010,7 +1850,11 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Data Vencimento *
+                    {entryType === 'parcelado'
+                      ? 'Venc. 1ª Parcela *'
+                      : entryType === 'recorrente'
+                      ? 'Venc. 1º Ciclo *'
+                      : 'Data Vencimento *'}
                   </label>
                   <input
                     type="date"
@@ -1035,6 +1879,45 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                 />
               </div>
 
+              {/* Pré-visualização das Parcelas ou Recorrências */}
+              {!editingPayable && entryType !== 'unico' && generatedEntriesPreview.length > 0 && (
+                <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-3.5 space-y-2 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between text-xs font-black text-sky-950">
+                    <div className="flex items-center gap-1.5">
+                      <CalendarDays className="w-4 h-4 text-sky-600 shrink-0" />
+                      <span>Prévia dos {generatedEntriesPreview.length} Lançamentos:</span>
+                    </div>
+                    <span className="text-[11px] font-black text-sky-700 font-mono">
+                      Total:{' '}
+                      {formatCurrency(
+                        generatedEntriesPreview.reduce((acc, curr) => acc + curr.amount, 0)
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="max-h-36 overflow-y-auto divide-y divide-sky-100 bg-white rounded-xl border border-sky-200/80 shadow-2xs">
+                    {generatedEntriesPreview.map((item) => (
+                      <div
+                        key={item.index}
+                        className="px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-700 hover:bg-sky-50/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-800 font-black flex items-center justify-center text-[10px] shrink-0">
+                            {item.index}
+                          </span>
+                          <span className="font-semibold text-slate-800">{item.label}</span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-slate-500 font-mono">{formatDisplayDate(item.dueDate)}</span>
+                        </div>
+                        <span className="font-black text-slate-900 font-mono">
+                          {formatCurrency(item.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -1049,7 +1932,15 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                   className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-colors disabled:opacity-50"
                 >
                   {isSavingForm && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{editingPayable ? 'Salvar Alterações' : 'Lançar Conta'}</span>
+                  <span>
+                    {editingPayable
+                      ? 'Salvar Alterações'
+                      : entryType === 'parcelado'
+                      ? `Lançar ${generatedEntriesPreview.length || installmentsCount} Parcelas`
+                      : entryType === 'recorrente'
+                      ? `Lançar ${generatedEntriesPreview.length || recurrenceCount} Recorrências`
+                      : 'Lançar Conta'}
+                  </span>
                 </button>
               </div>
             </form>
@@ -1094,7 +1985,7 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                 <p className="font-bold text-slate-800">{targetPayable.description}</p>
                 <div className="flex items-center justify-between text-[11px] text-slate-500">
                   <span>Fornecedor: {targetPayable.supplierName || '—'}</span>
-                  <span>Vencimento: {targetPayable.dueDate}</span>
+                  <span>Vencimento: <strong className="text-slate-700">{formatDisplayDate(targetPayable.dueDate)}</strong></span>
                 </div>
                 <div className="flex items-center justify-between pt-1 border-t border-slate-200 font-bold">
                   <span className="text-slate-600">Saldo Restante:</span>
@@ -1114,10 +2005,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     required
+                    placeholder="R$ 0,00"
                     value={paymentData.amountPaid}
-                    onChange={(e) => setPaymentData({ ...paymentData, amountPaid: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-black text-emerald-700 focus:ring-2 focus:ring-emerald-500/20"
+                    onChange={(e) => setPaymentData({ ...paymentData, amountPaid: maskCurrency(e.target.value) })}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-black text-emerald-700 focus:ring-2 focus:ring-emerald-500/20 font-mono"
                   />
                 </div>
 
@@ -1164,10 +2057,11 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="0,00"
+                    inputMode="numeric"
+                    placeholder="R$ 0,00"
                     value={paymentData.discount}
-                    onChange={(e) => setPaymentData({ ...paymentData, discount: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 text-slate-800"
+                    onChange={(e) => setPaymentData({ ...paymentData, discount: maskCurrency(e.target.value) })}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 text-slate-800 font-mono"
                   />
                 </div>
 
@@ -1177,10 +2071,11 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="0,00"
+                    inputMode="numeric"
+                    placeholder="R$ 0,00"
                     value={paymentData.interest}
-                    onChange={(e) => setPaymentData({ ...paymentData, interest: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 text-slate-800"
+                    onChange={(e) => setPaymentData({ ...paymentData, interest: maskCurrency(e.target.value) })}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 text-slate-800 font-mono"
                   />
                 </div>
               </div>
@@ -1259,7 +2154,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400">Vencimento</span>
-                  <p className="font-bold text-slate-800">{selectedPayable.dueDate}</p>
+                  <p className="font-bold text-slate-800">{formatDisplayDate(selectedPayable.dueDate)}</p>
+                  {selectedPayable.issueDate && (
+                    <span className="text-[10px] text-slate-400 block mt-0.5">
+                      Emissão: {formatDisplayDate(selectedPayable.issueDate)}
+                    </span>
+                  )}
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400">Status</span>
@@ -1296,6 +2196,35 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                 </div>
               </div>
 
+              {/* Informações da Série & Observações */}
+              {(() => {
+                const bInfo = parsePayableBatchInfo(selectedPayable.notes);
+                return (
+                  <div className="space-y-3">
+                    {bInfo.isBatch && (
+                      <div className="p-3 bg-indigo-50/70 border border-indigo-200/80 rounded-2xl flex items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2 text-indigo-900 font-bold">
+                          {bInfo.batchType === 'recorrente' ? <Repeat className="w-4 h-4 text-indigo-600 shrink-0" /> : <Layers className="w-4 h-4 text-indigo-600 shrink-0" />}
+                          <span>Lançamento em Série: {bInfo.displayTag || 'Parcelas Vinculadas'}</span>
+                        </div>
+                        {bInfo.batchId && (
+                          <span className="text-[10px] font-mono text-indigo-600 bg-white/80 px-2 py-0.5 rounded border border-indigo-200">
+                            Lote: {bInfo.batchId}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {bInfo.cleanNotes && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-400">Observações</span>
+                        <p className="text-slate-700 whitespace-pre-wrap">{bInfo.cleanNotes}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Payments History Table */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -1330,8 +2259,8 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                       ) : (
                         selectedPayable.payments.map((pmt) => (
                           <tr key={pmt.id} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">
-                              {pmt.paymentDate}
+                            <td className="py-2.5 px-3 font-semibold text-slate-800 font-mono text-[11px]">
+                              {formatDisplayDate(pmt.paymentDate)}
                             </td>
                             <td className="py-2.5 px-3 text-slate-600 font-medium">
                               {pmt.paymentMethod}
@@ -1445,6 +2374,10 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                     isOpen: false,
                     payable: null,
                     actionType: 'delete',
+                    scope: 'single',
+                    seriesCount: 0,
+                    pendingInSeries: [],
+                    paidInSeriesCount: 0,
                     error: '',
                     isExecuting: false,
                   })
@@ -1501,72 +2434,171 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                 )}
               </div>
 
+              {/* Opções de Escopo para Séries em Exclusão / Cancelamento */}
+              {confirmModal.seriesCount > 1 && (
+                <div className="p-3.5 bg-indigo-50/80 border border-indigo-200/90 rounded-2xl space-y-2.5">
+                  <div className="flex items-center gap-2 text-indigo-950 font-bold text-xs">
+                    <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>Lançamento em Série Vinculado ({confirmModal.seriesCount} contas no lote)</span>
+                  </div>
+                  <p className="text-[11px] text-indigo-800 leading-relaxed">
+                    Esta conta faz parte de um lançamento agrupado. Deseja aplicar a ação apenas nesta parcela ou em toda a série pendente?
+                  </p>
+                  <div className="space-y-2 text-[11px]">
+                    <div
+                      onClick={() => setConfirmModal((prev) => ({ ...prev, scope: 'single' }))}
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                        confirmModal.scope === 'single'
+                          ? 'bg-white border-rose-600 ring-2 ring-rose-500/20 text-slate-900 font-bold shadow-xs'
+                          : 'bg-white/60 border-indigo-200/60 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        id="delScopeSingle"
+                        name="delScope"
+                        checked={confirmModal.scope === 'single'}
+                        onChange={() => setConfirmModal((prev) => ({ ...prev, scope: 'single' }))}
+                        className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                      />
+                      <label htmlFor="delScopeSingle" className="cursor-pointer">
+                        <span className="block font-bold">
+                          {confirmModal.actionType === 'delete' ? 'Excluir apenas esta parcela' : 'Cancelar apenas esta parcela'}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-normal">
+                          Mantém as outras {confirmModal.seriesCount - 1} contas deste lote salvas e inalteradas.
+                        </span>
+                      </label>
+                    </div>
+
+                    <div
+                      onClick={() => setConfirmModal((prev) => ({ ...prev, scope: 'series' }))}
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                        confirmModal.scope === 'series'
+                          ? 'bg-white border-rose-600 ring-2 ring-rose-500/20 text-slate-900 font-bold shadow-xs'
+                          : 'bg-white/60 border-indigo-200/60 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        id="delScopeSeries"
+                        name="delScope"
+                        checked={confirmModal.scope === 'series'}
+                        onChange={() => setConfirmModal((prev) => ({ ...prev, scope: 'series' }))}
+                        className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                      />
+                      <label htmlFor="delScopeSeries" className="cursor-pointer">
+                        <span className="block font-bold">
+                          {confirmModal.actionType === 'delete'
+                            ? `Excluir todas as contas pendentes da série (${confirmModal.pendingInSeries.length} contas)`
+                            : `Cancelar todas as contas pendentes da série (${confirmModal.pendingInSeries.length} contas)`}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-normal">
+                          Remove todas as parcelas ainda não pagas deste lançamento.
+                          {confirmModal.paidInSeriesCount > 0 && (
+                            <span className="block text-emerald-700 font-bold mt-0.5">
+                              • {confirmModal.paidInSeriesCount} parcela(s) já baixada(s)/paga(s) serão protegidas e mantidas intactas.
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Mensagem explicativa */}
               {confirmModal.actionType === 'delete' ? (
                 <div className="p-3 bg-rose-50/70 border border-rose-200/80 rounded-xl text-rose-900 leading-relaxed">
-                  <p className="font-bold mb-1">Atenção: Ação permanente</p>
+                  <p className="font-bold mb-1">Atenção: Exclusão Permanente</p>
                   <p className="text-[11px] text-rose-800">
-                    Como esta conta não possui nenhuma baixa registrada, ela será excluída
-                    definitivamente do banco de dados.
+                    {confirmModal.scope === 'series'
+                      ? `Serão excluídas ${confirmModal.pendingInSeries.length} contas pendentes desta série.`
+                      : confirmModal.payable.paidAmount > 0
+                      ? 'Esta conta possui baixas parciais ou totais. Ao excluir, a conta e todo o histórico de baixas associadas serão permanentemente removidos do banco de dados.'
+                      : 'Esta conta será removida definitivamente do banco de dados.'}
                   </p>
                 </div>
               ) : (
                 <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-amber-900 leading-relaxed">
-                  <p className="font-bold mb-1">Conta com baixas registradas</p>
+                  <p className="font-bold mb-1">Cancelar Conta a Pagar</p>
                   <p className="text-[11px] text-amber-800">
-                    Esta conta já possui baixas registradas e não pode ser apagada fisicamente para
-                    não corromper os saldos contábeis. Seu status será alterado para{' '}
-                    <strong>"Cancelado"</strong>.
+                    O status da conta será alterado para <strong>"Cancelado"</strong> sem remover o registro do histórico do sistema.
                   </p>
                 </div>
               )}
 
               {/* Botões de Ação */}
-              <div className="pt-2 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  disabled={confirmModal.isExecuting}
-                  onClick={() =>
-                    setConfirmModal({
-                      isOpen: false,
-                      payable: null,
-                      actionType: 'delete',
-                      error: '',
-                      isExecuting: false,
-                    })
-                  }
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold transition-colors"
-                >
-                  Cancelar
-                </button>
+              <div className="pt-2 flex items-center justify-between gap-2.5">
+                {confirmModal.actionType === 'delete' && confirmModal.payable.paidAmount > 0 ? (
+                  <button
+                    type="button"
+                    disabled={confirmModal.isExecuting}
+                    onClick={() => setConfirmModal((prev) => ({ ...prev, actionType: 'cancel' }))}
+                    className="text-[11px] font-bold text-amber-700 hover:text-amber-800 underline underline-offset-2"
+                  >
+                    Apenas Cancelar Conta
+                  </button>
+                ) : <div />}
 
-                <button
-                  type="button"
-                  disabled={confirmModal.isExecuting}
-                  onClick={handleConfirmDeleteOrCancel}
-                  className={`px-4 py-2.5 rounded-xl text-white font-bold transition-all shadow-sm flex items-center gap-1.5 ${
-                    confirmModal.actionType === 'delete'
-                      ? 'bg-rose-600 hover:bg-rose-700'
-                      : 'bg-amber-600 hover:bg-amber-700'
-                  }`}
-                >
-                  {confirmModal.isExecuting ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Processando...</span>
-                    </>
-                  ) : confirmModal.actionType === 'delete' ? (
-                    <>
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Excluir Permanentemente</span>
-                    </>
-                  ) : (
-                    <>
-                      <Ban className="w-3.5 h-3.5" />
-                      <span>Confirmar Cancelamento</span>
-                    </>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={confirmModal.isExecuting}
+                    onClick={() =>
+                      setConfirmModal({
+                        isOpen: false,
+                        payable: null,
+                        actionType: 'delete',
+                        scope: 'single',
+                        seriesCount: 0,
+                        pendingInSeries: [],
+                        paidInSeriesCount: 0,
+                        error: '',
+                        isExecuting: false,
+                      })
+                    }
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold transition-colors"
+                  >
+                    Voltar
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={confirmModal.isExecuting}
+                    onClick={handleConfirmDeleteOrCancel}
+                    className={`px-4 py-2.5 rounded-xl text-white font-bold transition-all shadow-sm flex items-center gap-1.5 ${
+                      confirmModal.actionType === 'delete'
+                        ? 'bg-rose-600 hover:bg-rose-700'
+                        : 'bg-amber-600 hover:bg-amber-700'
+                    }`}
+                  >
+                    {confirmModal.isExecuting ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Processando...</span>
+                      </>
+                    ) : confirmModal.actionType === 'delete' ? (
+                      <>
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>
+                          {confirmModal.scope === 'series' && confirmModal.pendingInSeries.length > 1
+                            ? `Excluir Série (${confirmModal.pendingInSeries.length})`
+                            : 'Excluir Parcela'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>
+                          {confirmModal.scope === 'series' && confirmModal.pendingInSeries.length > 1
+                            ? `Cancelar Série (${confirmModal.pendingInSeries.length})`
+                            : 'Cancelar Parcela'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

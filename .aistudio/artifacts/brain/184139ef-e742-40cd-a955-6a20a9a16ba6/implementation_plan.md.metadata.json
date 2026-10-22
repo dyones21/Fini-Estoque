@@ -1,0 +1,6 @@
+{
+  "summary":  "Plano de implementação detalhado para:\n1. Rastreamento e ações em lote (exclusão e edição seletiva) de parcelas e recorrências vinculadas no Contas a Pagar sem alterar a estrutura do banco de dados.\n2. Diagnóstico e resolução completa de duplicidade de produtos no cadastro durante o lançamento de Notas Fiscais (NF-e).",
+  "updatedAt":  "2026-10-22T10:37:42.064567029Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

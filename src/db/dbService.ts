@@ -170,55 +170,75 @@ export async function saveProduct(p: Product): Promise<Product> {
   const cost = Number(p.costPrice) || 0;
   const sell = Number(p.sellPrice) || 0;
 
-  await withRetry(async () => {
+  const cleanEan = (eanVal || '').trim();
+  const hasValidEan = cleanEan !== '' && cleanEan !== 'SEM GTIN' && cleanEan !== 'SEMGTIN';
+  const cleanName = (p.name || '').trim().toLowerCase();
+
+  return await withRetry(async () => {
+    // 1. Prevenção de duplicidade: verifica se já existe outro produto com mesmo EAN ou nome idêntico
+    const existingRows = await db.select().from(products);
+    const existing = existingRows.find(
+      (ep) =>
+        (hasValidEan && (ep.ean === cleanEan || (ep as any).codeEAN === cleanEan)) ||
+        (cleanName && ep.name && ep.name.trim().toLowerCase() === cleanName)
+    );
+
+    // Se já existir e o ID passado for novo/auto-gerado diferente do ID existente, reutiliza o existente
+    const targetId = existing ? existing.id : p.id;
+
     await db
       .insert(products)
       .values({
-        id: p.id,
-        sku: skuVal,
-        ean: eanVal,
-        name: p.name || 'Produto Fini',
-        category: p.category || 'Balas de Gelatina',
-        unit: p.unit || 'Pacote 500g',
-        stockDeposito: depStock,
-        stockLoja: lojStock,
-        minStockDeposito: minDep,
-        minStockLoja: minLoj,
-        costPrice: cost,
-        sellPrice: sell,
-        expirationDate: expVal,
-        batchNumber: batchVal,
+        id: targetId,
+        sku: existing ? existing.sku : skuVal,
+        ean: hasValidEan ? cleanEan : existing?.ean || eanVal,
+        name: existing ? existing.name : p.name || 'Produto Fini',
+        category: existing ? existing.category : p.category || 'Balas de Gelatina',
+        unit: existing ? existing.unit : p.unit || 'Pacote 500g',
+        stockDeposito: existing ? existing.stockDeposito : depStock,
+        stockLoja: existing ? existing.stockLoja : lojStock,
+        minStockDeposito: existing ? existing.minStockDeposito : minDep,
+        minStockLoja: existing ? existing.minStockLoja : minLoj,
+        costPrice: cost > 0 ? cost : existing?.costPrice || 0,
+        sellPrice: sell > 0 ? sell : existing?.sellPrice || 0,
+        expirationDate: expVal || existing?.expirationDate,
+        batchNumber: batchVal || existing?.batchNumber,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: products.id,
         set: {
-          sku: skuVal,
-          ean: eanVal,
-          name: p.name || 'Produto Fini',
-          category: p.category || 'Balas de Gelatina',
-          unit: p.unit || 'Pacote 500g',
-          minStockDeposito: minDep,
-          minStockLoja: minLoj,
-          costPrice: cost,
-          sellPrice: sell,
-          expirationDate: expVal,
-          batchNumber: batchVal,
+          costPrice: cost > 0 ? cost : existing?.costPrice || 0,
+          sellPrice: sell > 0 ? sell : existing?.sellPrice || 0,
+          expirationDate: expVal || existing?.expirationDate,
+          batchNumber: batchVal || existing?.batchNumber,
           updatedAt: new Date(),
         },
       });
-  });
 
-  return {
-    ...p,
-    sku: skuVal,
-    ean: eanVal,
-    codeEAN: eanVal,
-    stockDeposito: depStock,
-    stockLoja: lojStock,
-    costPrice: cost,
-    sellPrice: sell,
-  };
+    const [saved] = await db.select().from(products).where(eq(products.id, targetId));
+
+    return {
+      id: saved.id,
+      sku: saved.sku,
+      ean: saved.ean || '',
+      codeEAN: saved.ean || '',
+      name: saved.name,
+      category: saved.category as any,
+      unit: saved.unit as any,
+      stockDeposito: saved.stockDeposito,
+      stockLoja: saved.stockLoja,
+      minStockDeposito: saved.minStockDeposito,
+      minStockLoja: saved.minStockLoja,
+      costPrice: saved.costPrice,
+      sellPrice: saved.sellPrice,
+      expirationDate: saved.expirationDate,
+      batchNumber: saved.batchNumber,
+      lastUpdated: (saved.updatedAt || new Date()).toISOString(),
+      totalSalesQuantity: 0,
+      totalSalesValue: 0,
+    };
+  });
 }
 
 /**
@@ -2278,19 +2298,15 @@ export async function deletePayable(id: string): Promise<{ success: boolean; mes
       throw err;
     }
 
-    if (existing.payments && existing.payments.length > 0) {
-      const err: any = new Error(
-        'Esta conta não pode ser excluída pois já possui baixas registradas. Para invalidá-la, altere o status para "Cancelado".'
-      );
-      err.statusCode = 400;
-      throw err;
-    }
+    // Exclui em cascata todas as baixas e pagamentos registrados para a conta
+    await db.delete(payablePayments).where(eq(payablePayments.payableId, id));
 
+    // Exclui a conta a pagar
     await db.delete(payables).where(eq(payables.id, id));
 
     return {
       success: true,
-      message: 'Conta a pagar excluída com sucesso.',
+      message: 'Conta a pagar e eventuais baixas excluídas com sucesso.',
     };
   });
 }

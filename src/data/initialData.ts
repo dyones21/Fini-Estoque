@@ -21,6 +21,7 @@ export const INITIAL_USERS: UserProfile[] = [
       canRegisterMovements: true,
       canManageUsers: true,
       canManageBackup: true,
+      canManagePayables: true,
     },
   },
   // GummyStock Users
@@ -43,6 +44,7 @@ export const INITIAL_USERS: UserProfile[] = [
       canRegisterMovements: true,
       canManageUsers: true,
       canManageBackup: true,
+      canManagePayables: true,
     },
   },
   {
@@ -64,6 +66,7 @@ export const INITIAL_USERS: UserProfile[] = [
       canRegisterMovements: true,
       canManageUsers: false,
       canManageBackup: true,
+      canManagePayables: true,
     },
   },
   {
@@ -128,6 +131,7 @@ export const INITIAL_USERS: UserProfile[] = [
       canRegisterMovements: true,
       canManageUsers: true,
       canManageBackup: true,
+      canManagePayables: true,
     },
   },
   {
