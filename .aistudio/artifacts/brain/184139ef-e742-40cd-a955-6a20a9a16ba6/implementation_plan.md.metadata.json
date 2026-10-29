@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de implementação detalhado para:\n1. Rastreamento e ações em lote (exclusão e edição seletiva) de parcelas e recorrências vinculadas no Contas a Pagar sem alterar a estrutura do banco de dados.\n2. Diagnóstico e resolução completa de duplicidade de produtos no cadastro durante o lançamento de Notas Fiscais (NF-e).",
-  "updatedAt":  "2026-10-22T10:37:42.064567029Z",
+  "summary":  "Implementação concluída da logo fixa e centralizada no topo do sidebar de ponta a ponta (top-0), moldagem fluida da barra superior (header) adaptando-se à largura do sidebar, e substituição/upload de logotipo em Dados da Empresa com prévia e botão de remoção.",
+  "updatedAt":  "2026-10-26T22:15:42.765353949Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

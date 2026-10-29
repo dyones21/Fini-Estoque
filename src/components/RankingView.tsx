@@ -4,11 +4,20 @@ import { useStock } from '../context/StockContext';
 import { formatCurrency } from '../utils/inventoryUtils';
 import { exportToExcel, exportToCSV } from '../utils/exportUtils';
 import { ExportButton } from './ExportButton';
+import { PaginationControls } from './PaginationControls';
 
 export const RankingView: React.FC = () => {
   const { products, movements } = useStock();
   const [metricMode, setMetricMode] = useState<'saida_baleiro' | 'capital_imobilizado'>('saida_baleiro');
   const [subMetric, setSubMetric] = useState<'valor' | 'quantidade'>('valor');
+
+  // Pagination State (Default 50 items per page with selector)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [metricMode, subMetric]);
 
   // Compute metrics for each product based on real movements or physical stock
   const productsWithMetrics = useMemo(() => {
@@ -66,6 +75,11 @@ export const RankingView: React.FC = () => {
     }
     return list;
   }, [productsWithMetrics, isSaidaBaleiro, subMetric]);
+
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return rankedProducts.slice(start, start + pageSize);
+  }, [rankedProducts, currentPage, pageSize]);
 
   const maxVal = useMemo(() => {
     if (rankedProducts.length === 0) return 1;
@@ -173,7 +187,7 @@ export const RankingView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div className="space-y-6 animate-in fade-in duration-200 w-full max-w-full min-w-0 overflow-hidden">
       
       {/* Title & Metric Switcher & Export */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -342,7 +356,8 @@ export const RankingView: React.FC = () => {
         </h3>
 
         <div className="space-y-4">
-          {rankedProducts.map((p, idx) => {
+          {paginatedProducts.map((p, idx) => {
+            const globalIndex = (currentPage - 1) * pageSize + idx + 1;
             let currentVal = 0;
             if (isSaidaBaleiro) {
               currentVal = subMetric === 'valor' ? p.estimatedOutputValue : p.outputUnits;
@@ -355,8 +370,8 @@ export const RankingView: React.FC = () => {
               <div key={p.id} className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="w-5 font-black text-slate-400 text-[11px]">
-                      #{idx + 1}
+                    <span className="w-6 font-black text-slate-400 text-[11px]">
+                      #{globalIndex}
                     </span>
                     <span className="font-bold text-slate-900">{p.name}</span>
                     <span className="text-[10px] text-slate-400 hidden sm:inline">
@@ -401,6 +416,18 @@ export const RankingView: React.FC = () => {
               </div>
             );
           })}
+        </div>
+
+        {/* Pagination Controls */}
+        <div className="pt-2 border-t border-slate-100">
+          <PaginationControls
+            currentPage={currentPage}
+            totalItems={rankedProducts.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            itemName="produtos no ranking"
+          />
         </div>
       </div>
 

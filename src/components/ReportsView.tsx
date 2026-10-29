@@ -33,6 +33,8 @@ import { Product, ProductCategory, StockMovement, NFEntry, StockTransfer } from 
 import { formatCurrency, formatDateTime, getDaysToExpiration, isLowStock, calculateCurvaABC } from '../utils/inventoryUtils';
 import { exportToExcel, exportToCSV } from '../utils/exportUtils';
 import { ExportButton } from './ExportButton';
+import { PaginationControls } from './PaginationControls';
+import { FilterCollapseBar } from './FilterCollapseBar';
 
 export type ReportType =
   | 'posicao_estoque'
@@ -87,7 +89,18 @@ export const ReportsView: React.FC = () => {
   const [showSellPrices, setShowSellPrices] = useState<boolean>(true);
   const [showSKU, setShowSKU] = useState<boolean>(true);
   const [showBatchAndExp, setShowBatchAndExp] = useState<boolean>(true);
-  const [showFiltersPanel, setShowFiltersPanel] = useState<boolean>(true);
+  const [showFiltersPanel, setShowFiltersPanel] = useState<boolean>(false);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchQuery.trim()) count++;
+    if (locationFilter !== 'geral') count++;
+    if (categoryFilter !== 'todos') count++;
+    if (statusFilter !== 'todos') count++;
+    if (startDate) count++;
+    if (endDate) count++;
+    return count;
+  }, [searchQuery, locationFilter, categoryFilter, statusFilter, startDate, endDate]);
 
   // Extract Categories
   const categoriesList = useMemo(() => {
@@ -105,7 +118,17 @@ export const ReportsView: React.FC = () => {
     setEndDate('');
     setSearchQuery('');
     setSortBy('nome_asc');
+    setCurrentPage(1);
   };
+
+  // Pagination State (Default 50 items per page with selector)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  // Auto-reset page when report type or any filter changes
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [reportType, locationFilter, categoryFilter, statusFilter, startDate, endDate, searchQuery, sortBy]);
 
   // ================= 1. FILTERED POSIÇÃO DE ESTOQUE =================
   const filteredProducts = useMemo(() => {
@@ -269,10 +292,52 @@ export const ReportsView: React.FC = () => {
     }).sort((a, b) => new Date(b.receiveDate).getTime() - new Date(a.receiveDate).getTime());
   }, [nfEntries, searchQuery, startDate, endDate]);
 
-  // ================= 5. CURVA ABC =================
   const abcAnalysis = useMemo(() => {
     return calculateCurvaABC(products, movements);
   }, [products, movements]);
+
+  // Paginated Slices (50 by default, respects pageSize & currentPage)
+  const activeTotalItems = useMemo(() => {
+    switch (reportType) {
+      case 'posicao_estoque':
+        return filteredProducts.length;
+      case 'movimentacoes':
+        return filteredMovements.length;
+      case 'vencimentos':
+        return filteredVencimentos.length;
+      case 'notas_fiscais':
+        return filteredNFs.length;
+      case 'curva_abc':
+        return abcAnalysis.length;
+      default:
+        return 0;
+    }
+  }, [reportType, filteredProducts.length, filteredMovements.length, filteredVencimentos.length, filteredNFs.length, abcAnalysis.length]);
+
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredProducts.slice(start, start + pageSize);
+  }, [filteredProducts, currentPage, pageSize]);
+
+  const paginatedMovements = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredMovements.slice(start, start + pageSize);
+  }, [filteredMovements, currentPage, pageSize]);
+
+  const paginatedVencimentos = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredVencimentos.slice(start, start + pageSize);
+  }, [filteredVencimentos, currentPage, pageSize]);
+
+  const paginatedNFs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredNFs.slice(start, start + pageSize);
+  }, [filteredNFs, currentPage, pageSize]);
+
+  const paginatedAbc = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return abcAnalysis.slice(start, start + pageSize);
+  }, [abcAnalysis, currentPage, pageSize]);
 
   // Handler for Printing / PDF Export
   const handlePrintPDF = () => {
@@ -473,7 +538,7 @@ export const ReportsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full min-w-0 overflow-hidden">
       
       {/* Dynamic CSS Print Stylesheet */}
       <style>{`
@@ -694,197 +759,176 @@ export const ReportsView: React.FC = () => {
       </div>
 
       {/* ================= CUSTOM FILTERS PANEL (NO-PRINT) ================= */}
-      {showFiltersPanel && (
-        <div className="no-print bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-rose-600" />
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
-                Filtros Personalizados & Customização do Relatório
-              </h3>
-            </div>
-
-            <button
-              onClick={handleResetFilters}
-              className="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 transition-colors"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Limpar Filtros</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Search Input */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1 text-left">
-                Busca Textual (Nome, SKU, Fornecedor)
-              </label>
-              <div className="relative">
+      <div className="no-print">
+        <FilterCollapseBar
+          isOpen={showFiltersPanel}
+          onToggle={() => setShowFiltersPanel(!showFiltersPanel)}
+          activeCount={activeFiltersCount}
+          onClear={handleResetFilters}
+          label="Opções de Filtros do Relatório ERP"
+        >
+          <div className="space-y-4 pt-1">
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-2.5 w-full flex-wrap">
+              {/* Search Input */}
+              <div className="relative flex-1 min-w-[200px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="text"
-                  placeholder="Pesquisar termo..."
+                  placeholder="Busca textual (Nome, SKU, Fornecedor)..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500/20"
                 />
               </div>
-            </div>
 
-            {/* Location Selector */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1 text-left">
-                Localização do Estoque
-              </label>
-              <select
-                value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value as any)}
-                className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold bg-white"
-              >
-                <option value="geral">Todos os Locais (Unificado)</option>
-                <option value="loja">Loja</option>
-                <option value="deposito">Depósito Central</option>
-              </select>
-            </div>
-
-            {/* Category Selector */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1 text-left">
-                Categoria de Produtos
-              </label>
-              <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold bg-white"
-              >
-                <option value="todos">Todas as Categorias ({categoriesList.length})</option>
-                {categoriesList.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Status Selector */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1 text-left">
-                Status / Nível de Estoque
-              </label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold bg-white"
-              >
-                <option value="todos">Todos os Status</option>
-                <option value="disponivel">Disponível em Estoque</option>
-                <option value="estoque_baixo">Estoque Baixo / Crítico</option>
-                <option value="validade_proxima">Validade Próxima (&lt;30 dias)</option>
-                <option value="vencido">Produtos VENCIDOS</option>
-                <option value="zerado">Estoque ZERADO</option>
-              </select>
-            </div>
-
-            {/* Date Range Start */}
-            {(reportType === 'movimentacoes' || reportType === 'notas_fiscais') && (
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1 text-left">
-                  Data Inicial (Período)
-                </label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold"
-                />
-              </div>
-            )}
-
-            {/* Date Range End */}
-            {(reportType === 'movimentacoes' || reportType === 'notas_fiscais') && (
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1 text-left">
-                  Data Final (Período)
-                </label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold"
-                />
-              </div>
-            )}
-
-            {/* Sorting */}
-            {reportType === 'posicao_estoque' && (
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1 text-left">
-                  Ordenar Registros Por
-                </label>
+              {/* Location Selector */}
+              <div className="w-full sm:w-auto shrink-0 sm:min-w-[140px]">
                 <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="w-full text-xs p-2 rounded-xl border border-slate-200 font-semibold bg-white"
+                  value={locationFilter}
+                  onChange={(e) => setLocationFilter(e.target.value as any)}
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
                 >
-                  <option value="nome_asc">Nome do Produto (A-Z)</option>
-                  <option value="nome_desc">Nome do Produto (Z-A)</option>
-                  <option value="custo_maior">Maior Patrimônio (Custo Total)</option>
-                  <option value="venda_maior">Maior Potencial (Venda Total)</option>
-                  <option value="qtd_maior">Maior Quantidade em Estoque</option>
-                  <option value="validade_mais_proxima">Validade Mais Próxima</option>
+                  <option value="geral">Todos os Locais</option>
+                  <option value="loja">Loja</option>
+                  <option value="deposito">Depósito Central</option>
                 </select>
               </div>
-            )}
+
+              {/* Category Selector */}
+              <div className="w-full sm:w-auto shrink-0 sm:min-w-[145px] sm:max-w-[200px]">
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white truncate"
+                >
+                  <option value="todos">Todas as Categorias</option>
+                  {categoriesList.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Selector */}
+              <div className="w-full sm:w-auto shrink-0 sm:min-w-[135px]">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
+                >
+                  <option value="todos">Todos os Status</option>
+                  <option value="disponivel">Disponível</option>
+                  <option value="estoque_baixo">Estoque Baixo</option>
+                  <option value="validade_proxima">Validade &lt;30d</option>
+                  <option value="vencido">Vencidos</option>
+                  <option value="zerado">Zerado</option>
+                </select>
+              </div>
+
+              {/* Date Range Start & End */}
+              {(reportType === 'movimentacoes' || reportType === 'notas_fiscais') && (
+                <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-[124px] text-xs py-1 px-2 rounded-lg border border-slate-200 font-medium bg-white text-slate-700"
+                    title="Data Inicial"
+                  />
+                  <span className="text-[11px] text-slate-400 font-bold px-0.5">até</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-[124px] text-xs py-1 px-2 rounded-lg border border-slate-200 font-medium bg-white text-slate-700"
+                    title="Data Final"
+                  />
+                </div>
+              )}
+
+              {/* Sorting */}
+              {reportType === 'posicao_estoque' && (
+                <div className="w-full sm:w-auto shrink-0 sm:min-w-[145px]">
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
+                  >
+                    <option value="nome_asc">Nome (A-Z)</option>
+                    <option value="nome_desc">Nome (Z-A)</option>
+                    <option value="custo_maior">Maior Patrimônio</option>
+                    <option value="venda_maior">Maior Potencial</option>
+                    <option value="qtd_maior">Maior Quantidade</option>
+                    <option value="validade_mais_proxima">Validade Próxima</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Column Display Toggles & Clear */}
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4 text-xs">
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">
+                  Exibir Colunas:
+                </span>
+
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showCostPrices}
+                    onChange={(e) => setShowCostPrices(e.target.checked)}
+                    className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <span className="font-medium text-slate-700">Preço de Custo</span>
+                </label>
+
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showSellPrices}
+                    onChange={(e) => setShowSellPrices(e.target.checked)}
+                    className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <span className="font-medium text-slate-700">Preço de Venda</span>
+                </label>
+
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showSKU}
+                    onChange={(e) => setShowSKU(e.target.checked)}
+                    className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <span className="font-medium text-slate-700">SKU / Código EAN</span>
+                </label>
+
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showBatchAndExp}
+                    onChange={(e) => setShowBatchAndExp(e.target.checked)}
+                    className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <span className="font-medium text-slate-700">Lote e Validade</span>
+                </label>
+              </div>
+
+              {activeFiltersCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="py-1.5 px-3 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-rose-200 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="Limpar todos os filtros"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Limpar Filtros</span>
+                </button>
+              )}
+            </div>
           </div>
-
-          {/* Column Display Toggles */}
-          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-4 text-xs">
-            <span className="font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">
-              Exibir Colunas:
-            </span>
-
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showCostPrices}
-                onChange={(e) => setShowCostPrices(e.target.checked)}
-                className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
-              />
-              <span className="font-medium text-slate-700">Preço de Custo</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showSellPrices}
-                onChange={(e) => setShowSellPrices(e.target.checked)}
-                className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
-              />
-              <span className="font-medium text-slate-700">Preço de Venda</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showSKU}
-                onChange={(e) => setShowSKU(e.target.checked)}
-                className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
-              />
-              <span className="font-medium text-slate-700">SKU / Código EAN</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showBatchAndExp}
-                onChange={(e) => setShowBatchAndExp(e.target.checked)}
-                className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
-              />
-              <span className="font-medium text-slate-700">Lote e Data de Validade</span>
-            </label>
-          </div>
-        </div>
-      )}
+        </FilterCollapseBar>
+      </div>
 
       {/* ================= EXECUTIVE SUMMARY KPI CARDS ================= */}
       {reportType === 'posicao_estoque' && (
@@ -942,330 +986,610 @@ export const ReportsView: React.FC = () => {
 
         {/* 1. POSIÇÃO DE ESTOQUE TABLE */}
         {reportType === 'posicao_estoque' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4">Produto</th>
-                  {showSKU && <th className="py-3 px-3">SKU / EAN</th>}
-                  <th className="py-3 px-3">Categoria</th>
-                  <th className="py-3 px-3 text-center">Loja</th>
-                  <th className="py-3 px-3 text-center">Depósito</th>
-                  <th className="py-3 px-3 text-center">Total</th>
-                  {showCostPrices && <th className="py-3 px-3 text-right">P. Custo</th>}
-                  {showSellPrices && <th className="py-3 px-3 text-right">P. Venda</th>}
-                  {showCostPrices && <th className="py-3 px-3 text-right">Custo Total</th>}
-                  {showBatchAndExp && <th className="py-3 px-3 text-center">Lote / Validade</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredProducts.length === 0 ? (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto print:block">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
                   <tr>
-                    <td colSpan={10} className="py-8 text-center text-slate-400 font-semibold">
-                      Nenhum produto encontrado para os filtros aplicados.
-                    </td>
+                    <th className="py-3 px-4">Produto</th>
+                    {showSKU && <th className="py-3 px-3">SKU / EAN</th>}
+                    <th className="py-3 px-3">Categoria</th>
+                    <th className="py-3 px-3 text-center">Loja</th>
+                    <th className="py-3 px-3 text-center">Depósito</th>
+                    <th className="py-3 px-3 text-center">Total</th>
+                    {showCostPrices && <th className="py-3 px-3 text-right">P. Custo</th>}
+                    {showSellPrices && <th className="py-3 px-3 text-right">P. Venda</th>}
+                    {showCostPrices && <th className="py-3 px-3 text-right">Custo Total</th>}
+                    {showBatchAndExp && <th className="py-3 px-3 text-center">Lote / Validade</th>}
                   </tr>
-                ) : (
-                  filteredProducts.map((p) => {
-                    const totalUnits = p.stockLoja + p.stockDeposito;
-                    const daysToExp = getDaysToExpiration(p.expirationDate);
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="py-8 text-center text-slate-400 font-semibold">
+                        Nenhum produto encontrado para os filtros aplicados.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedProducts.map((p) => {
+                      const totalUnits = p.stockLoja + p.stockDeposito;
+                      const daysToExp = getDaysToExpiration(p.expirationDate);
 
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-2.5 px-4 font-bold text-slate-900">
-                          {p.name}
-                          <span className="block text-[10px] text-slate-400 font-normal">{p.unit}</span>
-                        </td>
-                        {showSKU && (
-                          <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
-                            {p.sku}
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-4 font-bold text-slate-900">
+                            {p.name}
+                            <span className="block text-[10px] text-slate-400 font-normal">{p.unit}</span>
                           </td>
-                        )}
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded bg-slate-100 font-semibold text-slate-700 text-[10px]">
-                            {p.category}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-bold text-slate-800">
-                          {p.stockLoja}
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-bold text-slate-800">
-                          {p.stockDeposito}
-                        </td>
-                        <td className="py-2.5 px-3 text-center">
-                          <span className={`font-black ${totalUnits === 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-                            {totalUnits}
-                          </span>
-                        </td>
-                        {showCostPrices && (
-                          <td className="py-2.5 px-3 text-right font-medium text-slate-600">
-                            {formatCurrency(p.costPrice)}
-                          </td>
-                        )}
-                        {showSellPrices && (
-                          <td className="py-2.5 px-3 text-right font-extrabold text-emerald-700">
-                            {formatCurrency(p.sellPrice)}
-                          </td>
-                        )}
-                        {showCostPrices && (
-                          <td className="py-2.5 px-3 text-right font-extrabold text-rose-700">
-                            {formatCurrency(totalUnits * p.costPrice)}
-                          </td>
-                        )}
-                        {showBatchAndExp && (
-                          <td className="py-2.5 px-3 text-center">
-                            <span className="block font-mono text-[10px] text-slate-500">Lote: {p.batchNumber}</span>
-                            <span
-                              className={`text-[10px] font-bold ${
-                                daysToExp < 0
-                                  ? 'text-rose-600 font-black'
-                                  : daysToExp <= 30
-                                  ? 'text-amber-600'
-                                  : 'text-slate-600'
-                              }`}
-                            >
-                              Val: {p.expirationDate}
+                          {showSKU && (
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
+                              {p.sku}
+                            </td>
+                          )}
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 font-semibold text-slate-700 text-[10px]">
+                              {p.category}
                             </span>
                           </td>
-                        )}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-800">
+                            {p.stockLoja}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-800">
+                            {p.stockDeposito}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className={`font-black ${totalUnits === 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                              {totalUnits}
+                            </span>
+                          </td>
+                          {showCostPrices && (
+                            <td className="py-2.5 px-3 text-right font-medium text-slate-600">
+                              {formatCurrency(p.costPrice)}
+                            </td>
+                          )}
+                          {showSellPrices && (
+                            <td className="py-2.5 px-3 text-right font-extrabold text-emerald-700">
+                              {formatCurrency(p.sellPrice)}
+                            </td>
+                          )}
+                          {showCostPrices && (
+                            <td className="py-2.5 px-3 text-right font-extrabold text-rose-700">
+                              {formatCurrency(totalUnits * p.costPrice)}
+                            </td>
+                          )}
+                          {showBatchAndExp && (
+                            <td className="py-2.5 px-3 text-center">
+                              <span className="block font-mono text-[10px] text-slate-500">Lote: {p.batchNumber}</span>
+                              <span
+                                className={`text-[10px] font-bold ${
+                                  daysToExp < 0
+                                    ? 'text-rose-600 font-black'
+                                    : daysToExp <= 30
+                                    ? 'text-amber-600'
+                                    : 'text-slate-600'
+                                }`}
+                              >
+                                Val: {p.expirationDate}
+                              </span>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="block md:hidden p-3 space-y-3 bg-slate-50/50 no-print">
+              {paginatedProducts.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 font-semibold">
+                  Nenhum produto encontrado para os filtros aplicados.
+                </div>
+              ) : (
+                paginatedProducts.map((p) => {
+                  const totalUnits = p.stockLoja + p.stockDeposito;
+                  const daysToExp = getDaysToExpiration(p.expirationDate);
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-slate-900 text-sm block truncate">
+                            {p.name}
+                          </span>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                            <span>{p.category}</span>
+                            {p.sku && (
+                              <span className="font-mono bg-slate-100 px-1 py-0.2 rounded text-[10px]">
+                                {p.sku}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-lg text-xs font-black ${
+                          totalUnits === 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-800'
+                        }`}>
+                          {totalUnits} {p.unit || 'un'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-100">
+                        <div className="p-2 rounded-xl bg-slate-50">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Estoque Físico</span>
+                          <span className="font-bold text-slate-700">Loja: {p.stockLoja}</span>
+                          <span className="text-[10px] text-slate-500 block">Dep: {p.stockDeposito}</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Preços</span>
+                          <span className="font-extrabold text-emerald-700 block">Venda: {formatCurrency(p.sellPrice)}</span>
+                          {showCostPrices && (
+                            <span className="text-[10px] text-slate-500 block">Custo: {formatCurrency(p.costPrice)}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {showBatchAndExp && (
+                        <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
+                          <span className="font-mono text-slate-500">Lote: {p.batchNumber}</span>
+                          <span
+                            className={`font-bold ${
+                              daysToExp < 0
+                                ? 'text-rose-600 font-black'
+                                : daysToExp <= 30
+                                ? 'text-amber-600'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            Val: {p.expirationDate}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
         )}
 
         {/* 2. HISTÓRICO DE MOVIMENTAÇÕES TABLE */}
         {reportType === 'movimentacoes' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4">Data / Hora</th>
-                  <th className="py-3 px-3">Produto</th>
-                  <th className="py-3 px-3">Tipo de Operação</th>
-                  <th className="py-3 px-3 text-center">Qtd</th>
-                  <th className="py-3 px-3">Local</th>
-                  <th className="py-3 px-3 text-right">Valor Total</th>
-                  <th className="py-3 px-3">Usuário</th>
-                  <th className="py-3 px-3">Motivo / Detalhes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredMovements.length === 0 ? (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto print:block">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400 font-semibold">
-                      Nenhuma movimentação encontrada para os filtros selecionados.
-                    </td>
+                    <th className="py-3 px-4">Data / Hora</th>
+                    <th className="py-3 px-3">Produto</th>
+                    <th className="py-3 px-3">Tipo de Operação</th>
+                    <th className="py-3 px-3 text-center">Qtd</th>
+                    <th className="py-3 px-3">Local</th>
+                    <th className="py-3 px-3 text-right">Valor Total</th>
+                    <th className="py-3 px-3">Usuário</th>
+                    <th className="py-3 px-3">Motivo / Detalhes</th>
                   </tr>
-                ) : (
-                  filteredMovements.map((m) => (
-                    <tr key={m.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-2.5 px-4 font-mono text-[11px] text-slate-600">
-                        {formatDateTime(m.date)}
-                      </td>
-                      <td className="py-2.5 px-3 font-bold text-slate-900">
-                        {m.productName}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-800">
-                          {m.type === 'entrada_nf' && 'Entrada NF'}
-                          {m.type === 'transferencia_deposito_loja' && 'Transf. Depósito -> Loja'}
-                          {m.type === 'venda_loja' && 'Saída p/ Baleiro'}
-                          {m.type === 'perda_avaria' && (m.lossCategory ? `Perda (${m.lossCategory})` : 'Perda / Avaria')}
-                          {m.type === 'ajuste_inventario' && 'Ajuste Inventário'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-center font-black text-slate-900">
-                        {m.type === 'ajuste_inventario' ? (
-                          (() => {
-                            let prev = m.previousQuantity;
-                            if (prev === undefined || prev === null) {
-                              const match = m.reason?.match(/Anterior:\s*(\d+)/i);
-                              if (match) prev = Number(match[1]);
-                            }
-                            if (prev !== undefined && prev !== null) {
-                              const diff = m.quantity - prev;
-                              const sign = diff > 0 ? `+${diff}` : `${diff}`;
-                              return (
-                                <div className="inline-flex flex-col items-center leading-tight">
-                                  <span
-                                    className={
-                                      diff > 0
-                                        ? 'text-emerald-700 font-black'
-                                        : diff < 0
-                                        ? 'text-rose-700 font-black'
-                                        : 'text-slate-600 font-bold'
-                                    }
-                                  >
-                                    {sign}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 font-medium">
-                                    ({prev} → {m.quantity})
-                                  </span>
-                                </div>
-                              );
-                            }
-                            return m.quantity;
-                          })()
-                        ) : (
-                          m.quantity
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 capitalize font-semibold text-slate-700">
-                        {m.location}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
-                        {m.totalValue ? formatCurrency(m.totalValue) : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 font-medium text-slate-700">
-                        {m.userName}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-500 italic">
-                        {m.reason || '—'}
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedMovements.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400 font-semibold">
+                        Nenhuma movimentação encontrada para os filtros selecionados.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ) : (
+                    paginatedMovements.map((m) => (
+                      <tr key={m.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-2.5 px-4 font-mono text-[11px] text-slate-600">
+                          {formatDateTime(m.date)}
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-slate-900">
+                          {m.productName}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-800">
+                            {m.type === 'entrada_nf' && 'Entrada NF'}
+                            {m.type === 'transferencia_deposito_loja' && 'Transf. Depósito -> Loja'}
+                            {m.type === 'venda_loja' && 'Saída p/ Baleiro'}
+                            {m.type === 'perda_avaria' && (m.lossCategory ? `Perda (${m.lossCategory})` : 'Perda / Avaria')}
+                            {m.type === 'ajuste_inventario' && 'Ajuste Inventário'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-black text-slate-900">
+                          {m.type === 'ajuste_inventario' ? (
+                            (() => {
+                              let prev = m.previousQuantity;
+                              if (prev === undefined || prev === null) {
+                                const match = m.reason?.match(/Anterior:\s*(\d+)/i);
+                                if (match) prev = Number(match[1]);
+                              }
+                              if (prev !== undefined && prev !== null) {
+                                const diff = m.quantity - prev;
+                                const sign = diff > 0 ? `+${diff}` : `${diff}`;
+                                return (
+                                  <div className="inline-flex flex-col items-center leading-tight">
+                                    <span
+                                      className={
+                                        diff > 0
+                                          ? 'text-emerald-700 font-black'
+                                          : diff < 0
+                                          ? 'text-rose-700 font-black'
+                                          : 'text-slate-600 font-bold'
+                                      }
+                                    >
+                                      {sign}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 font-medium">
+                                      ({prev} → {m.quantity})
+                                    </span>
+                                  </div>
+                                );
+                              }
+                              return m.quantity;
+                            })()
+                          ) : (
+                            m.quantity
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 capitalize font-semibold text-slate-700">
+                          {m.location}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
+                          {m.totalValue ? formatCurrency(m.totalValue) : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 font-medium text-slate-700">
+                          {m.userName}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-500 italic">
+                          {m.reason || '—'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="block md:hidden p-3 space-y-3 bg-slate-50/50 no-print">
+              {paginatedMovements.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 font-semibold">
+                  Nenhuma movimentação encontrada para os filtros selecionados.
+                </div>
+              ) : (
+                paginatedMovements.map((m) => (
+                  <div
+                    key={m.id}
+                    className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-bold text-slate-900 text-sm block truncate">
+                          {m.productName}
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
+                          {formatDateTime(m.date)}
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-800 shrink-0">
+                        {m.type === 'entrada_nf' && 'Entrada NF'}
+                        {m.type === 'transferencia_deposito_loja' && 'Transf.'}
+                        {m.type === 'venda_loja' && 'Baleiro'}
+                        {m.type === 'perda_avaria' && 'Perda'}
+                        {m.type === 'ajuste_inventario' && 'Ajuste'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-700 capitalize">{m.location}</span>
+                        <span className="text-slate-300">•</span>
+                        <span className="font-black text-slate-900">{m.quantity} un</span>
+                      </div>
+                      <span className="font-bold text-emerald-700">
+                        {m.totalValue ? formatCurrency(m.totalValue) : '—'}
+                      </span>
+                    </div>
+
+                    {(m.reason || m.userName) && (
+                      <div className="text-[11px] text-slate-500 pt-1 flex items-center justify-between border-t border-slate-50">
+                        <span className="italic truncate">{m.reason || 'Sem observações'}</span>
+                        <span className="font-semibold text-slate-600 shrink-0 ml-2">{m.userName}</span>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </>
         )}
 
         {/* 3. VENCIMENTOS & LOTES TABLE */}
         {reportType === 'vencimentos' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4">Produto</th>
-                  <th className="py-3 px-3">Categoria</th>
-                  <th className="py-3 px-3 text-center">Estoque Total</th>
-                  <th className="py-3 px-3">Lote</th>
-                  <th className="py-3 px-3">Data de Validade</th>
-                  <th className="py-3 px-3 text-center">Dias Restantes</th>
-                  <th className="py-3 px-3 text-center">Status Criticidade</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredVencimentos.length === 0 ? (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto print:block">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400 font-semibold">
-                      Nenhum produto atende aos critérios de vencimento selecionados.
-                    </td>
+                    <th className="py-3 px-4">Produto</th>
+                    <th className="py-3 px-3">Categoria</th>
+                    <th className="py-3 px-3 text-center">Estoque Total</th>
+                    <th className="py-3 px-3">Lote</th>
+                    <th className="py-3 px-3">Data de Validade</th>
+                    <th className="py-3 px-3 text-center">Dias Restantes</th>
+                    <th className="py-3 px-3 text-center">Status Criticidade</th>
                   </tr>
-                ) : (
-                  filteredVencimentos.map(({ product, days }) => {
-                    const isExpired = days < 0;
-                    const isCritical = days >= 0 && days <= 30;
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedVencimentos.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400 font-semibold">
+                        Nenhum produto atende aos critérios de vencimento selecionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedVencimentos.map(({ product, days }) => {
+                      const isExpired = days < 0;
+                      const isCritical = days >= 0 && days <= 30;
 
-                    return (
-                      <tr key={product.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-2.5 px-4 font-bold text-slate-900">
-                          {product.name}
-                          <span className="block text-[10px] text-slate-400 font-mono">SKU: {product.sku}</span>
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-slate-600">
-                          {product.category}
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-bold text-slate-800">
-                          {product.stockLoja + product.stockDeposito} un
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-slate-700">
-                          {product.batchNumber}
-                        </td>
-                        <td className="py-2.5 px-3 font-bold text-slate-900">
-                          {product.expirationDate}
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-extrabold">
-                          <span
-                            className={
-                              isExpired
-                                ? 'text-rose-700'
-                                : isCritical
-                                ? 'text-amber-700'
-                                : 'text-emerald-700'
-                            }
-                          >
-                            {isExpired ? `${Math.abs(days)}d atrasado` : `${days} dias`}
+                      return (
+                        <tr key={product.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-4 font-bold text-slate-900">
+                            {product.name}
+                            <span className="block text-[10px] text-slate-400 font-mono">SKU: {product.sku}</span>
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-600">
+                            {product.category}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-800">
+                            {product.stockLoja + product.stockDeposito} un
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-700">
+                            {product.batchNumber}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            {product.expirationDate}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-extrabold">
+                            <span
+                              className={
+                                isExpired
+                                  ? 'text-rose-700'
+                                  : isCritical
+                                  ? 'text-amber-700'
+                                  : 'text-emerald-700'
+                              }
+                            >
+                              {isExpired ? `${Math.abs(days)}d atrasado` : `${days} dias`}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            {isExpired ? (
+                              <span className="px-2.5 py-1 rounded bg-rose-100 text-rose-800 font-black text-[10px] uppercase">
+                                VENCIDO
+                              </span>
+                            ) : isCritical ? (
+                              <span className="px-2.5 py-1 rounded bg-amber-100 text-amber-900 font-black text-[10px] uppercase">
+                                CRÍTICO (&lt;30d)
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px] uppercase">
+                                DENTRO DO PRAZO
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="block md:hidden p-3 space-y-3 bg-slate-50/50 no-print">
+              {paginatedVencimentos.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 font-semibold">
+                  Nenhum produto atende aos critérios de vencimento selecionados.
+                </div>
+              ) : (
+                paginatedVencimentos.map(({ product, days }) => {
+                  const isExpired = days < 0;
+                  const isCritical = days >= 0 && days <= 30;
+
+                  return (
+                    <div
+                      key={product.id}
+                      className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-slate-900 text-sm block truncate">
+                            {product.name}
                           </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-center">
-                          {isExpired ? (
-                            <span className="px-2.5 py-1 rounded bg-rose-100 text-rose-800 font-black text-[10px] uppercase">
-                              VENCIDO
-                            </span>
-                          ) : isCritical ? (
-                            <span className="px-2.5 py-1 rounded bg-amber-100 text-amber-900 font-black text-[10px] uppercase">
-                              CRÍTICO (&lt;30d)
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px] uppercase">
-                              DENTRO DO PRAZO
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            {product.category} {product.sku ? `• SKU: ${product.sku}` : ''}
+                          </span>
+                        </div>
+                        {isExpired ? (
+                          <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-black text-[10px] uppercase shrink-0">
+                            VENCIDO
+                          </span>
+                        ) : isCritical ? (
+                          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-black text-[10px] uppercase shrink-0">
+                            CRÍTICO (&lt;30d)
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px] uppercase shrink-0">
+                            NO PRAZO
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-100">
+                        <div className="p-2 rounded-xl bg-slate-50">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Estoque Físico</span>
+                          <span className="font-bold text-slate-800">
+                            {product.stockLoja + product.stockDeposito} un total
+                          </span>
+                          <span className="text-[10px] text-slate-500 block">
+                            Dep: {product.stockDeposito} | Loja: {product.stockLoja}
+                          </span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Validade & Lote</span>
+                          <span className="font-bold text-slate-900 block">{product.expirationDate}</span>
+                          <span className="text-[10px] font-mono text-slate-500 block">Lote: {product.batchNumber}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-[11px] font-bold text-slate-500">Prazo Restante:</span>
+                        <span
+                          className={`font-black ${
+                            isExpired ? 'text-rose-700' : isCritical ? 'text-amber-700' : 'text-emerald-700'
+                          }`}
+                        >
+                          {isExpired ? `${Math.abs(days)} dias vencido` : `${days} dias restantes`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
         )}
 
         {/* 4. NOTAS FISCAIS TABLE */}
         {reportType === 'notas_fiscais' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4">Número NF</th>
-                  <th className="py-3 px-3">Fornecedor</th>
-                  <th className="py-3 px-3">CNPJ</th>
-                  <th className="py-3 px-3">Emissão / Recebimento</th>
-                  <th className="py-3 px-3 text-center">Qtd Itens</th>
-                  <th className="py-3 px-3 text-right">Valor Total NF</th>
-                  <th className="py-3 px-3">Responsável</th>
-                  <th className="py-3 px-3 text-center">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredNFs.length === 0 ? (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto print:block">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400 font-semibold">
-                      Nenhuma Nota Fiscal encontrada no período.
-                    </td>
+                    <th className="py-3 px-4">Número NF</th>
+                    <th className="py-3 px-3">Fornecedor</th>
+                    <th className="py-3 px-3">CNPJ</th>
+                    <th className="py-3 px-3">Emissão / Recebimento</th>
+                    <th className="py-3 px-3 text-center">Qtd Itens</th>
+                    <th className="py-3 px-3 text-right">Valor Total NF</th>
+                    <th className="py-3 px-3">Responsável</th>
+                    <th className="py-3 px-3 text-center">Ações</th>
                   </tr>
-                ) : (
-                  filteredNFs.map((nf) => (
-                    <tr key={nf.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-2.5 px-4 font-black text-rose-700">
-                        {nf.numberNF}
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedNFs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400 font-semibold">
+                        Nenhuma Nota Fiscal encontrada no período.
                       </td>
-                      <td className="py-2.5 px-3 font-bold text-slate-900">
-                        {nf.supplier}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-slate-600">
-                        {nf.cnpjSupplier}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-600 font-medium">
-                        Emissão: {nf.issueDate} <br />
-                        <span className="text-[10px] text-slate-400">Entrada: {formatDateTime(nf.receiveDate)}</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-center font-extrabold text-slate-800">
-                        {nf.items.reduce((sum, item) => sum + item.quantity, 0)} un
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-black text-emerald-700">
-                        {formatCurrency(nf.totalValue)}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-700 font-medium">
-                        {nf.createdBy}
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        {canDeleteNF ? (
+                    </tr>
+                  ) : (
+                    paginatedNFs.map((nf) => (
+                      <tr key={nf.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-2.5 px-4 font-black text-rose-700">
+                          {nf.numberNF}
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-slate-900">
+                          {nf.supplier}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-600">
+                          {nf.cnpjSupplier}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600 font-medium">
+                          Emissão: {nf.issueDate} <br />
+                          <span className="text-[10px] text-slate-400">Entrada: {formatDateTime(nf.receiveDate)}</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-extrabold text-slate-800">
+                          {nf.items.reduce((sum, item) => sum + item.quantity, 0)} un
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-black text-emerald-700">
+                          {formatCurrency(nf.totalValue)}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-700 font-medium">
+                          {nf.createdBy}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          {canDeleteNF ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNfToDelete(nf);
+                                setDeleteError(null);
+                                setDeleteSuccess(null);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 hover:text-rose-800 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                              title="Excluir Nota Fiscal e reverter estoque"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Excluir</span>
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 font-medium">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="block md:hidden p-3 space-y-3 bg-slate-50/50 no-print">
+              {paginatedNFs.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 font-semibold">
+                  Nenhuma Nota Fiscal encontrada no período.
+                </div>
+              ) : (
+                paginatedNFs.map((nf) => {
+                  const totalItems = nf.items.reduce((sum, item) => sum + item.quantity, 0);
+
+                  return (
+                    <div
+                      key={nf.id}
+                      className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-black text-rose-700 text-sm block">
+                            NF: {nf.numberNF}
+                          </span>
+                          <span className="font-bold text-slate-900 text-xs block truncate mt-0.5">
+                            {nf.supplier}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400 block">
+                            {nf.cnpjSupplier}
+                          </span>
+                        </div>
+                        <span className="text-sm font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 shrink-0">
+                          {formatCurrency(nf.totalValue)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100 text-slate-600">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Entrada</span>
+                          <span className="font-semibold">{formatDateTime(nf.receiveDate)}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 block">Itens</span>
+                          <span className="font-bold text-slate-800">{totalItems} un</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px]">
+                        <span className="text-slate-500">Resp: {nf.createdBy}</span>
+                        {canDeleteNF && (
                           <button
                             type="button"
                             onClick={() => {
@@ -1273,84 +1597,156 @@ export const ReportsView: React.FC = () => {
                               setDeleteError(null);
                               setDeleteSuccess(null);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 hover:text-rose-800 border border-rose-200 rounded-lg transition-colors cursor-pointer"
-                            title="Excluir Nota Fiscal e reverter estoque"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                             <span>Excluir</span>
                           </button>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 font-medium">—</span>
                         )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
         )}
 
         {/* 5. CURVA ABC TABLE */}
         {reportType === 'curva_abc' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4 text-center">Classe ABC</th>
-                  <th className="py-3 px-3">Produto</th>
-                  <th className="py-3 px-3">Categoria</th>
-                  <th className="py-3 px-3 text-center">Saída p/ Baleiro</th>
-                  <th className="py-3 px-3 text-right">Valor Estimado Saída</th>
-                  <th className="py-3 px-3 text-right">% Representatividade</th>
-                  <th className="py-3 px-3 text-right">% Acumulada</th>
-                  <th className="py-3 px-3 text-center">Estoque Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {abcAnalysis.map((item) => (
-                  <tr key={item.product.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-4 text-center">
-                      <span
-                        className={`inline-block px-3 py-1 rounded-full text-xs font-black uppercase ${
-                          item.classABC === 'A'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : item.classABC === 'B'
-                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                            : 'bg-slate-100 text-slate-600 border border-slate-200'
-                        }`}
-                      >
-                        Classe {item.classABC}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 font-bold text-slate-900">
-                      {item.product.name}
-                      <span className="block text-[10px] text-slate-400 font-mono">SKU: {item.product.sku}</span>
-                    </td>
-                    <td className="py-2.5 px-3 font-semibold text-slate-600">
-                      {item.product.category}
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-black text-rose-700">
-                      {item.totalOutputUnits || 0} un
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-black text-slate-900">
-                      {formatCurrency(item.totalRevenue)}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-slate-800">
-                      {item.revenuePercentage.toFixed(2)}%
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-slate-600">
-                      {item.cumulativePercentage.toFixed(2)}%
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-bold text-slate-700">
-                      {item.product.stockLoja + item.product.stockDeposito} un
-                    </td>
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto print:block">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-100 text-slate-700 uppercase font-extrabold border-b border-slate-200">
+                  <tr>
+                    <th className="py-3 px-4 text-center">Classe ABC</th>
+                    <th className="py-3 px-3">Produto</th>
+                    <th className="py-3 px-3">Categoria</th>
+                    <th className="py-3 px-3 text-center">Saída p/ Baleiro</th>
+                    <th className="py-3 px-3 text-right">Valor Estimado Saída</th>
+                    <th className="py-3 px-3 text-right">% Representatividade</th>
+                    <th className="py-3 px-3 text-right">% Acumulada</th>
+                    <th className="py-3 px-3 text-center">Estoque Total</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedAbc.map((item) => (
+                    <tr key={item.product.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-2.5 px-4 text-center">
+                        <span
+                          className={`inline-block px-3 py-1 rounded-full text-xs font-black uppercase ${
+                            item.classABC === 'A'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : item.classABC === 'B'
+                              ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          }`}
+                        >
+                          Classe {item.classABC}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-bold text-slate-900">
+                        {item.product.name}
+                        <span className="block text-[10px] text-slate-400 font-mono">SKU: {item.product.sku}</span>
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-600">
+                        {item.product.category}
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-black text-rose-700">
+                        {item.totalOutputUnits || 0} un
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-black text-slate-900">
+                        {formatCurrency(item.totalRevenue)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-800">
+                        {item.revenuePercentage.toFixed(2)}%
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-600">
+                        {item.cumulativePercentage.toFixed(2)}%
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-bold text-slate-700">
+                        {item.product.stockLoja + item.product.stockDeposito} un
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="block md:hidden p-3 space-y-3 bg-slate-50/50 no-print">
+              {paginatedAbc.map((item) => (
+                <div
+                  key={item.product.id}
+                  className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-bold text-slate-900 text-sm block truncate">
+                        {item.product.name}
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        {item.product.category} {item.product.sku ? `• SKU: ${item.product.sku}` : ''}
+                      </span>
+                    </div>
+                    <span
+                      className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-black uppercase shrink-0 ${
+                        item.classABC === 'A'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : item.classABC === 'B'
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      Classe {item.classABC}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-100">
+                    <div className="p-2 rounded-xl bg-slate-50">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Saída Baleiro</span>
+                      <span className="font-black text-rose-700 block">{item.totalOutputUnits || 0} un</span>
+                      <span className="text-[10px] text-slate-500 block">Estoque: {item.product.stockLoja + item.product.stockDeposito} un</span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-50">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Valor Est. Saída</span>
+                      <span className="font-black text-slate-900 block">{formatCurrency(item.totalRevenue)}</span>
+                      <span className="text-[10px] text-slate-500 block">{item.revenuePercentage.toFixed(1)}% do total</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
+                    <span className="text-[11px] font-bold text-slate-500">Pareto Acumulado:</span>
+                    <span className="font-extrabold text-slate-800">{item.cumulativePercentage.toFixed(2)}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
+
+        {/* Pagination Controls */}
+        <div className="no-print p-3 border-t border-slate-200 bg-white">
+          <PaginationControls
+            currentPage={currentPage}
+            totalItems={activeTotalItems}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            itemName={
+              reportType === 'posicao_estoque'
+                ? 'produtos'
+                : reportType === 'movimentacoes'
+                ? 'movimentações'
+                : reportType === 'vencimentos'
+                ? 'lotes'
+                : reportType === 'notas_fiscais'
+                ? 'notas fiscais'
+                : 'itens ABC'
+            }
+          />
+        </div>
 
       </div>
 

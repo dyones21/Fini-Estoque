@@ -138,18 +138,25 @@ export const DEFAULT_CATEGORIES = [
 
 export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Company Info State (strictly single-tenant from PostgreSQL)
-  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>({
-    id: 'default-company',
-    name: '',
-    tradeName: '',
-    cnpj: '',
-    address: '',
-    city: '',
-    state: '',
-    defaultMarkupPercent: 85,
-    isConfigured: false,
-    active: true,
-    isMaster: true,
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(() => {
+    let cachedLogo = '';
+    try {
+      cachedLogo = localStorage.getItem('FINI_COMPANY_LOGO') || '';
+    } catch {}
+    return {
+      id: 'default-company',
+      name: '',
+      tradeName: '',
+      cnpj: '',
+      address: '',
+      city: '',
+      state: '',
+      defaultMarkupPercent: 85,
+      logoUrl: cachedLogo,
+      isConfigured: false,
+      active: true,
+      isMaster: true,
+    };
   });
   const [isLoadingCompany, setIsLoadingCompany] = useState<boolean>(true);
 
@@ -711,6 +718,12 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       ]);
 
       if (dataComp && typeof dataComp === 'object') {
+        const fetchedLogo = dataComp.logoUrl || '';
+        try {
+          if (fetchedLogo) localStorage.setItem('FINI_COMPANY_LOGO', fetchedLogo);
+          else localStorage.removeItem('FINI_COMPANY_LOGO');
+        } catch {}
+
         setCompanyInfo({
           id: dataComp.id || 'default-company',
           name: dataComp.name || '',
@@ -723,6 +736,7 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             dataComp.defaultMarkupPercent !== undefined && dataComp.defaultMarkupPercent !== null
               ? Number(dataComp.defaultMarkupPercent)
               : 85,
+          logoUrl: fetchedLogo,
           isConfigured: Boolean(dataComp.isConfigured || (dataComp.name && dataComp.cnpj)),
           active: dataComp.active ?? true,
           isMaster: true,
@@ -893,6 +907,14 @@ export const StockProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const updateCompanyInfo = async (info: Partial<CompanyInfo>): Promise<CompanyInfo> => {
+    if (info.logoUrl !== undefined) {
+      try {
+        if (info.logoUrl) localStorage.setItem('FINI_COMPANY_LOGO', info.logoUrl);
+        else localStorage.removeItem('FINI_COMPANY_LOGO');
+      } catch {}
+    }
+    setCompanyInfo((prev) => ({ ...prev, ...info }));
+
     const res = await authFetch('/api/company', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

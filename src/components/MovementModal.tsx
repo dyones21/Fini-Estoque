@@ -8,6 +8,7 @@ import {
   Plus,
   Minus,
   CheckCircle2,
+  ArrowLeft,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product, StockMovement, LossCategory } from '../types';
@@ -233,38 +234,72 @@ export const MovementModal: React.FC<MovementModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[90vh] flex flex-col">
-        
-        {/* Header (Fixo no topo) */}
-        <div className="bg-linear-to-r from-slate-900 to-slate-800 p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-slate-700 text-amber-400 shrink-0">
-              <MinusCircle className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-black tracking-tight">
-                {type === 'ajuste_inventario' ? 'Ajuste de Inventário' : 'Registrar Saída ou Baixa'}
-              </h2>
-              <p className="text-xs text-slate-300">
-                {type === 'ajuste_inventario'
-                  ? 'Ajuste e correção de saldos apurados em contagem física'
-                  : 'Baixas por Saída p/ Baleiro, Validade Vencida ou Avaria'}
-              </p>
-            </div>
-          </div>
+  useEffect(() => {
+    if (isOpen) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [isOpen]);
 
+  if (!isOpen) return null;
+
+  return (
+    <div className="w-full max-w-4xl mx-auto space-y-6 animate-in fade-in duration-200">
+      {/* Navigation & Title Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+            className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center justify-center shrink-0"
+            title="Voltar para a lista"
           >
-            <X className="w-5 h-5" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                {type === 'ajuste_inventario' ? 'Ajuste de Inventário' : 'Registrar Saída ou Baixa'}
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800">
+                {type === 'ajuste_inventario' ? 'Inventário' : 'Baixa Operacional'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-medium">
+              {type === 'ajuste_inventario'
+                ? 'Ajuste e correção de saldos apurados em contagem física'
+                : 'Baixas por Saída p/ Baleiro, Validade Vencida ou Avaria'}
+            </p>
+          </div>
         </div>
 
-        {/* Form com Layout Coluna e Área de Rolagem Interna */}
-        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-colors"
+          >
+            Cancelar e Voltar
+          </button>
+          <button
+            type="submit"
+            form="movement-dedicated-form"
+            disabled={isNegativeAdjustment}
+            className={`font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-colors ${
+              isNegativeAdjustment
+                ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                : 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
+            }`}
+          >
+            {type === 'ajuste_inventario'
+              ? `Confirmar Ajuste (${calculatedDiff >= 0 ? '+' : ''}${calculatedDiff})`
+              : 'Confirmar Baixa'}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Dedicated Card */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 sm:p-8 space-y-6">
+        <form id="movement-dedicated-form" onSubmit={handleSubmit} className="space-y-6">
           
           {/* Corpo do formulário com rolagem */}
           <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
@@ -611,20 +646,20 @@ export const MovementModal: React.FC<MovementModalProps> = ({
 
           </div>
 
-          {/* Footer (Fixo no rodapé, sempre visível fora da rolagem) */}
-          <div className="p-3.5 sm:px-5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
+          {/* Footer Actions */}
+          <div className="pt-4 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold cursor-pointer"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold transition-colors cursor-pointer"
             >
-              Cancelar
+              Cancelar e Voltar
             </button>
 
             <button
               type="submit"
               disabled={isNegativeAdjustment}
-              className={`font-bold px-5 py-2.5 rounded-xl text-xs shadow-md transition-all ${
+              className={`w-full sm:w-auto font-bold text-xs px-6 py-2.5 rounded-xl shadow-xs transition-colors ${
                 isNegativeAdjustment
                   ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
                   : 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
@@ -637,7 +672,6 @@ export const MovementModal: React.FC<MovementModalProps> = ({
           </div>
 
         </form>
-
       </div>
     </div>
   );

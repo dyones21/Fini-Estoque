@@ -28,6 +28,9 @@ import { Product, StockMovement } from '../types';
 import { formatCurrency } from '../utils/inventoryUtils';
 import { exportToExcel, exportToCSV } from '../utils/exportUtils';
 import { ExportButton } from './ExportButton';
+import { PaginationControls } from './PaginationControls';
+import { FilterCollapseBar } from './FilterCollapseBar';
+import { DismissibleInfoCard } from './DismissibleInfoCard';
 
 export interface PurchaseItemAnalysis {
   product: Product;
@@ -56,6 +59,25 @@ export const PurchaseSuggestionView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('todos');
   const [statusFilter, setStatusFilter] = useState<'sugestoes' | 'criticos' | 'esgotados' | 'todos'>('sugestoes');
+  const [isFiltersOpen, setIsFiltersOpen] = useState<boolean>(false);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchQuery.trim()) count++;
+    if (selectedCategory !== 'todos') count++;
+    if (statusFilter !== 'sugestoes') count++;
+    if (thresholdDays !== 15) count++;
+    if (targetCoverageDays !== 30) count++;
+    return count;
+  }, [searchQuery, selectedCategory, statusFilter, thresholdDays, targetCoverageDays]);
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setSelectedCategory('todos');
+    setStatusFilter('sugestoes');
+    setThresholdDays(15);
+    setTargetCoverageDays(30);
+  };
 
   // Copy to clipboard notification
   const [copiedList, setCopiedList] = useState(false);
@@ -187,6 +209,21 @@ export const PurchaseSuggestionView: React.FC = () => {
       });
   }, [analysisData, statusFilter, selectedCategory, searchQuery]);
 
+  // Pagination State (Default 50 items per page)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  // Reset page when filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, selectedCategory, searchQuery, thresholdDays, targetCoverageDays]);
+
+  // Paginated Items
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredItems.slice(start, start + pageSize);
+  }, [filteredItems, currentPage, pageSize]);
+
   // Summary Metrics
   const metrics = useMemo(() => {
     const suggestedList = analysisData.filter((i) => i.isSuggested);
@@ -293,7 +330,7 @@ export const PurchaseSuggestionView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full min-w-0 overflow-hidden">
       {/* Header Banner */}
       <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -342,13 +379,18 @@ export const PurchaseSuggestionView: React.FC = () => {
           </div>
         </div>
 
-        {/* Disclaimer / Transparency Card */}
-        <div className="mt-5 p-3.5 bg-amber-50/80 rounded-2xl border border-amber-200/80 flex items-start gap-3 text-xs text-amber-900">
-          <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <p className="leading-relaxed font-medium">
-            <strong>Como funciona o cálculo:</strong> A velocidade de saída é calculada somando todas as <strong>baixas operacionais na loja</strong> e <strong>perdas/avarias</strong> dos últimos 30 dias e dividindo por 30 (consumo médio diário). <em>Transferências internas entre depósito e loja não contam como saída</em>, pois a mercadoria permanece no estoque da empresa. Produtos com estoque restante inferior a <strong>{thresholdDays} dias</strong> ou com saldo abaixo do <strong>estoque mínimo de segurança</strong> são sugeridos para compra com meta de <strong>{targetCoverageDays} dias de cobertura</strong>.
-          </p>
-        </div>
+        {/* Disclaimer / Transparency Card (Dismissible on first access) */}
+        <DismissibleInfoCard
+          storageKey="dismissed_info_purchase_suggestion_calc"
+          className="mt-5 p-3.5 bg-amber-50/80 rounded-2xl border border-amber-200/80 flex items-start gap-3 text-xs text-amber-900"
+        >
+          <div className="flex items-start gap-3">
+            <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <p className="leading-relaxed font-medium">
+              <strong>Como funciona o cálculo:</strong> A velocidade de saída é calculada somando todas as <strong>baixas operacionais na loja</strong> e <strong>perdas/avarias</strong> dos últimos 30 dias e dividindo por 30 (consumo médio diário). <em>Transferências internas entre depósito e loja não contam como saída</em>, pois a mercadoria permanece no estoque da empresa. Produtos com estoque restante inferior a <strong>{thresholdDays} dias</strong> ou com saldo abaixo do <strong>estoque mínimo de segurança</strong> são sugeridos para compra com meta de <strong>{targetCoverageDays} dias de cobertura</strong>.
+            </p>
+          </div>
+        </DismissibleInfoCard>
 
         {/* Metrics Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-6 pt-6 border-t border-slate-100">
@@ -410,125 +452,132 @@ export const PurchaseSuggestionView: React.FC = () => {
         </div>
       </div>
 
-      {/* Control and Configuration Bar */}
-      <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-          {/* Search */}
-          <div className="relative w-full lg:w-72">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Buscar por produto, SKU ou EAN..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-amber-500"
-            />
-          </div>
-
-          {/* Category Selector */}
-          <div className="flex items-center gap-2 w-full lg:w-auto">
-            <span className="text-xs font-bold text-slate-500 shrink-0">Categoria:</span>
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-amber-500 cursor-pointer w-full sm:w-auto"
-            >
-              <option value="todos">Todas as Categorias</option>
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status Tabs */}
-          <div className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-2xl w-full lg:w-auto">
-            <button
-              onClick={() => setStatusFilter('sugestoes')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
-                statusFilter === 'sugestoes'
-                  ? 'bg-white text-amber-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Sugeridos ({metrics.totalSuggested})
-            </button>
-            <button
-              onClick={() => setStatusFilter('criticos')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
-                statusFilter === 'criticos'
-                  ? 'bg-white text-rose-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Críticos &lt;7d ({metrics.totalCritical})
-            </button>
-            <button
-              onClick={() => setStatusFilter('esgotados')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
-                statusFilter === 'esgotados'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Esgotados ({analysisData.filter((i) => i.isExhausted).length})
-            </button>
-            <button
-              onClick={() => setStatusFilter('todos')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
-                statusFilter === 'todos'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Todos ({analysisData.length})
-            </button>
-          </div>
-        </div>
-
-        {/* Dynamic Parameter Sliders */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100 text-xs">
-          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center justify-between gap-4">
-            <div>
-              <span className="font-bold text-slate-700 block">Ponto de Alerta de Estoque:</span>
-              <span className="text-[11px] text-slate-500">Sugerir quando o estoque durar menos de:</span>
+      {/* Control and Configuration Bar (Filters Collapsible) */}
+      <FilterCollapseBar
+        isOpen={isFiltersOpen}
+        onToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+        activeCount={activeFiltersCount}
+        onClear={handleClearFilters}
+        label="Opções de Filtros e Parâmetros de Compra"
+      >
+        <div className="space-y-3">
+          <div className="flex flex-col lg:flex-row gap-2.5 items-stretch lg:items-center justify-between w-full">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar por produto, SKU ou EAN..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-amber-500 focus:bg-white"
+              />
             </div>
-            <div className="flex items-center gap-2">
+
+            {/* Category Selector */}
+            <div className="w-full sm:w-auto shrink-0 sm:min-w-[150px] sm:max-w-[210px]">
               <select
-                value={thresholdDays}
-                onChange={(e) => setThresholdDays(Number(e.target.value))}
-                className="py-1 px-2.5 bg-white border border-slate-200 rounded-lg font-extrabold text-amber-700"
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-500 cursor-pointer truncate"
               >
-                <option value={7}>7 dias (Crítico)</option>
-                <option value={15}>15 dias (Padrão)</option>
-                <option value={20}>20 dias</option>
-                <option value={30}>30 dias</option>
-                <option value={45}>45 dias</option>
+                <option value="todos">Todas as Categorias</option>
+                {categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
               </select>
             </div>
+
+            {/* Status Tabs */}
+            <div className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-xl shrink-0">
+              <button
+                onClick={() => setStatusFilter('sugestoes')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                  statusFilter === 'sugestoes'
+                    ? 'bg-white text-amber-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Sugeridos ({metrics.totalSuggested})
+              </button>
+              <button
+                onClick={() => setStatusFilter('criticos')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                  statusFilter === 'criticos'
+                    ? 'bg-white text-rose-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Críticos ({metrics.totalCritical})
+              </button>
+              <button
+                onClick={() => setStatusFilter('esgotados')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                  statusFilter === 'esgotados'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Esgotados ({analysisData.filter((i) => i.isExhausted).length})
+              </button>
+              <button
+                onClick={() => setStatusFilter('todos')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                  statusFilter === 'todos'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Todos ({analysisData.length})
+              </button>
+            </div>
           </div>
 
-          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center justify-between gap-4">
-            <div>
-              <span className="font-bold text-slate-700 block">Meta de Cobertura Desejada:</span>
-              <span className="text-[11px] text-slate-500">Comprar quantidade suficiente para:</span>
+          {/* Dynamic Parameter Sliders */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100 text-xs">
+            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center justify-between gap-4">
+              <div>
+                <span className="font-bold text-slate-700 block">Ponto de Alerta de Estoque:</span>
+                <span className="text-[11px] text-slate-500">Sugerir quando o estoque durar menos de:</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={thresholdDays}
+                  onChange={(e) => setThresholdDays(Number(e.target.value))}
+                  className="py-1 px-2.5 bg-white border border-slate-200 rounded-lg font-extrabold text-amber-700"
+                >
+                  <option value={7}>7 dias (Crítico)</option>
+                  <option value={15}>15 dias (Padrão)</option>
+                  <option value={20}>20 dias</option>
+                  <option value={30}>30 dias</option>
+                  <option value={45}>45 dias</option>
+                </select>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={targetCoverageDays}
-                onChange={(e) => setTargetCoverageDays(Number(e.target.value))}
-                className="py-1 px-2.5 bg-white border border-slate-200 rounded-lg font-extrabold text-emerald-700"
-              >
-                <option value={15}>15 dias de estoque</option>
-                <option value={30}>30 dias (Padrão 1 Mês)</option>
-                <option value={45}>45 dias</option>
-                <option value={60}>60 dias (2 Meses)</option>
-              </select>
+
+            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center justify-between gap-4">
+              <div>
+                <span className="font-bold text-slate-700 block">Meta de Cobertura Desejada:</span>
+                <span className="text-[11px] text-slate-500">Comprar quantidade suficiente para:</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={targetCoverageDays}
+                  onChange={(e) => setTargetCoverageDays(Number(e.target.value))}
+                  className="py-1 px-2.5 bg-white border border-slate-200 rounded-lg font-extrabold text-emerald-700"
+                >
+                  <option value={15}>15 dias de estoque</option>
+                  <option value={30}>30 dias (Padrão 1 Mês)</option>
+                  <option value={45}>45 dias</option>
+                  <option value={60}>60 dias (2 Meses)</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </FilterCollapseBar>
 
       {/* Suggestion Table */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -545,115 +594,188 @@ export const PurchaseSuggestionView: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-                  <th className="py-3.5 px-4 sm:px-6">Produto / Categoria</th>
-                  <th className="py-3.5 px-4 text-center">Estoque Atual</th>
-                  <th className="py-3.5 px-4 text-center">Giro 30d (Diário)</th>
-                  <th className="py-3.5 px-4 text-center">Dias Restantes</th>
-                  <th className="py-3.5 px-4 text-center">Status</th>
-                  <th className="py-3.5 px-4 text-right">Qtd Sugerida</th>
-                  <th className="py-3.5 px-4 sm:px-6 text-right">Custo Est.</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {filteredItems.map((item) => {
-                  const days = item.daysOfStockRemaining;
-                  const isZero = item.totalCurrentStock <= 0;
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                    <th className="py-3.5 px-4 sm:px-6">Produto / Categoria</th>
+                    <th className="py-3.5 px-4 text-center">Estoque Atual</th>
+                    <th className="py-3.5 px-4 text-center">Giro 30d (Diário)</th>
+                    <th className="py-3.5 px-4 text-center">Dias Restantes</th>
+                    <th className="py-3.5 px-4 text-center">Status</th>
+                    <th className="py-3.5 px-4 text-right">Qtd Sugerida</th>
+                    <th className="py-3.5 px-4 sm:px-6 text-right">Custo Est.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {paginatedItems.map((item) => {
+                    const days = item.daysOfStockRemaining;
+                    const isZero = item.totalCurrentStock <= 0;
 
-                  return (
-                    <tr
-                      key={item.product.id}
-                      className={`hover:bg-slate-50/80 transition-colors ${
-                        item.isExhausted
-                          ? 'bg-rose-50/30'
-                          : item.isCritical
-                          ? 'bg-amber-50/20'
-                          : ''
-                      }`}
-                    >
-                      {/* Produto */}
-                      <td className="py-4 px-4 sm:px-6">
-                        <div className="max-w-[240px]">
-                          <span className="font-extrabold text-slate-900 block text-xs sm:text-sm truncate" title={item.product.name}>
-                            {item.product.name}
-                          </span>
-                          <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
-                            <span className="truncate">{item.product.category}</span>
-                            {item.product.sku && (
-                              <span className="font-mono bg-slate-100 px-1.5 py-0.2 rounded text-[10px] text-slate-600">
-                                {item.product.sku}
-                              </span>
-                            )}
+                    return (
+                      <tr
+                        key={item.product.id}
+                        className={`hover:bg-slate-50/80 transition-colors ${
+                          item.isExhausted
+                            ? 'bg-rose-50/30'
+                            : item.isCritical
+                            ? 'bg-amber-50/20'
+                            : ''
+                        }`}
+                      >
+                        {/* Produto */}
+                        <td className="py-4 px-4 sm:px-6">
+                          <div className="max-w-[240px]">
+                            <span className="font-extrabold text-slate-900 block text-xs sm:text-sm truncate" title={item.product.name}>
+                              {item.product.name}
+                            </span>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                              <span className="truncate">{item.product.category}</span>
+                              {item.product.sku && (
+                                <span className="font-mono bg-slate-100 px-1.5 py-0.2 rounded text-[10px] text-slate-600">
+                                  {item.product.sku}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Estoque Atual */}
-                      <td className="py-4 px-4 text-center">
-                        <div className="space-y-0.5">
-                          <span className={`font-black text-xs ${isZero ? 'text-rose-600' : 'text-slate-900'}`}>
-                            {item.totalCurrentStock} un
-                          </span>
-                          <div className="text-[10px] text-slate-400 flex items-center justify-center gap-1.5">
-                            <span title="Depósito">D: {item.currentStockDeposito}</span>
-                            <span>•</span>
-                            <span title="Loja">L: {item.currentStockLoja}</span>
+                        {/* Estoque Atual */}
+                        <td className="py-4 px-4 text-center">
+                          <div className="space-y-0.5">
+                            <span className={`font-black text-xs ${isZero ? 'text-rose-600' : 'text-slate-900'}`}>
+                              {item.totalCurrentStock} un
+                            </span>
+                            <div className="text-[10px] text-slate-400 flex items-center justify-center gap-1.5">
+                              <span title="Depósito">D: {item.currentStockDeposito}</span>
+                              <span>•</span>
+                              <span title="Loja">L: {item.currentStockLoja}</span>
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Saídas 30d e Média Diária */}
-                      <td className="py-4 px-4 text-center">
-                        <div className="space-y-0.5">
-                          <span className="font-bold text-slate-800 text-xs">
-                            {item.dailyConsumption > 0 ? `${item.dailyConsumption.toFixed(1)} un/dia` : 'Sem saída'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 block">
-                            {item.totalOut30Days} un / 30d
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Dias de Estoque Restante */}
-                      <td className="py-4 px-4 text-center">
-                        {days !== null ? (
-                          <div className="inline-flex flex-col items-center">
-                            <span
-                              className={`font-black text-xs px-2 py-0.5 rounded-lg ${
-                                days <= 0
-                                  ? 'bg-rose-100 text-rose-700'
-                                  : days < 7
-                                  ? 'bg-rose-50 text-rose-600 border border-rose-200'
-                                  : days < thresholdDays
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  : 'bg-emerald-50 text-emerald-700'
-                              }`}
-                            >
-                              {Math.round(days)} {Math.round(days) === 1 ? 'dia' : 'dias'}
+                        {/* Saídas 30d e Média Diária */}
+                        <td className="py-4 px-4 text-center">
+                          <div className="space-y-0.5">
+                            <span className="font-bold text-slate-800 text-xs">
+                              {item.dailyConsumption > 0 ? `${item.dailyConsumption.toFixed(1)} un/dia` : 'Sem saída'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block">
+                              {item.totalOut30Days} un / 30d
                             </span>
                           </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 font-medium">
-                            Sem saída recente
-                          </span>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* Status Badge */}
-                      <td className="py-4 px-4 text-center">
+                        {/* Dias de Estoque Restante */}
+                        <td className="py-4 px-4 text-center">
+                          {days !== null ? (
+                            <div className="inline-flex flex-col items-center">
+                              <span
+                                className={`font-black text-xs px-2 py-0.5 rounded-lg ${
+                                  days <= 0
+                                    ? 'bg-rose-100 text-rose-700'
+                                    : days < 7
+                                    ? 'bg-rose-50 text-rose-600 border border-rose-200'
+                                    : days < thresholdDays
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-700'
+                                }`}
+                              >
+                                {Math.round(days)} {Math.round(days) === 1 ? 'dia' : 'dias'}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 font-medium">
+                              Sem saída recente
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Status Badge */}
+                        <td className="py-4 px-4 text-center">
+                          {item.isExhausted ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white uppercase tracking-wider">
+                              Esgotado
+                            </span>
+                          ) : item.isCritical ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-200 uppercase">
+                              Crítico (&lt;7d)
+                            </span>
+                          ) : item.isSuggested ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              Reposição
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">
+                              Adequado
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Quantidade Sugerida */}
+                        <td className="py-4 px-4 text-right">
+                          <span
+                            className={`font-black text-sm ${
+                              item.suggestedPurchaseQty > 0
+                                ? 'text-amber-600 bg-amber-50/80 px-2 py-0.5 rounded-lg border border-amber-200/80'
+                                : 'text-slate-400'
+                            }`}
+                          >
+                            {item.suggestedPurchaseQty > 0 ? `+${item.suggestedPurchaseQty} un` : '0'}
+                          </span>
+                        </td>
+
+                        {/* Custo Estimado */}
+                        <td className="py-4 px-4 sm:px-6 text-right">
+                          <span className="font-extrabold text-slate-900 text-xs">
+                            {item.estimatedCost > 0 ? formatCurrency(item.estimatedCost) : '-'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="block md:hidden p-3 space-y-3 bg-slate-50/50">
+              {paginatedItems.map((item) => {
+                const days = item.daysOfStockRemaining;
+                const isZero = item.totalCurrentStock <= 0;
+
+                return (
+                  <div
+                    key={item.product.id}
+                    className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-bold text-slate-900 text-sm block truncate">
+                          {item.product.name}
+                        </span>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                          <span>{item.product.category}</span>
+                          {item.product.sku && (
+                            <span className="font-mono bg-slate-100 px-1 py-0.2 rounded text-[10px]">
+                              {item.product.sku}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
                         {item.isExhausted ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white uppercase tracking-wider">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white uppercase">
                             Esgotado
                           </span>
                         ) : item.isCritical ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-200 uppercase">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 uppercase">
                             Crítico (&lt;7d)
                           </span>
                         ) : item.isSuggested ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
                             Reposição
                           </span>
                         ) : (
@@ -661,33 +783,60 @@ export const PurchaseSuggestionView: React.FC = () => {
                             Adequado
                           </span>
                         )}
-                      </td>
+                      </div>
+                    </div>
 
-                      {/* Quantidade Sugerida */}
-                      <td className="py-4 px-4 text-right">
-                        <span
-                          className={`font-black text-sm ${
-                            item.suggestedPurchaseQty > 0
-                              ? 'text-amber-600 bg-amber-50/80 px-2 py-0.5 rounded-lg border border-amber-200/80'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          {item.suggestedPurchaseQty > 0 ? `+${item.suggestedPurchaseQty} un` : '0'}
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-100">
+                      <div className="p-2 rounded-xl bg-slate-50">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Estoque Atual</span>
+                        <span className={`font-black ${isZero ? 'text-rose-600' : 'text-slate-800'}`}>
+                          {item.totalCurrentStock} un
                         </span>
-                      </td>
+                        <span className="text-[10px] text-slate-400 block">
+                          Dep: {item.currentStockDeposito} | Loja: {item.currentStockLoja}
+                        </span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-slate-50">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Giro 30d</span>
+                        <span className="font-bold text-slate-800">
+                          {item.dailyConsumption > 0 ? `${item.dailyConsumption.toFixed(1)}/dia` : 'Sem saída'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block">
+                          {days !== null ? `${Math.round(days)} dias rest.` : 'Sem saída'}
+                        </span>
+                      </div>
+                    </div>
 
-                      {/* Custo Estimado */}
-                      <td className="py-4 px-4 sm:px-6 text-right">
-                        <span className="font-extrabold text-slate-900 text-xs">
-                          {item.estimatedCost > 0 ? formatCurrency(item.estimatedCost) : '-'}
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/60">
+                      <div>
+                        <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block">
+                          Sugestão de Compra
                         </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        <span className="text-[11px] text-amber-700 font-medium">
+                          Custo Est: {item.estimatedCost > 0 ? formatCurrency(item.estimatedCost) : '-'}
+                        </span>
+                      </div>
+                      <span className="text-base font-black text-amber-700 bg-white px-2.5 py-1 rounded-lg border border-amber-200 shadow-xs">
+                        {item.suggestedPurchaseQty > 0 ? `+${item.suggestedPurchaseQty} un` : '0 un'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="p-3 border-t border-slate-200 bg-white">
+              <PaginationControls
+                currentPage={currentPage}
+                totalItems={filteredItems.length}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={setPageSize}
+                itemName="itens sugeridos"
+              />
+            </div>
+          </>
         )}
       </div>
     </div>

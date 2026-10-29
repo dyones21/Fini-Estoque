@@ -101,6 +101,7 @@ export async function ensureDbSchema(): Promise<void> {
         );
 
         ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_manage_payables BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE company_info ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '';
       `);
     } catch (err: any) {
       console.warn('Auto-schema check notice:', err.message);
@@ -1516,6 +1517,7 @@ export async function getCompanyInfo(): Promise<CompanyInfo> {
       city: r.city || '',
       state: r.state || '',
       defaultMarkupPercent: isNaN(markup) || markup < 0 ? 85 : markup,
+      logoUrl: (r as any).logoUrl || '',
       isConfigured: Boolean(r.name && r.cnpj),
       active: true,
       isMaster: true,
@@ -1537,6 +1539,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
   const address = info.address?.trim() || '';
   const city = info.city?.trim() || '';
   const state = info.state?.trim().toUpperCase() || '';
+  const logoUrl = typeof info.logoUrl === 'string' ? info.logoUrl : '';
   const rawMarkup = info.defaultMarkupPercent;
   const defaultMarkupPercent =
     typeof rawMarkup === 'number' && !isNaN(rawMarkup) && rawMarkup >= 0
@@ -1557,6 +1560,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
         city,
         state,
         defaultMarkupPercent,
+        logoUrl,
       })
       .onConflictDoUpdate({
         target: companyInfo.id,
@@ -1568,6 +1572,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
           city,
           state,
           defaultMarkupPercent,
+          logoUrl,
           updatedAt: new Date(),
         },
       });
@@ -1581,6 +1586,7 @@ export async function saveCompanyInfo(info: Partial<CompanyInfo>): Promise<Compa
       city,
       state,
       defaultMarkupPercent,
+      logoUrl,
       isConfigured: true,
       active: true,
       isMaster: true,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2,
   Save,
@@ -11,8 +11,12 @@ import {
   Loader2,
   TrendingUp,
   Percent,
+  Upload,
+  Trash2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
+import { DismissibleInfoCard } from './DismissibleInfoCard';
 
 const BRAZILIAN_STATES = [
   { uf: 'AC', name: 'Acre' },
@@ -99,6 +103,8 @@ export const CompanyDataView: React.FC = () => {
   const [city, setCity] = useState('');
   const [state, setState] = useState('RJ');
   const [defaultMarkupPercent, setDefaultMarkupPercent] = useState<number | string>(85);
+  const [logoUrl, setLogoUrl] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -113,6 +119,7 @@ export const CompanyDataView: React.FC = () => {
       setAddress(companyInfo.address || '');
       setCity(companyInfo.city || '');
       setState(companyInfo.state || 'RJ');
+      setLogoUrl(companyInfo.logoUrl || '');
       setDefaultMarkupPercent(
         companyInfo.defaultMarkupPercent !== undefined && !isNaN(companyInfo.defaultMarkupPercent)
           ? companyInfo.defaultMarkupPercent
@@ -128,6 +135,75 @@ export const CompanyDataView: React.FC = () => {
   const handleCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatCnpj(e.target.value);
     setCnpj(formatted);
+  };
+
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setErrorMsg('Por favor selecione um arquivo de imagem válido (PNG, JPG, WEBP, SVG).');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('O arquivo de imagem é muito grande. O tamanho máximo permitido é 5MB.');
+      return;
+    }
+
+    setErrorMsg('');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const imgData = event.target?.result as string;
+      if (!imgData) return;
+
+      // Se for SVG, salva direto
+      if (file.type.includes('svg')) {
+        setLogoUrl(imgData);
+        return;
+      }
+
+      // Redimensionamento otimizado via canvas para garantir máxima nitidez com tamanho reduzido
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 384;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height = Math.round((height * MAX_SIZE) / width);
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width = Math.round((width * MAX_SIZE) / height);
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const optimizedDataUrl = canvas.toDataURL('image/png', 0.92);
+          setLogoUrl(optimizedDataUrl);
+        } else {
+          setLogoUrl(imgData);
+        }
+      };
+      img.src = imgData;
+    };
+    reader.readAsDataURL(file);
+
+    // Reseta o input para permitir selecionar o mesmo arquivo novamente
+    e.target.value = '';
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoUrl('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -174,6 +250,7 @@ export const CompanyDataView: React.FC = () => {
         city: city.trim(),
         state: state.trim().toUpperCase(),
         defaultMarkupPercent: markupNum,
+        logoUrl: logoUrl.trim(),
         isConfigured: true,
       });
 
@@ -228,19 +305,24 @@ export const CompanyDataView: React.FC = () => {
         </div>
       )}
 
-      {/* Security & Fiscal Integrity Notice */}
-      <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3.5 shadow-2xs">
-        <ShieldCheck className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
-        <div className="text-xs text-sky-950 space-y-1">
-          <p className="font-bold text-sky-900">
-            Validação Fiscal de NF-e Integrada
-          </p>
-          <p className="text-sky-800 leading-relaxed">
-            O CNPJ cadastrado nesta tela é utilizado como chave de segurança oficial na importação de arquivos XML de Notas Fiscais Eletrônicas. 
-            O servidor só autoriza entradas de NF-e emitidas para o mesmo CNPJ registrado aqui.
-          </p>
+      {/* Security & Fiscal Integrity Notice (Dismissible on first access) */}
+      <DismissibleInfoCard
+        storageKey="dismissed_info_company_fiscal_security"
+        className="bg-sky-50/80 border border-sky-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3.5 shadow-2xs"
+      >
+        <div className="flex items-start gap-3.5">
+          <ShieldCheck className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-sky-950 space-y-1">
+            <p className="font-bold text-sky-900">
+              Validação Fiscal de NF-e Integrada
+            </p>
+            <p className="text-sky-800 leading-relaxed">
+              O CNPJ cadastrado nesta tela é utilizado como chave de segurança oficial na importação de arquivos XML de Notas Fiscais Eletrônicas. 
+              O servidor só autoriza entradas de NF-e emitidas para o mesmo CNPJ registrado aqui.
+            </p>
+          </div>
         </div>
-      </div>
+      </DismissibleInfoCard>
 
       {/* Feedback Messages */}
       {successMsg && (
@@ -261,6 +343,94 @@ export const CompanyDataView: React.FC = () => {
       <form onSubmit={handleSubmit} className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-6 sm:p-8 space-y-6">
           
+          {/* SEÇÃO 1: Logotipo & Identidade Visual */}
+          <div className="border-b border-slate-100 pb-6">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-rose-500" />
+                Identidade Visual & Logotipo
+              </h2>
+              {logoUrl ? (
+                <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 uppercase tracking-tight">
+                  Personalizado
+                </span>
+              ) : (
+                <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-tight">
+                  Padrão do Sistema
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Esta imagem é exibida de forma fixa no topo do menu lateral (sidebar) e nos cabeçalhos operacionais.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+              {/* Box de Prévia (simulando a área de topo do sidebar escuro) */}
+              <div className="flex flex-col items-center gap-1.5 shrink-0">
+                <div className="w-20 h-20 rounded-2xl bg-slate-900 border border-slate-700/80 flex items-center justify-center p-2 shadow-inner relative group">
+                  {logoUrl ? (
+                    <img
+                      src={logoUrl}
+                      alt="Prévia do Logotipo"
+                      className="w-16 h-16 object-contain rounded-xl"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-rose-600 via-pink-500 to-amber-400 p-0.5 flex items-center justify-center shadow-md">
+                      <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center font-black text-rose-600 text-xl tracking-tighter">
+                        G
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  Prévia no Menu
+                </span>
+              </div>
+
+              {/* Controles de Upload e Remoção */}
+              <div className="flex-1 space-y-3 text-center sm:text-left">
+                <div>
+                  <h4 className="text-xs font-black text-slate-800">
+                    {logoUrl ? 'Logotipo Personalizado Selecionado' : 'Logotipo Padrão GummyStock Ativo'}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Envie o arquivo de imagem da sua marca (PNG, JPG, WEBP ou SVG). Dimensão ideal recomendada: quadrada (ex: 256×256 px).
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/png, image/jpeg, image/jpg, image/webp, image/svg+xml"
+                    onChange={handleLogoFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{logoUrl ? 'Substituir Imagem...' : 'Enviar Imagem do Computador...'}</span>
+                  </button>
+
+                  {logoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 font-bold text-xs transition-all active:scale-95 cursor-pointer"
+                      title="Restaurar o logotipo padrão do sistema"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Remover / Restaurar Padrão</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="border-b border-slate-100 pb-4">
             <h2 className="text-sm font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
               <FileText className="w-4 h-4 text-rose-500" />

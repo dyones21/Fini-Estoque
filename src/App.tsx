@@ -146,6 +146,13 @@ const MainApp: React.FC = () => {
     }
   }, [isAuthChecking, currentUser?.id, currentUser?.email, currentUser?.role, currentUser?.permissions, activeTab, checkPermission]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('FINI_SIDEBAR_COLLAPSED') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   // Stock table filter state for drill-down navigation from Dashboard
   const [stockFilters, setStockFilters] = useState<StockFilterOptions>({});
@@ -159,6 +166,13 @@ const MainApp: React.FC = () => {
 
   // Selected product for modals
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  // Scroll to top when any dedicated operational form opens
+  useEffect(() => {
+    if (isProductModalOpen || isSaleModalOpen || isTransferModalOpen || isMovementModalOpen || isNFModalOpen) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [isProductModalOpen, isSaleModalOpen, isTransferModalOpen, isMovementModalOpen, isNFModalOpen]);
 
   // Product History Modal state
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -202,9 +216,9 @@ const MainApp: React.FC = () => {
   // Nota: SaaSMasterScreen desativada para manter fluxo direto no GummyStock
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-800 antialiased selection:bg-rose-500 selection:text-white">
+    <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-800 antialiased selection:bg-rose-500 selection:text-white w-full max-w-full overflow-x-hidden">
       
-      {/* Header with activeTab sync and sale modal trigger */}
+      {/* Header with activeTab sync and sale modal trigger (Molda-se à largura do sidebar fixo) */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -212,12 +226,13 @@ const MainApp: React.FC = () => {
         onOpenSaleModal={() => handleOpenSaleForProduct()}
         onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMobileMenuOpen={isMobileMenuOpen}
+        isSidebarCollapsed={isSidebarCollapsed}
       />
 
       {/* Main Content Layout */}
-      <div className="flex-1 flex flex-col lg:flex-row max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 gap-4 sm:gap-6">
+      <div className="flex-1 flex flex-col lg:flex-row w-full min-w-0">
         
-        {/* Sidebar */}
+        {/* Sidebar (Fixo na lateral, sem barra de rolagem) */}
         <Sidebar
           activeTab={activeTab}
           setActiveTab={(tab) => {
@@ -232,12 +247,52 @@ const MainApp: React.FC = () => {
           onOpenSaleModal={() => handleOpenSaleForProduct()}
           isMobileOpen={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
+          isCollapsed={isSidebarCollapsed}
+          onCollapseChange={setIsSidebarCollapsed}
         />
 
-        {/* View Switcher Container with ErrorBoundary and Smooth Fade-In Transition */}
-        <main className="flex-1 min-w-0">
-          <ErrorBoundary>
-            <div key={activeTab} className="animate-moduleFadeIn">
+        {/* View Switcher Container with ErrorBoundary and Smooth Fade-In Transition (Compensa largura do sidebar fixo) */}
+        <main
+          className={`flex-1 min-w-0 px-3 sm:px-6 lg:px-8 py-4 sm:py-6 transition-all duration-300 ${
+            isSidebarCollapsed ? 'lg:ml-16' : 'lg:ml-[220px]'
+          }`}
+        >
+          <div className="max-w-7xl mx-auto w-full">
+            {isProductModalOpen ? (
+              <ProductFormModal
+                isOpen={isProductModalOpen}
+                onClose={() => {
+                  setIsProductModalOpen(false);
+                  setSelectedProduct(null);
+                }}
+                editingProduct={selectedProduct}
+              />
+            ) : isSaleModalOpen ? (
+              <StoreSaleModal
+                isOpen={isSaleModalOpen}
+                onClose={() => setIsSaleModalOpen(false)}
+                preselectedProduct={selectedProduct}
+              />
+            ) : isTransferModalOpen ? (
+              <TransferModal
+                isOpen={isTransferModalOpen}
+                onClose={() => setIsTransferModalOpen(false)}
+                preselectedProduct={selectedProduct}
+              />
+            ) : isMovementModalOpen ? (
+              <MovementModal
+                isOpen={isMovementModalOpen}
+                onClose={() => setIsMovementModalOpen(false)}
+                preselectedProduct={selectedProduct}
+              />
+            ) : isNFModalOpen ? (
+              <NFEntryModal
+                isOpen={isNFModalOpen}
+                onClose={() => setIsNFModalOpen(false)}
+              />
+            ) : (
+              <ErrorBoundary>
+                <div key={activeTab} className="animate-moduleFadeIn">
               {activeTab === 'dashboard' && (
                 checkPermission('canViewDashboard') ? (
                   <Dashboard
@@ -379,49 +434,19 @@ const MainApp: React.FC = () => {
               )}
             </div>
           </ErrorBoundary>
+        )}
+          </div>
         </main>
       </div>
 
       {/* Global Dedicated Login Page & Account Switcher Portal */}
       <LoginPage />
 
-      {/* Operational Modals */}
-      <StoreSaleModal
-        isOpen={isSaleModalOpen}
-        onClose={() => setIsSaleModalOpen(false)}
-        preselectedProduct={selectedProduct}
-      />
-
+      {/* Product History Modal (Audit Popover) */}
       <ProductHistoryModal
         isOpen={isHistoryModalOpen}
         onClose={() => setIsHistoryModalOpen(false)}
         product={historyProduct}
-      />
-
-      <NFEntryModal
-        isOpen={isNFModalOpen}
-        onClose={() => setIsNFModalOpen(false)}
-      />
-
-      <TransferModal
-        isOpen={isTransferModalOpen}
-        onClose={() => setIsTransferModalOpen(false)}
-        preselectedProduct={selectedProduct}
-      />
-
-      <MovementModal
-        isOpen={isMovementModalOpen}
-        onClose={() => setIsMovementModalOpen(false)}
-        preselectedProduct={selectedProduct}
-      />
-
-      <ProductFormModal
-        isOpen={isProductModalOpen}
-        onClose={() => {
-          setIsProductModalOpen(false);
-          setSelectedProduct(null);
-        }}
-        editingProduct={selectedProduct}
       />
 
     </div>

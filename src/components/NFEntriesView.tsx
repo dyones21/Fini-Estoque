@@ -32,6 +32,8 @@ import {
 import { useStock } from '../context/StockContext';
 import { NFEntry } from '../types';
 import { formatCurrency, formatDate, formatDateTime } from '../utils/inventoryUtils';
+import { PaginationControls } from './PaginationControls';
+import { FilterCollapseBar } from './FilterCollapseBar';
 
 interface NFEntriesViewProps {
   onOpenNFModal: () => void;
@@ -46,6 +48,19 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'date_desc' | 'date_asc' | 'val_desc' | 'val_asc'>('date_desc');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchTerm.trim()) count++;
+    if (sortOrder !== 'date_desc') count++;
+    return count;
+  }, [searchTerm, sortOrder]);
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setSortOrder('date_desc');
+  };
 
   // Selected NF for Detail Modal
   const [selectedNF, setSelectedNF] = useState<NFEntry | null>(null);
@@ -216,8 +231,23 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
     return nfEntries.reduce((acc, nf) => acc + (nf.totalValue || 0), 0);
   }, [nfEntries]);
 
+  // Pagination State (Default 50 items per page)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  // Reset page when search or sort order changes
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, sortOrder]);
+
+  // Paginated NFs
+  const paginatedNFs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredNFs.slice(start, start + pageSize);
+  }, [filteredNFs, currentPage, pageSize]);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full min-w-0 overflow-hidden">
       {/* Header Banner */}
       <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -292,44 +322,64 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <div className="relative w-full sm:w-80 md:w-96">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Buscar por número da NF, fornecedor ou CNPJ..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-rose-500 focus:bg-white transition-all"
-          />
-          {searchTerm && (
+      {/* Filter and Search Bar - Collapsed by Default */}
+      <FilterCollapseBar
+        isOpen={isFiltersOpen}
+        onToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+        activeCount={activeFiltersCount}
+        onClear={handleClearFilters}
+        label="Opções de Filtros de Notas Fiscais"
+      >
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full pt-1">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Buscar por número da NF, fornecedor ou CNPJ..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-9 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5 shrink-0">
+              <ArrowUpDown className="w-3.5 h-3.5" />
+              Ordenar:
+            </span>
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as any)}
+              className="py-2 px-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-rose-500/20 cursor-pointer"
+            >
+              <option value="date_desc">Mais recentes primeiro</option>
+              <option value="date_asc">Mais antigas primeiro</option>
+              <option value="val_desc">Maior valor total</option>
+              <option value="val_asc">Menor valor total</option>
+            </select>
+          </div>
+
+          {activeFiltersCount > 0 && (
             <button
-              onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              type="button"
+              onClick={handleClearFilters}
+              className="py-2 px-3 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-rose-200 text-xs font-bold shrink-0 transition-colors flex items-center justify-center gap-1.5"
+              title="Limpar Filtros"
             >
               <X className="w-3.5 h-3.5" />
+              <span>Limpar</span>
             </button>
           )}
         </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-          <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5 shrink-0">
-            <ArrowUpDown className="w-3.5 h-3.5" />
-            Ordenar:
-          </span>
-          <select
-            value={sortOrder}
-            onChange={(e) => setSortOrder(e.target.value as any)}
-            className="py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-rose-500 cursor-pointer"
-          >
-            <option value="date_desc">Mais recentes primeiro</option>
-            <option value="date_asc">Mais antigas primeiro</option>
-            <option value="val_desc">Maior valor total</option>
-            <option value="val_asc">Menor valor total</option>
-          </select>
-        </div>
-      </div>
+      </FilterCollapseBar>
 
       {/* Main NF List Table */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -359,123 +409,207 @@ export const NFEntriesView: React.FC<NFEntriesViewProps> = ({ onOpenNFModal }) =
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-                  <th className="py-3.5 px-4 sm:px-6">Número da NF</th>
-                  <th className="py-3.5 px-4">Fornecedor</th>
-                  <th className="py-3.5 px-4">Recebimento</th>
-                  <th className="py-3.5 px-4 text-center">Itens / Qtd</th>
-                  <th className="py-3.5 px-4 text-right">Valor Total</th>
-                  <th className="py-3.5 px-4 sm:px-6 text-center">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {filteredNFs.map((nf) => {
-                  const totalItemsQty = nf.items?.reduce((acc, it) => acc + (it.quantity || 0), 0) || 0;
-                  const totalSKUs = nf.items?.length || 0;
+          <>
+            {/* DESKTOP TABLE VIEW */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                    <th className="py-3.5 px-4 sm:px-6">Número da NF</th>
+                    <th className="py-3.5 px-4">Fornecedor</th>
+                    <th className="py-3.5 px-4">Recebimento</th>
+                    <th className="py-3.5 px-4 text-center">Itens / Qtd</th>
+                    <th className="py-3.5 px-4 text-right">Valor Total</th>
+                    <th className="py-3.5 px-4 sm:px-6 text-center">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {paginatedNFs.map((nf) => {
+                    const totalItemsQty = nf.items?.reduce((acc, it) => acc + (it.quantity || 0), 0) || 0;
+                    const totalSKUs = nf.items?.length || 0;
 
-                  return (
-                    <tr
-                      key={nf.id}
-                      className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
-                      onClick={() => setSelectedNF(nf)}
-                    >
-                      {/* Número da NF */}
-                      <td className="py-4 px-4 sm:px-6 font-bold text-slate-900">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-black text-xs shrink-0 border border-rose-100 group-hover:bg-rose-600 group-hover:text-white transition-colors">
-                            <Receipt className="w-4 h-4" />
+                    return (
+                      <tr
+                        key={nf.id}
+                        className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
+                        onClick={() => setSelectedNF(nf)}
+                      >
+                        {/* Número da NF */}
+                        <td className="py-4 px-4 sm:px-6 font-bold text-slate-900">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-black text-xs shrink-0 border border-rose-100 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                              <Receipt className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span className="font-extrabold text-slate-900 block text-xs sm:text-sm">
+                                NF #{nf.numberNF}
+                              </span>
+                              {nf.accessKey && (
+                                <span className="text-[10px] text-slate-400 font-mono block truncate max-w-[140px]" title={nf.accessKey}>
+                                  {nf.accessKey.slice(0, 16)}...
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div>
-                            <span className="font-extrabold text-slate-900 block text-xs sm:text-sm">
-                              NF #{nf.numberNF}
+                        </td>
+
+                        {/* Fornecedor */}
+                        <td className="py-4 px-4">
+                          <div className="max-w-[220px]">
+                            <span className="font-bold text-slate-800 block truncate" title={nf.supplier}>
+                              {nf.supplier || 'Fornecedor não identificado'}
                             </span>
-                            {nf.accessKey && (
-                              <span className="text-[10px] text-slate-400 font-mono block truncate max-w-[140px]" title={nf.accessKey}>
-                                {nf.accessKey.slice(0, 16)}...
+                            {nf.cnpjSupplier && (
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                CNPJ: {nf.cnpjSupplier}
                               </span>
                             )}
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Fornecedor */}
-                      <td className="py-4 px-4">
-                        <div className="max-w-[220px]">
-                          <span className="font-bold text-slate-800 block truncate" title={nf.supplier}>
-                            {nf.supplier || 'Fornecedor não identificado'}
-                          </span>
-                          {nf.cnpjSupplier && (
-                            <span className="text-[11px] text-slate-400 font-mono">
-                              CNPJ: {nf.cnpjSupplier}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Data de Recebimento */}
-                      <td className="py-4 px-4">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-1.5 text-slate-700 font-semibold text-xs">
-                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>{formatDate(nf.receiveDate || nf.issueDate)}</span>
+                        {/* Data de Recebimento */}
+                        <td className="py-4 px-4">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5 text-slate-700 font-semibold text-xs">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>{formatDate(nf.receiveDate || nf.issueDate)}</span>
+                            </div>
+                            {nf.issueDate && nf.issueDate !== nf.receiveDate && (
+                              <span className="text-[10px] text-slate-400 block">
+                                Emissão: {formatDate(nf.issueDate)}
+                              </span>
+                            )}
                           </div>
-                          {nf.issueDate && nf.issueDate !== nf.receiveDate && (
-                            <span className="text-[10px] text-slate-400 block">
-                              Emissão: {formatDate(nf.issueDate)}
-                            </span>
-                          )}
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Itens e Qtd */}
-                      <td className="py-4 px-4 text-center">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">
-                          <Package className="w-3.5 h-3.5 text-slate-500" />
-                          <span>{totalItemsQty} un</span>
-                          <span className="text-[10px] text-slate-400 font-normal">({totalSKUs} {totalSKUs === 1 ? 'item' : 'itens'})</span>
-                        </span>
-                      </td>
+                        {/* Itens e Qtd */}
+                        <td className="py-4 px-4 text-center">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">
+                            <Package className="w-3.5 h-3.5 text-slate-500" />
+                            <span>{totalItemsQty} un</span>
+                            <span className="text-[10px] text-slate-400 font-normal">({totalSKUs} {totalSKUs === 1 ? 'item' : 'itens'})</span>
+                          </span>
+                        </td>
 
-                      {/* Valor Total */}
-                      <td className="py-4 px-4 text-right">
-                        <span className="font-extrabold text-emerald-600 text-sm">
-                          {formatCurrency(nf.totalValue || 0)}
-                        </span>
-                      </td>
+                        {/* Valor Total */}
+                        <td className="py-4 px-4 text-right">
+                          <span className="font-extrabold text-emerald-600 text-sm">
+                            {formatCurrency(nf.totalValue || 0)}
+                          </span>
+                        </td>
 
-                      {/* Ações */}
-                      <td className="py-4 px-4 sm:px-6 text-center" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => setSelectedNF(nf)}
-                            title="Ver Detalhes da Nota Fiscal"
-                            className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 transition-colors border border-slate-200/60"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-
-                          {canDeleteNF && (
+                        {/* Ações */}
+                        <td className="py-4 px-4 sm:px-6 text-center" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => setNfToDelete(nf)}
-                              title="Excluir Nota Fiscal (Reverter Estoque)"
-                              className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors border border-slate-200/60"
+                              onClick={() => setSelectedNF(nf)}
+                              title="Ver Detalhes da Nota Fiscal"
+                              className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 transition-colors border border-slate-200/60"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Eye className="w-4 h-4" />
                             </button>
-                          )}
+
+                            {canDeleteNF && (
+                              <button
+                                onClick={() => setNfToDelete(nf)}
+                                title="Excluir Nota Fiscal (Reverter Estoque)"
+                                className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors border border-slate-200/60"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* MOBILE CARDS VIEW */}
+            <div className="block md:hidden p-3 space-y-3 bg-slate-50/50">
+              {paginatedNFs.map((nf) => {
+                const totalItemsQty = nf.items?.reduce((acc, it) => acc + (it.quantity || 0), 0) || 0;
+                const totalSKUs = nf.items?.length || 0;
+
+                return (
+                  <div
+                    key={nf.id}
+                    onClick={() => setSelectedNF(nf)}
+                    className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-3 text-left transition-all active:scale-[0.99] cursor-pointer"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-black text-xs shrink-0 border border-rose-100">
+                          <Receipt className="w-4 h-4" />
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        <div>
+                          <span className="font-extrabold text-slate-900 text-sm block">
+                            NF #{nf.numberNF}
+                          </span>
+                          <span className="text-[11px] text-slate-500 font-semibold block truncate max-w-[180px]">
+                            {nf.supplier || 'Fornecedor não informado'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <span className="font-extrabold text-emerald-600 text-sm">
+                        {formatCurrency(nf.totalValue || 0)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] bg-slate-50 p-2 rounded-xl border border-slate-100">
+                      <span className="text-slate-600 font-medium">
+                        Rec: <strong className="text-slate-800">{formatDate(nf.receiveDate || nf.issueDate)}</strong>
+                      </span>
+                      <span className="inline-flex items-center gap-1 font-bold text-slate-700">
+                        <Package className="w-3 h-3 text-slate-400" />
+                        {totalItemsQty} un ({totalSKUs} SKUs)
+                      </span>
+                    </div>
+
+                    <div
+                      className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => setSelectedNF(nf)}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl flex items-center gap-1 transition-colors"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Ver Itens</span>
+                      </button>
+
+                      {canDeleteNF && (
+                        <button
+                          onClick={() => setNfToDelete(nf)}
+                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs rounded-xl transition-colors"
+                          title="Excluir Nota"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
+
+      {/* Pagination Controls */}
+      {filteredNFs.length > 0 && (
+        <PaginationControls
+          currentPage={currentPage}
+          totalItems={filteredNFs.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemName="notas fiscais"
+        />
+      )}
 
       {/* ================= MODAL DE DETALHES DA NOTA FISCAL ================= */}
       {selectedNF && (

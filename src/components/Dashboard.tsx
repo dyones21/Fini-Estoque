@@ -15,6 +15,7 @@ import {
   Layers,
   ArrowRight,
   AlertCircle,
+  X,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -33,6 +34,7 @@ import { formatCurrency, getDaysToExpiration } from '../utils/inventoryUtils';
 import { authFetch } from '../utils/apiAuth';
 import { ActiveTab } from './Sidebar';
 import { Payable } from '../types';
+import { PaginationControls } from './PaginationControls';
 
 export interface StockFilterOptions {
   searchQuery?: string;
@@ -49,6 +51,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
   const { products, nfEntries, checkPermission } = useStock();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('todos');
+
+  // Pagination State (Default 50 items per page with selector)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategory]);
 
   // Contas a Pagar Summary state (only loaded if user has permission)
   const canManagePayables = checkPermission('canManagePayables');
@@ -207,8 +217,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
     });
   }, [products, searchTerm, selectedCategory]);
 
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredProducts.slice(start, start + pageSize);
+  }, [filteredProducts, currentPage, pageSize]);
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div className="space-y-6 animate-in fade-in duration-200 w-full max-w-full min-w-0 overflow-hidden">
       
       {/* Top Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
@@ -640,23 +655,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
           </div>
 
           {/* Search & Category Select Controls */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[200px]">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-64">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Buscar produto, EAN ou SKU..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full text-xs pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-500 font-semibold"
+                className="w-full text-xs pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-500 font-semibold"
               />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
-            <div className="relative">
+            <div className="relative shrink-0">
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="text-xs py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-500 font-semibold text-slate-700"
+                className="w-full sm:w-auto text-xs py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-500 font-semibold text-slate-700"
               >
                 <option value="todos">Todas Categorias ({categories.length})</option>
                 {categories.map((cat) => (
@@ -669,9 +693,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
           </div>
         </div>
 
-        {/* Scrollable Data Table */}
-        <div className="border border-slate-200 rounded-2xl overflow-x-auto shadow-xs">
-          <table className="w-full min-w-[950px] text-left text-xs">
+        {/* Desktop Table View */}
+        <div className="hidden md:block border border-slate-200 rounded-2xl overflow-x-auto shadow-xs">
+          <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 font-extrabold uppercase text-[10px] border-b border-slate-200">
               <tr>
                 <th className="py-3 px-4">Produto & Cód. EAN</th>
@@ -686,14 +710,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredProducts.length === 0 ? (
+              {paginatedProducts.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-8 text-center text-slate-400 font-semibold">
                     Nenhum produto encontrado para os filtros selecionados.
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((p) => {
+                paginatedProducts.map((p) => {
                   const totalQty = p.stockDeposito + p.stockLoja;
                   const totalValuation = totalQty * p.costPrice;
                   const isLowStock = p.stockDeposito <= p.minStockDeposito || p.stockLoja <= p.minStockLoja;
@@ -801,6 +825,94 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onNavigateTo
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Cards View */}
+        <div className="block md:hidden p-3 space-y-3 bg-slate-50/50 rounded-2xl border border-slate-200">
+          {paginatedProducts.length === 0 ? (
+            <div className="p-6 text-center text-slate-400 font-semibold">
+              Nenhum produto encontrado para os filtros selecionados.
+            </div>
+          ) : (
+            paginatedProducts.map((p) => {
+              const totalQty = p.stockDeposito + p.stockLoja;
+              const isLowStock = p.stockDeposito <= p.minStockDeposito || p.stockLoja <= p.minStockLoja;
+              const daysToExp = getDaysToExpiration(p.expirationDate);
+
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => handleDrillDown({ searchQuery: p.name })}
+                  className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2.5 cursor-pointer hover:border-rose-300 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-extrabold text-slate-900 text-sm block truncate">
+                        {p.name} ➔
+                      </span>
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                        <span>{p.category}</span>
+                        {p.sku && (
+                          <span className="font-mono bg-slate-100 px-1 py-0.2 rounded text-[10px]">
+                            {p.sku}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {isLowStock ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 uppercase shrink-0">
+                        Estoque Baixo
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 uppercase shrink-0">
+                        Estoque OK
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-100">
+                    <div className="p-2 rounded-xl bg-slate-50">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Estoque Físico</span>
+                      <span className="font-black text-slate-900 block">{totalQty} {p.unit} total</span>
+                      <span className="text-[10px] text-slate-500 block">Dep: {p.stockDeposito} | Loja: {p.stockLoja}</span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-50">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Preços</span>
+                      <span className="font-extrabold text-emerald-700 block">Venda: {formatCurrency(p.sellPrice)}</span>
+                      <span className="text-[10px] text-slate-500 block">Custo: {formatCurrency(p.costPrice)}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
+                    <span className="text-[10px] text-slate-500 font-mono">Lote: {p.batchNumber}</span>
+                    <span
+                      className={`text-[10px] font-bold ${
+                        daysToExp < 0
+                          ? 'text-rose-700 font-black'
+                          : daysToExp <= 30
+                          ? 'text-amber-700'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      Val: {p.expirationDate}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Pagination Controls */}
+        <div className="pt-2 border-t border-slate-100">
+          <PaginationControls
+            currentPage={currentPage}
+            totalItems={filteredProducts.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            itemName="produtos"
+          />
         </div>
       </div>
 

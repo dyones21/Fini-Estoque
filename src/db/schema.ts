@@ -28,6 +28,7 @@ export const companyInfo = pgTable('company_info', {
   city: text('city').notNull(),
   state: text('state').notNull(),
   defaultMarkupPercent: doublePrecision('default_markup_percent').notNull().default(85),
+  logoUrl: text('logo_url').default(''),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 

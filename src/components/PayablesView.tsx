@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   DollarSign,
   Plus,
@@ -27,6 +28,7 @@ import {
   Repeat,
   Layers,
   CalendarDays,
+  ArrowLeft,
 } from 'lucide-react';
 import { Payable, Supplier, PayablePayment, PayableStatus, PAYABLE_CATEGORIES } from '../types';
 import { authFetch } from '../utils/apiAuth';
@@ -34,6 +36,8 @@ import { formatCurrency, parseNumber } from '../utils/inventoryUtils';
 import { exportToExcel } from '../utils/exportUtils';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { maskCurrency, parseCurrencyToNumber, formatDisplayDate } from '../utils/maskUtils';
+import { PaginationControls } from './PaginationControls';
+import { FilterCollapseBar } from './FilterCollapseBar';
 
 interface PayablesViewProps {
   initialFilterStatus?: string;
@@ -64,6 +68,25 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isFiltersOpen, setIsFiltersOpen] = useState<boolean>(false);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchTerm.trim()) count++;
+    if (statusFilter !== 'todos') count++;
+    if (supplierFilter !== 'todos') count++;
+    if (startDate) count++;
+    if (endDate) count++;
+    return count;
+  }, [searchTerm, statusFilter, supplierFilter, startDate, endDate]);
+
+  const handleClearFilters = () => {
+    setStatusFilter('todos');
+    setSupplierFilter('todos');
+    setStartDate('');
+    setEndDate('');
+    setSearchTerm('');
+  };
 
   // Table Sorting State (Padrão: Vencimento mais próximo primeiro)
   type SortField =
@@ -371,33 +394,16 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
     }
   }, [initialFilterStatus]);
 
-  // Calculations for KPI Cards
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const next7DaysStr = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-  const kpis = useMemo(() => {
-    let totalOpen = 0;
-    let totalOverdue = 0;
-    let totalNext7Days = 0;
-    let totalPaid = 0;
-
-    for (const p of payables) {
-      if (p.status === 'cancelado') continue;
-      const remaining = Number(p.remainingAmount ?? (p.originalAmount - p.paidAmount)) || 0;
-      totalPaid += Number(p.paidAmount) || 0;
-
-      if (remaining > 0) {
-        totalOpen += remaining;
-        if (p.dueDate < todayStr) {
-          totalOverdue += remaining;
-        } else if (p.dueDate >= todayStr && p.dueDate <= next7DaysStr) {
-          totalNext7Days += remaining;
-        }
-      }
+  useEffect(() => {
+    if (isFormModalOpen) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
+  }, [isFormModalOpen]);
 
-    return { totalOpen, totalOverdue, totalNext7Days, totalPaid };
-  }, [payables, todayStr, next7DaysStr]);
+  // Dates for Due Date Tracking
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const tomorrowStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const next7DaysStr = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   // Filtered & Sorted Payables (Padrão: Vencimento mais próximo primeiro)
   const filteredPayables = useMemo(() => {
@@ -483,6 +489,46 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
     todayStr,
     next7DaysStr,
   ]);
+
+  // Calculations for KPI Cards dynamically based on applied filters
+  const kpis = useMemo(() => {
+    let totalOpen = 0;
+    let totalOverdue = 0;
+    let totalNext7Days = 0;
+    let totalPaid = 0;
+
+    for (const p of filteredPayables) {
+      if (p.status === 'cancelado') continue;
+      const remaining = Number(p.remainingAmount ?? (p.originalAmount - p.paidAmount)) || 0;
+      totalPaid += Number(p.paidAmount) || 0;
+
+      if (remaining > 0) {
+        totalOpen += remaining;
+        if (p.dueDate < todayStr) {
+          totalOverdue += remaining;
+        } else if (p.dueDate >= todayStr && p.dueDate <= next7DaysStr) {
+          totalNext7Days += remaining;
+        }
+      }
+    }
+
+    return { totalOpen, totalOverdue, totalNext7Days, totalPaid };
+  }, [filteredPayables, todayStr, next7DaysStr]);
+
+  // Pagination State (Default 50 items per page)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, supplierFilter, startDate, endDate, searchTerm]);
+
+  // Paginated Payables
+  const paginatedPayables = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredPayables.slice(start, start + pageSize);
+  }, [filteredPayables, currentPage, pageSize]);
 
   // Prévia das parcelas ou recorrências geradas em tempo real
   const generatedEntriesPreview = useMemo(() => {
@@ -1072,8 +1118,500 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
     }
   };
 
+  if (isFormModalOpen) {
+    return (
+      <div className="w-full max-w-4xl mx-auto space-y-6 animate-in fade-in duration-200">
+        {/* Navigation & Title Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setIsFormModalOpen(false);
+                setFormError('');
+              }}
+              className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center justify-center shrink-0"
+              title="Voltar para a lista de contas"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                  {editingPayable ? 'Editar Conta a Pagar' : 'Nova Conta a Pagar'}
+                </h1>
+                {!editingPayable && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-100 text-sky-800">
+                    {entryType === 'unico' ? 'Lançamento Único' : entryType === 'parcelado' ? 'Parcelado' : 'Recorrente'}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 font-medium">
+                {editingPayable
+                  ? 'Altere as informações da conta a pagar selecionada'
+                  : 'Cadastre um novo compromisso financeiro, despesa operacional ou pagamento de fornecedor'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setIsFormModalOpen(false);
+                setFormError('');
+              }}
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-colors"
+            >
+              Cancelar e Voltar
+            </button>
+            <button
+              type="submit"
+              form="payable-dedicated-form"
+              disabled={isSavingForm}
+              className="flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-colors disabled:opacity-50"
+            >
+              {isSavingForm ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{editingPayable ? 'Salvar Alterações' : 'Salvar Conta a Pagar'}</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Dedicated Form Card */}
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 sm:p-8">
+          <form id="payable-dedicated-form" onSubmit={handleSaveForm} className="space-y-6">
+            {formError && (
+              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2.5 animate-in fade-in">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <span className="font-semibold">{formError}</span>
+              </div>
+            )}
+
+            {/* Scope Selection for Recurring/Installment series when editing */}
+            {editingPayable && futurePendingInSeries.length > 1 && (
+              <div className="p-4 bg-sky-50/70 border border-sky-200 rounded-2xl space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-sky-900">
+                  <Layers className="w-4 h-4 text-sky-600" />
+                  <span>Esta conta faz parte de uma série ({futurePendingInSeries.length} parcelas futuras pendentes)</span>
+                </div>
+                <p className="text-[11px] text-sky-700">
+                  Escolha se deseja atualizar somente esta conta ou propagar as alterações (descrição, categoria, valor, etc.) para todas as próximas pendentes da série.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <label
+                    onClick={() => setEditScope('single')}
+                    className={`p-3 rounded-xl border cursor-pointer text-xs flex items-center gap-2 transition-all ${
+                      editScope === 'single'
+                        ? 'bg-white border-sky-500 font-bold text-sky-900 shadow-xs'
+                        : 'bg-white/50 border-slate-200 text-slate-600 hover:bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="editScope"
+                      checked={editScope === 'single'}
+                      onChange={() => setEditScope('single')}
+                      className="text-sky-600"
+                    />
+                    <span>Apenas esta conta</span>
+                  </label>
+                  <label
+                    onClick={() => setEditScope('series_future')}
+                    className={`p-3 rounded-xl border cursor-pointer text-xs flex items-center gap-2 transition-all ${
+                      editScope === 'series_future'
+                        ? 'bg-white border-sky-500 font-bold text-sky-900 shadow-xs'
+                        : 'bg-white/50 border-slate-200 text-slate-600 hover:bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="editScope"
+                      checked={editScope === 'series_future'}
+                      onChange={() => setEditScope('series_future')}
+                      className="text-sky-600"
+                    />
+                    <span>Esta e todas as {futurePendingInSeries.length} futuras pendentes</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Entry Type selector when creating */}
+            {!editingPayable && (
+              <div className="space-y-2">
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-wider">
+                  Tipo de Lançamento
+                </label>
+                <div className="grid grid-cols-3 gap-2 p-1.5 bg-slate-100 rounded-2xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() => setEntryType('unico')}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all ${
+                      entryType === 'unico'
+                        ? 'bg-white text-sky-900 shadow-xs border border-slate-200/60'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Receipt className="w-4 h-4 text-sky-600" />
+                    <span>Único</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEntryType('parcelado')}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all ${
+                      entryType === 'parcelado'
+                        ? 'bg-white text-indigo-900 shadow-xs border border-slate-200/60'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Layers className="w-4 h-4 text-indigo-600" />
+                    <span>Parcelado</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEntryType('recorrente')}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all ${
+                      entryType === 'recorrente'
+                        ? 'bg-white text-emerald-900 shadow-xs border border-slate-200/60'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Repeat className="w-4 h-4 text-emerald-600" />
+                    <span>Recorrente</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Row 1: Fornecedor e Categoria */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Building className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Fornecedor</span>
+                </label>
+                <select
+                  value={formData.supplierId}
+                  onChange={(e) => setFormData({ ...formData, supplierId: e.target.value })}
+                  className="w-full text-xs p-3 rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-medium"
+                >
+                  <option value="">Sem Fornecedor Vinculado (Geral / Outros)</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.cnpj ? `(${s.cnpj})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Categoria de Despesa</span>
+                </label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full text-xs p-3 rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-medium"
+                >
+                  {PAYABLE_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Row 2: Descrição e Documento */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Descrição da Conta *</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Compra de Mercadorias, Aluguel Loja, Conta de Energia, etc."
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nº Documento / NF
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: NF-12345"
+                  value={formData.documentNumber}
+                  onChange={(e) => setFormData({ ...formData, documentNumber: e.target.value })}
+                  className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-medium"
+                />
+              </div>
+            </div>
+
+            {/* Row 3: Datas e Valor */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Data de Emissão</span>
+                </label>
+                <input
+                  type="date"
+                  value={formData.issueDate}
+                  onChange={(e) => setFormData({ ...formData, issueDate: e.target.value })}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-amber-900 mb-1 flex items-center gap-1.5">
+                  <CalendarDays className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Data de Vencimento *</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={formData.dueDate}
+                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                  className="w-full text-xs p-2.5 rounded-xl border border-amber-300 bg-amber-50/50 focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-bold text-amber-950"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-sky-900 mb-1 flex items-center gap-1.5">
+                  <DollarSign className="w-3.5 h-3.5 text-sky-600" />
+                  <span>
+                    {entryType === 'parcelado'
+                      ? 'Valor Total das Parcelas *'
+                      : entryType === 'recorrente'
+                      ? 'Valor por Ocorrência *'
+                      : 'Valor Original *'}
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="R$ 0,00"
+                  value={formData.originalAmount}
+                  onChange={(e) =>
+                    setFormData({ ...formData, originalAmount: maskCurrency(e.target.value) })
+                  }
+                  className="w-full text-xs p-2.5 rounded-xl border border-sky-300 bg-sky-50/50 focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-black text-sky-950"
+                />
+              </div>
+            </div>
+
+            {/* Configurações de Parcelas / Recorrência (quando em lote e criando) */}
+            {!editingPayable && entryType !== 'unico' && (
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    {entryType === 'parcelado' ? (
+                      <>
+                        <Layers className="w-4 h-4 text-indigo-600" />
+                        <span>Configuração do Parcelamento</span>
+                      </>
+                    ) : (
+                      <>
+                        <Repeat className="w-4 h-4 text-emerald-600" />
+                        <span>Configuração da Recorrência</span>
+                      </>
+                    )}
+                  </h3>
+                  <span className="text-[11px] text-slate-500 font-semibold">
+                    {entryType === 'parcelado'
+                      ? `${installmentsCount} parcelas calculadas`
+                      : `${recurrenceCount} ocorrências programadas`}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {entryType === 'parcelado' ? (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Número de Parcelas
+                      </label>
+                      <select
+                        value={installmentsCount}
+                        onChange={(e) => setInstallmentsCount(parseInt(e.target.value, 10))}
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white font-bold"
+                      >
+                        {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24, 36, 48, 60, 72].map((n) => (
+                          <option key={n} value={n}>
+                            {n}x parcelas
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Quantidade de Repetições
+                      </label>
+                      <select
+                        value={recurrenceCount}
+                        onChange={(e) => setRecurrenceCount(parseInt(e.target.value, 10))}
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white font-bold"
+                      >
+                        {[2, 3, 4, 5, 6, 12, 18, 24, 36, 48, 60].map((n) => (
+                          <option key={n} value={n}>
+                            {n} repetições ({n} meses/períodos)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Intervalo de Repetição
+                    </label>
+                    <select
+                      value={intervalType}
+                      onChange={(e) => setIntervalType(e.target.value as IntervalType)}
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white font-bold"
+                    >
+                      <option value="mensal">Mensal (Padrão - A cada 30 dias)</option>
+                      <option value="quinzenal">Quinzenal (A cada 15 dias)</option>
+                      <option value="semanal">Semanal (A cada 7 dias)</option>
+                      <option value="trimestral">Trimestral (A cada 3 meses)</option>
+                      <option value="semestral">Semanal (A cada 6 meses)</option>
+                      <option value="anual">Anual (A cada 12 meses)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Pré-visualização das Parcelas */}
+                {generatedEntriesPreview.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <p className="text-[11px] font-bold text-slate-600">
+                      Pré-visualização dos Vencimentos:
+                    </p>
+                    <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+                      {generatedEntriesPreview.map((item) => (
+                        <div
+                          key={item.index}
+                          className="flex items-center justify-between px-3 py-2 text-xs hover:bg-slate-50 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-600">
+                              {item.index}
+                            </span>
+                            <span className="font-semibold text-slate-800">{item.description}</span>
+                          </div>
+                          <div className="flex items-center gap-4 text-right">
+                            <span className="text-slate-500 text-[11px]">
+                              Venc: <strong className="text-slate-700">{formatDisplayDate(item.dueDate)}</strong>
+                            </span>
+                            <span className="font-bold text-sky-800">
+                              {formatCurrency(item.amount)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Observações */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Observações Adicionais (opcional)
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Ex: Condições acordadas com o fornecedor, dados bancários para transferência Pix, centro de custo, etc."
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-medium"
+              />
+            </div>
+
+            {/* Bottom Actions Bar */}
+            <div className="pt-4 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFormModalOpen(false);
+                  setFormError('');
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold transition-colors"
+              >
+                Cancelar e Voltar
+              </button>
+              <button
+                type="submit"
+                disabled={isSavingForm}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-xs transition-colors disabled:opacity-50"
+              >
+                {isSavingForm ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Salvando...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{editingPayable ? 'Salvar Alterações' : 'Salvar Conta a Pagar'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Floating Toast Notification if open */}
+        {toastMessage && (
+          <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom duration-200 max-w-sm">
+            <div
+              className={`p-4 rounded-2xl shadow-xl border flex items-center gap-3 text-xs font-bold ${
+                toastMessage.type === 'success'
+                  ? 'bg-emerald-900 text-emerald-100 border-emerald-700'
+                  : toastMessage.type === 'error'
+                  ? 'bg-rose-900 text-rose-100 border-rose-700'
+                  : 'bg-slate-900 text-slate-100 border-slate-700'
+              }`}
+            >
+              {toastMessage.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : toastMessage.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <Receipt className="w-4 h-4 text-sky-400 shrink-0" />
+              )}
+              <span className="flex-1">{toastMessage.text}</span>
+              <button
+                onClick={() => setToastMessage(null)}
+                className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-hidden">
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-3">
@@ -1121,8 +1659,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total em Aberto */}
         <div
-          onClick={() => setStatusFilter('aberto')}
-          className="bg-white p-4 rounded-2xl border border-sky-100 shadow-xs cursor-pointer hover:border-sky-300 transition-all"
+          onClick={() => setStatusFilter(statusFilter === 'aberto' ? 'todos' : 'aberto')}
+          className={`bg-white p-4 rounded-2xl border shadow-xs cursor-pointer transition-all ${
+            statusFilter === 'aberto'
+              ? 'border-sky-400 ring-2 ring-sky-500/20 bg-sky-50/20'
+              : 'border-sky-100 hover:border-sky-300'
+          }`}
         >
           <div className="flex items-center justify-between text-sky-600 mb-1.5">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
@@ -1136,8 +1678,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
 
         {/* Total Vencido */}
         <div
-          onClick={() => setStatusFilter('vencido')}
-          className="bg-white p-4 rounded-2xl border border-rose-100 shadow-xs cursor-pointer hover:border-rose-300 transition-all"
+          onClick={() => setStatusFilter(statusFilter === 'vencido' ? 'todos' : 'vencido')}
+          className={`bg-white p-4 rounded-2xl border shadow-xs cursor-pointer transition-all ${
+            statusFilter === 'vencido'
+              ? 'border-rose-400 ring-2 ring-rose-500/20 bg-rose-50/20'
+              : 'border-rose-100 hover:border-rose-300'
+          }`}
         >
           <div className="flex items-center justify-between text-rose-600 mb-1.5">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
@@ -1151,8 +1697,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
 
         {/* Vencendo em 7 Dias */}
         <div
-          onClick={() => setStatusFilter('proximos_7_dias')}
-          className="bg-white p-4 rounded-2xl border border-amber-100 shadow-xs cursor-pointer hover:border-amber-300 transition-all"
+          onClick={() => setStatusFilter(statusFilter === 'proximos_7_dias' ? 'todos' : 'proximos_7_dias')}
+          className={`bg-white p-4 rounded-2xl border shadow-xs cursor-pointer transition-all ${
+            statusFilter === 'proximos_7_dias'
+              ? 'border-amber-400 ring-2 ring-amber-500/20 bg-amber-50/20'
+              : 'border-amber-100 hover:border-amber-300'
+          }`}
         >
           <div className="flex items-center justify-between text-amber-600 mb-1.5">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
@@ -1166,8 +1716,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
 
         {/* Total Já Pago */}
         <div
-          onClick={() => setStatusFilter('pago')}
-          className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-xs cursor-pointer hover:border-emerald-300 transition-all"
+          onClick={() => setStatusFilter(statusFilter === 'pago' ? 'todos' : 'pago')}
+          className={`bg-white p-4 rounded-2xl border shadow-xs cursor-pointer transition-all ${
+            statusFilter === 'pago'
+              ? 'border-emerald-400 ring-2 ring-emerald-500/20 bg-emerald-50/20'
+              : 'border-emerald-100 hover:border-emerald-300'
+          }`}
         >
           <div className="flex items-center justify-between text-emerald-600 mb-1.5">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
@@ -1180,23 +1734,29 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
         </div>
       </div>
 
-      {/* Filter Toolbar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      {/* Filter Toolbar - Collapsed by Default */}
+      <FilterCollapseBar
+        isOpen={isFiltersOpen}
+        onToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+        activeCount={activeFiltersCount}
+        onClear={handleClearFilters}
+        label="Opções de Filtros de Contas a Pagar"
+      >
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-2.5 w-full pt-1 flex-wrap">
           {/* Search Input */}
-          <div className="relative lg:col-span-2">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder="Buscar descrição, fornecedor, nota..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+              className="w-full pl-10 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
             />
           </div>
 
           {/* Status Filter */}
-          <div>
+          <div className="w-full sm:w-auto shrink-0 sm:min-w-[140px]">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -1213,7 +1773,7 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
           </div>
 
           {/* Supplier Filter */}
-          <div>
+          <div className="w-full sm:w-auto shrink-0 sm:min-w-[155px] sm:max-w-[210px]">
             <select
               value={supplierFilter}
               onChange={(e) => setSupplierFilter(e.target.value)}
@@ -1228,44 +1788,104 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
             </select>
           </div>
 
-          {/* Date Range Clear */}
-          <div className="flex items-center gap-2">
+          {/* NOVO: Seletor de Dia Específico (Hoje, Amanhã, Data Pontual) */}
+          <div className="flex items-center gap-1.5 shrink-0 bg-slate-50/80 p-1 rounded-xl border border-slate-200">
+            <span className="text-[11px] font-bold text-slate-500 pl-1 flex items-center gap-1">
+              <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
+              Dia:
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (startDate === todayStr && endDate === todayStr) {
+                  setStartDate('');
+                  setEndDate('');
+                } else {
+                  setStartDate(todayStr);
+                  setEndDate(todayStr);
+                }
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                startDate === todayStr && endDate === todayStr
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              }`}
+              title="Filtrar contas com vencimento hoje"
+            >
+              Hoje
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (startDate === tomorrowStr && endDate === tomorrowStr) {
+                  setStartDate('');
+                  setEndDate('');
+                } else {
+                  setStartDate(tomorrowStr);
+                  setEndDate(tomorrowStr);
+                }
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                startDate === tomorrowStr && endDate === tomorrowStr
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              }`}
+              title="Filtrar contas com vencimento amanhã"
+            >
+              Amanhã
+            </button>
+            <input
+              type="date"
+              value={startDate && startDate === endDate ? startDate : ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                setStartDate(val);
+                setEndDate(val);
+              }}
+              className="w-[124px] py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 focus:ring-1 focus:ring-sky-500"
+              title="Selecionar um dia específico"
+            />
+          </div>
+
+          {/* Date Range (Mantido exatamente como já existe) */}
+          <div className="flex items-center gap-1.5 shrink-0 bg-slate-50/80 p-1 rounded-xl border border-slate-200">
+            <span className="text-[11px] font-bold text-slate-500 pl-1">Período:</span>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full py-2 px-2 rounded-xl border border-slate-200 text-xs font-medium"
+              className="w-[124px] py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 focus:ring-1 focus:ring-sky-500"
               title="Vencimento Inicial"
             />
+            <span className="text-[11px] text-slate-400 font-bold px-0.5">até</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full py-2 px-2 rounded-xl border border-slate-200 text-xs font-medium"
+              className="w-[124px] py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 focus:ring-1 focus:ring-sky-500"
               title="Vencimento Final"
             />
-            {(startDate || endDate || statusFilter !== 'todos' || supplierFilter !== 'todos' || searchTerm) && (
-              <button
-                onClick={() => {
-                  setStatusFilter('todos');
-                  setSupplierFilter('todos');
-                  setStartDate('');
-                  setEndDate('');
-                  setSearchTerm('');
-                }}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 shrink-0"
-                title="Limpar Filtros"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
           </div>
-        </div>
-      </div>
 
-      {/* Payables Table */}
+          {/* Clear Filters Button */}
+          {activeFiltersCount > 0 && (
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="py-2 px-3 text-sky-600 hover:text-sky-700 hover:bg-sky-50 rounded-xl border border-sky-200 text-xs font-bold shrink-0 transition-colors flex items-center justify-center gap-1.5"
+              title="Limpar Filtros"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Limpar</span>
+            </button>
+          )}
+        </div>
+      </FilterCollapseBar>
+
+      {/* Payables Container (Desktop Table + Mobile Cards) */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* DESKTOP TABLE VIEW */}
+        <div className="hidden md:block overflow-x-auto">
           {/* Table */}
           <table className="w-full text-left border-collapse text-xs">
             <thead>
@@ -1400,14 +2020,14 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
                     Carregando contas a pagar...
                   </td>
                 </tr>
-              ) : filteredPayables.length === 0 ? (
+              ) : paginatedPayables.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-400">
                     Nenhuma conta a pagar encontrada para os filtros selecionados.
                   </td>
                 </tr>
               ) : (
-                filteredPayables.map((p) => {
+                paginatedPayables.map((p) => {
                   const remaining =
                     p.remainingAmount ?? Math.max(0, p.originalAmount - p.paidAmount);
                   const isPaid = p.status === 'pago';
@@ -1528,428 +2148,144 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* MOBILE CARDS VIEW */}
+        <div className="block md:hidden p-3 space-y-3 bg-slate-50/50">
+          {isLoading ? (
+            <div className="py-8 text-center text-slate-400">
+              <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-sky-600" />
+              Carregando contas...
+            </div>
+          ) : paginatedPayables.length === 0 ? (
+            <p className="py-6 text-center text-slate-400 text-xs">
+              Nenhuma conta a pagar encontrada.
+            </p>
+          ) : (
+            paginatedPayables.map((p) => {
+              const remaining = p.remainingAmount ?? Math.max(0, p.originalAmount - p.paidAmount);
+              const isPaid = p.status === 'pago';
+              const isCanceled = p.status === 'cancelado';
+              const isOverdue = p.dueDate < todayStr && !isPaid && !isCanceled;
+
+              const bInfo = parsePayableBatchInfo(p.notes);
+              const tagText = bInfo.isBatch
+                ? bInfo.displayTag
+                : p.description.match(/\((\d+\/\d+)\)/)?.[1]
+                ? `Parcela ${p.description.match(/\((\d+\/\d+)\)/)![1]}`
+                : null;
+
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => {
+                    setSelectedPayable(p);
+                    setIsDetailsModalOpen(true);
+                  }}
+                  className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-3 text-left transition-all active:scale-[0.99] cursor-pointer"
+                >
+                  {/* Top Bar: Title, Batch tag & Status */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-extrabold text-slate-900 text-xs leading-tight">
+                          {p.description}
+                        </span>
+                        {p.nfEntryId && (
+                          <span className="text-[9px] bg-sky-100 text-sky-800 font-extrabold px-1.5 py-0.2 rounded">
+                            NF-e
+                          </span>
+                        )}
+                        {tagText && (
+                          <span className="text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-200/70 font-bold px-1.5 py-0.2 rounded-md inline-flex items-center gap-1">
+                            {bInfo.batchType === 'recorrente' ? <Repeat className="w-2.5 h-2.5 text-indigo-500" /> : <Layers className="w-2.5 h-2.5 text-indigo-500" />}
+                            {tagText}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        {p.supplierName || 'Fornecedor avulso'} • {p.category}
+                      </p>
+                    </div>
+
+                    <div className="shrink-0">{getStatusBadge(p.status)}</div>
+                  </div>
+
+                  {/* Document & Due Date Bar */}
+                  <div className="flex items-center justify-between text-[11px] bg-slate-50 p-2 rounded-xl border border-slate-100">
+                    <span className="font-mono text-slate-500">
+                      Doc: <strong className="text-slate-700">{p.documentNumber || '—'}</strong>
+                    </span>
+                    <span className={`font-mono font-bold ${isOverdue ? 'text-rose-600' : 'text-slate-700'}`}>
+                      Vence: {formatDisplayDate(p.dueDate)}
+                    </span>
+                  </div>
+
+                  {/* Financial Values Grid */}
+                  <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 text-left">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Original</span>
+                      <span className="text-xs font-bold text-slate-800">{formatCurrency(p.originalAmount)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Pago</span>
+                      <span className="text-xs font-semibold text-emerald-700">{formatCurrency(p.paidAmount)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Saldo</span>
+                      <span className="text-xs font-black text-rose-600">{formatCurrency(remaining)}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div
+                    className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {!isPaid && !isCanceled && (
+                      <button
+                        onClick={() => handleOpenPaymentModal(p)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
+                      >
+                        Dar Baixa
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleOpenEdit(p)}
+                      className="p-1.5 text-slate-500 hover:text-sky-600 bg-slate-100 hover:bg-sky-50 rounded-lg text-xs font-bold flex items-center gap-1"
+                      title="Editar Conta"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Editar</span>
+                    </button>
+                    <button
+                      onClick={() => handleOpenDeleteOrCancel(p)}
+                      className="p-1.5 text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 rounded-lg text-xs font-bold flex items-center gap-1"
+                      title="Excluir ou Cancelar"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
-      {/* MODAL 1: Create / Edit Account */}
-      {isFormModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-200">
-            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-sky-500/20 border border-sky-400/30 rounded-xl text-sky-300">
-                  <DollarSign className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black">
-                    {editingPayable
-                      ? 'Editar Conta a Pagar'
-                      : entryType === 'parcelado'
-                      ? 'Nova Conta a Pagar (Parcelada)'
-                      : entryType === 'recorrente'
-                      ? 'Nova Conta a Pagar (Recorrente)'
-                      : 'Nova Conta a Pagar'}
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    {entryType === 'parcelado'
-                      ? 'Lançamento com divisão automática do valor em parcelas'
-                      : entryType === 'recorrente'
-                      ? 'Lançamento repetido por ciclos periódicos'
-                      : 'Lançamento de compromisso financeiro com fornecedor'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsFormModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveForm} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
-              {formError && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{formError}</span>
-                </div>
-              )}
-
-              {/* Seletor de Tipo de Lançamento: Único, Parcelado ou Recorrente */}
-              {!editingPayable && (
-                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2.5">
-                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600">
-                    Tipo de Lançamento
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEntryType('unico')}
-                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
-                        entryType === 'unico'
-                          ? 'bg-sky-600 text-white shadow-xs'
-                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                      }`}
-                    >
-                      <DollarSign className="w-3.5 h-3.5" />
-                      <span>Único</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setEntryType('parcelado')}
-                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
-                        entryType === 'parcelado'
-                          ? 'bg-sky-600 text-white shadow-xs'
-                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                      }`}
-                    >
-                      <Layers className="w-3.5 h-3.5" />
-                      <span>Parcelado</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setEntryType('recorrente')}
-                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
-                        entryType === 'recorrente'
-                          ? 'bg-sky-600 text-white shadow-xs'
-                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                      }`}
-                    >
-                      <Repeat className="w-3.5 h-3.5" />
-                      <span>Recorrente</span>
-                    </button>
-                  </div>
-
-                  {/* Configurações do Parcelamento ou Recorrência */}
-                  {entryType !== 'unico' && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2.5 border-t border-slate-200 animate-in fade-in duration-150">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
-                          {entryType === 'parcelado' ? 'Qtd. de Parcelas *' : 'Qtd. de Ocorrências *'}
-                        </label>
-                        <input
-                          type="number"
-                          min={2}
-                          max={entryType === 'parcelado' ? 60 : 48}
-                          value={entryType === 'parcelado' ? installmentsCount : recurrenceCount}
-                          onChange={(e) => {
-                            const val = Math.max(2, Math.min(60, parseInt(e.target.value, 10) || 2));
-                            if (entryType === 'parcelado') setInstallmentsCount(val);
-                            else setRecurrenceCount(val);
-                          }}
-                          className="w-full text-xs p-2 rounded-xl border border-slate-200 font-bold text-slate-800 bg-white focus:ring-2 focus:ring-sky-500/20"
-                        />
-                        <span className="text-[10px] text-slate-400 mt-0.5 block">
-                          {entryType === 'parcelado'
-                            ? 'Mínimo 2 e máximo 60 parcelas'
-                            : 'Mínimo 2 e máximo 48 ciclos'}
-                        </span>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Intervalo de Vencimento *
-                        </label>
-                        <select
-                          value={intervalType}
-                          onChange={(e) => setIntervalType(e.target.value as IntervalType)}
-                          className="w-full text-xs p-2 rounded-xl border border-slate-200 font-bold text-slate-800 bg-white focus:ring-2 focus:ring-sky-500/20"
-                        >
-                          <option value="semanal">Semanal (a cada 7 dias)</option>
-                          <option value="quinzenal">Quinzenal (a cada 15 dias)</option>
-                          <option value="mensal">Mensal (a cada 1 mês - padrão)</option>
-                          <option value="trimestral">Trimestral (a cada 3 meses)</option>
-                          <option value="semestral">Semestral (a cada 6 meses)</option>
-                          <option value="anual">Anual (a cada 1 ano)</option>
-                        </select>
-                        <span className="text-[10px] text-slate-400 mt-0.5 block">
-                          Frequência entre cada vencimento
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Opções de Escopo para Edição de Séries (Parceladas ou Recorrentes) */}
-              {editingPayable && editingSeriesPayables.length > 1 && (
-                <div className="p-3.5 bg-indigo-50/80 border border-indigo-200/90 rounded-2xl space-y-2.5">
-                  <div className="flex items-center gap-2 text-indigo-950 font-bold text-xs">
-                    <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
-                    <span>Lançamento em Série Vinculado ({editingSeriesPayables.length} contas no lote)</span>
-                  </div>
-                  <p className="text-[11px] text-indigo-800 leading-relaxed">
-                    Esta conta faz parte de um lançamento em grupo. Escolha como deseja aplicar as alterações:
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                    <div
-                      onClick={() => setEditScope('single')}
-                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
-                        editScope === 'single'
-                          ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20 text-indigo-950 font-bold shadow-xs'
-                          : 'bg-white/60 border-indigo-200/60 text-slate-700 hover:bg-white'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        id="editScopeSingle"
-                        name="editScope"
-                        checked={editScope === 'single'}
-                        onChange={() => setEditScope('single')}
-                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <label htmlFor="editScopeSingle" className="cursor-pointer">
-                        <span className="block font-bold">Apenas esta parcela</span>
-                        <span className="text-[10px] text-slate-500 font-normal">
-                          Altera apenas esta conta individual (vencimento {formatDisplayDate(editingPayable.dueDate)})
-                        </span>
-                      </label>
-                    </div>
-
-                    <div
-                      onClick={() => setEditScope('series_future')}
-                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
-                        editScope === 'series_future'
-                          ? 'bg-white border-indigo-600 ring-2 ring-indigo-500/20 text-indigo-950 font-bold shadow-xs'
-                          : 'bg-white/60 border-indigo-200/60 text-slate-700 hover:bg-white'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        id="editScopeFuture"
-                        name="editScope"
-                        checked={editScope === 'series_future'}
-                        onChange={() => setEditScope('series_future')}
-                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <label htmlFor="editScopeFuture" className="cursor-pointer">
-                        <span className="block font-bold">
-                          Esta e todas adiante ({futurePendingInSeries.length} pendentes)
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-normal">
-                          Atualiza fornecedor, categoria, valor e descrição nas contas futuras pendentes
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Fornecedor
-                </label>
-                <select
-                  value={formData.supplierId}
-                  onChange={(e) => setFormData({ ...formData, supplierId: e.target.value })}
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-bold text-slate-800 focus:ring-2 focus:ring-sky-500/20"
-                >
-                  <option value="">Selecione um fornecedor cadastrado (opcional)</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} {s.cnpj ? `(${s.cnpj})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Descrição da Conta *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Compra de Gomas Fini, Aluguel Loja, Conta de Luz..."
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-bold focus:ring-2 focus:ring-sky-500/20"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Categoria *
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-bold text-slate-800 focus:ring-2 focus:ring-sky-500/20"
-                  >
-                    {PAYABLE_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Nº do Documento (NF, Boleto)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ex: NF 12345"
-                    value={formData.documentNumber}
-                    onChange={(e) => setFormData({ ...formData, documentNumber: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-mono focus:ring-2 focus:ring-sky-500/20"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    {entryType === 'parcelado'
-                      ? 'Valor Total da Compra (R$) *'
-                      : entryType === 'recorrente'
-                      ? 'Valor por Ciclo (R$) *'
-                      : 'Valor Original (R$) *'}
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    required
-                    disabled={Boolean(editingPayable?.payments && editingPayable.payments.length > 0)}
-                    placeholder="R$ 0,00"
-                    value={formData.originalAmount}
-                    onChange={(e) => setFormData({ ...formData, originalAmount: maskCurrency(e.target.value) })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-black text-slate-900 focus:ring-2 focus:ring-sky-500/20 disabled:bg-slate-100 disabled:text-slate-400 font-mono"
-                  />
-                  {editingPayable?.payments && editingPayable.payments.length > 0 && (
-                    <span className="text-[10px] text-amber-600 font-bold">
-                      Bloqueado (já possui baixas)
-                    </span>
-                  )}
-                  {!editingPayable && entryType === 'parcelado' && installmentsCount > 1 && (
-                    <span className="text-[10px] text-sky-700 font-semibold block mt-0.5">
-                      Dividido em {installmentsCount} parcelas
-                    </span>
-                  )}
-                  {!editingPayable && entryType === 'recorrente' && recurrenceCount > 1 && (
-                    <span className="text-[10px] text-emerald-700 font-semibold block mt-0.5">
-                      {recurrenceCount} ciclos de {intervalLabel(intervalType).toLowerCase()}
-                    </span>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Data Emissão
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.issueDate}
-                    onChange={(e) => setFormData({ ...formData, issueDate: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    {entryType === 'parcelado'
-                      ? 'Venc. 1ª Parcela *'
-                      : entryType === 'recorrente'
-                      ? 'Venc. 1º Ciclo *'
-                      : 'Data Vencimento *'}
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.dueDate}
-                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-bold text-rose-600 focus:ring-2 focus:ring-sky-500/20"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Observações
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Informações adicionais, chave PIX, banco, etc."
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-sky-500/20"
-                />
-              </div>
-
-              {/* Pré-visualização das Parcelas ou Recorrências */}
-              {!editingPayable && entryType !== 'unico' && generatedEntriesPreview.length > 0 && (
-                <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-3.5 space-y-2 animate-in fade-in duration-150">
-                  <div className="flex items-center justify-between text-xs font-black text-sky-950">
-                    <div className="flex items-center gap-1.5">
-                      <CalendarDays className="w-4 h-4 text-sky-600 shrink-0" />
-                      <span>Prévia dos {generatedEntriesPreview.length} Lançamentos:</span>
-                    </div>
-                    <span className="text-[11px] font-black text-sky-700 font-mono">
-                      Total:{' '}
-                      {formatCurrency(
-                        generatedEntriesPreview.reduce((acc, curr) => acc + curr.amount, 0)
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="max-h-36 overflow-y-auto divide-y divide-sky-100 bg-white rounded-xl border border-sky-200/80 shadow-2xs">
-                    {generatedEntriesPreview.map((item) => (
-                      <div
-                        key={item.index}
-                        className="px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-700 hover:bg-sky-50/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-800 font-black flex items-center justify-center text-[10px] shrink-0">
-                            {item.index}
-                          </span>
-                          <span className="font-semibold text-slate-800">{item.label}</span>
-                          <span className="text-slate-300">•</span>
-                          <span className="text-slate-500 font-mono">{formatDisplayDate(item.dueDate)}</span>
-                        </div>
-                        <span className="font-black text-slate-900 font-mono">
-                          {formatCurrency(item.amount)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsFormModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingForm}
-                  className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-colors disabled:opacity-50"
-                >
-                  {isSavingForm && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>
-                    {editingPayable
-                      ? 'Salvar Alterações'
-                      : entryType === 'parcelado'
-                      ? `Lançar ${generatedEntriesPreview.length || installmentsCount} Parcelas`
-                      : entryType === 'recorrente'
-                      ? `Lançar ${generatedEntriesPreview.length || recurrenceCount} Recorrências`
-                      : 'Lançar Conta'}
-                  </span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Pagination Controls */}
+      {filteredPayables.length > 0 && (
+        <PaginationControls
+          currentPage={currentPage}
+          totalItems={filteredPayables.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemName="contas a pagar"
+        />
       )}
 
       {/* MODAL 2: Registrar Baixa (Pagamento Total ou Parcial) */}
-      {isPaymentModalOpen && targetPayable && (
+      {isPaymentModalOpen && targetPayable && createPortal(
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-200">
             <div className="bg-emerald-900 text-white p-4 flex items-center justify-between">
@@ -2112,11 +2448,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL 3: Detalhes da Conta & Histórico de Baixas (com Estorno) */}
-      {isDetailsModalOpen && selectedPayable && (
+      {isDetailsModalOpen && selectedPayable && createPortal(
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-200">
             <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
@@ -2332,11 +2669,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL 4: In-App Confirmation Modal (Excluir ou Cancelar Conta) */}
-      {confirmModal.isOpen && confirmModal.payable && (
+      {confirmModal.isOpen && confirmModal.payable && createPortal(
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-200">
             <div
@@ -2602,11 +2940,12 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL 5: In-App Confirmation Modal (Estorno de Baixa) */}
-      {voidModal.isOpen && voidModal.payment && (
+      {voidModal.isOpen && voidModal.payment && createPortal(
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-200">
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
@@ -2711,7 +3050,8 @@ export const PayablesView: React.FC<PayablesViewProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Floating Toast Notification */}

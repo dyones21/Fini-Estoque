@@ -24,6 +24,7 @@ import {
   Tag,
   TrendingUp,
   Package,
+  X,
 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory, LocationType } from '../types';
@@ -38,6 +39,8 @@ import {
 import { exportToExcel, exportToCSV } from '../utils/exportUtils';
 import { getFriendlyErrorMessage } from '../utils/errorHandler';
 import { ExportButton } from './ExportButton';
+import { PaginationControls } from './PaginationControls';
+import { FilterCollapseBar } from './FilterCollapseBar';
 
 interface StockTableProps {
   locationMode: LocationType;
@@ -99,10 +102,12 @@ export const StockTable: React.FC<StockTableProps> = ({
     };
   }, [activeMenuProductId]);
   const [isFiltersOpen, setIsFiltersOpen] = useState(
-    initialIsFiltersOpen ||
-      !!initialSearchQuery ||
-      (initialCategory !== 'todos' && !!initialCategory) ||
-      (initialStatus !== 'todos' && !!initialStatus)
+    Boolean(
+      initialIsFiltersOpen ||
+      initialSearchQuery ||
+      (initialCategory && initialCategory !== 'todos') ||
+      (initialStatus && initialStatus !== 'todos')
+    )
   );
 
   // React to initial filter changes from Dashboard drill-downs
@@ -121,11 +126,23 @@ export const StockTable: React.FC<StockTableProps> = ({
     }
   }, [initialSearchQuery, initialCategory, initialStatus, initialIsFiltersOpen]);
 
-  const isFilterActive =
-    searchQuery !== '' ||
-    selectedCategory !== 'todos' ||
-    selectedStatus !== 'todos' ||
-    groupBy !== 'nenhum';
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchQuery.trim()) count++;
+    if (selectedCategory !== 'todos') count++;
+    if (selectedStatus !== 'todos') count++;
+    if (groupBy !== 'nenhum') count++;
+    return count;
+  }, [searchQuery, selectedCategory, selectedStatus, groupBy]);
+
+  const isFilterActive = activeFiltersCount > 0;
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setSelectedCategory('todos');
+    setSelectedStatus('todos');
+    setGroupBy('nenhum');
+  };
 
   // Compute Curva ABC map
   const abcMap = useMemo(() => {
@@ -172,10 +189,25 @@ export const StockTable: React.FC<StockTableProps> = ({
     }).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }, [products, searchQuery, selectedCategory, selectedStatus, locationMode]);
 
+  // Pagination State (Default 50 items per page)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  // Reset page when filters or search term changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCategory, selectedStatus, groupBy]);
+
+  // Paginated Products (applied when not grouped, or per overall set)
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredProducts.slice(start, start + pageSize);
+  }, [filteredProducts, currentPage, pageSize]);
+
   // Grouped Products Map
   const groupedProducts = useMemo<Record<string, Product[]>>(() => {
     if (groupBy === 'nenhum') {
-      return { 'Todos os Produtos': filteredProducts };
+      return { 'Todos os Produtos': paginatedProducts };
     }
 
     const map: Record<string, Product[]> = {};
@@ -194,7 +226,7 @@ export const StockTable: React.FC<StockTableProps> = ({
     });
 
     return map;
-  }, [filteredProducts, groupBy, abcMap]);
+  }, [filteredProducts, paginatedProducts, groupBy, abcMap]);
 
   // Helper titles
   const getLocationTitle = () => {
@@ -281,7 +313,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-200">
+    <div className="space-y-4 animate-in fade-in duration-200 w-full max-w-full min-w-0 overflow-hidden">
       
       {/* Location Header Title & Add Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200 shadow-xs">
@@ -355,131 +387,97 @@ export const StockTable: React.FC<StockTableProps> = ({
         </div>
       </div>
 
-      {/* Filter & Search Bar - Collapsible / Closed by Default */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => setIsFiltersOpen((prev) => !prev)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setIsFiltersOpen((prev) => !prev);
-            }
-          }}
-          className="w-full flex items-center justify-between p-3.5 px-4 text-left font-bold text-xs text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer select-none"
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-slate-100 text-slate-600">
-              <Filter className="w-4 h-4" />
-            </div>
-            <div>
-              <span className="font-extrabold text-slate-900">Filtros & Pesquisa de Produtos</span>
-              <span className="text-slate-400 font-normal ml-2 text-[11px]">
-                (Clique para {isFiltersOpen ? 'recolher' : 'abrir e filtrar'})
-              </span>
-            </div>
-
-            {isFilterActive && (
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 uppercase ml-2">
-                Filtros Ativos
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 text-slate-400">
-            {isFilterActive && (
+      {/* Filter Toolbar - Collapsed by Default */}
+      <FilterCollapseBar
+        isOpen={isFiltersOpen}
+        onToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+        activeCount={activeFiltersCount}
+        onClear={handleClearFilters}
+        label="Opções de Filtros & Busca do Estoque"
+      >
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-2.5 w-full pt-1">
+          {/* Search Input */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar por Nome, SKU, EAN ou Lote..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-8 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+            />
+            {searchQuery && (
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSearchQuery('');
-                  setSelectedCategory('todos');
-                  setSelectedStatus('todos');
-                  setGroupBy('nenhum');
-                }}
-                className="text-[11px] font-bold text-rose-600 hover:underline mr-2"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                Limpar Filtros
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
-            {isFiltersOpen ? (
-              <ChevronUp className="w-4 h-4 text-slate-500" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-slate-500" />
-            )}
           </div>
+
+          {/* Category Filter */}
+          <div className="w-full sm:w-auto shrink-0 sm:min-w-[150px] sm:max-w-[210px]">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full py-2 px-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-rose-500/20 truncate"
+            >
+              <option value="todos">Todas as Categorias</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Status Filter */}
+          <div className="w-full sm:w-auto shrink-0 sm:min-w-[145px]">
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="w-full py-2 px-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-rose-500/20"
+            >
+              <option value="todos">Todos os Status</option>
+              <option value="estoque_baixo">⚠️ Estoque Baixo</option>
+              <option value="estoque_baixo_loja">🏪 Baixo na Loja</option>
+              <option value="estoque_baixo_deposito">🏭 Baixo no Depósito</option>
+              <option value="esgotado">🚫 Esgotado</option>
+              <option value="validade_proxima">⏰ Validade &lt;30d</option>
+            </select>
+          </div>
+
+          {/* GroupBy */}
+          <div className="w-full sm:w-auto shrink-0 sm:min-w-[140px]">
+            <select
+              value={groupBy}
+              onChange={(e) =>
+                setGroupBy(e.target.value as 'nenhum' | 'categoria' | 'curva_abc')
+              }
+              className="w-full py-2 px-3 rounded-xl border border-slate-200 text-xs font-bold text-rose-700 focus:ring-2 focus:ring-rose-500/20"
+            >
+              <option value="nenhum">Sem Agrupar</option>
+              <option value="categoria">Agrupar Categoria</option>
+              <option value="curva_abc">Agrupar Curva ABC</option>
+            </select>
+          </div>
+
+          {/* Clear Filters Button */}
+          {activeFiltersCount > 0 && (
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="py-2 px-3 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-rose-200 text-xs font-bold shrink-0 transition-colors flex items-center justify-center gap-1.5"
+              title="Limpar Filtros"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Limpar</span>
+            </button>
+          )}
         </div>
-
-        {isFiltersOpen && (
-          <div className="p-4 pt-2 border-t border-slate-100 space-y-3 bg-slate-50/40">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              
-              {/* Search Input */}
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Buscar por Nome, SKU, EAN ou Lote..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white"
-                />
-              </div>
-
-              {/* Category Filter */}
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full py-2 px-3 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white"
-                >
-                  <option value="todos">Todas as Categorias</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Status Filter */}
-              <div>
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="w-full py-2 px-3 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white"
-                >
-                  <option value="todos">Todos os Status</option>
-                  <option value="estoque_baixo">⚠️ Estoque Baixo (Geral)</option>
-                  <option value="estoque_baixo_loja">🏪 Estoque Baixo na Loja</option>
-                  <option value="estoque_baixo_deposito">🏭 Estoque Baixo no Depósito</option>
-                  <option value="esgotado">🚫 Esgotado (Zero)</option>
-                  <option value="validade_proxima">⏰ Validade Próxima (&lt;30d)</option>
-                </select>
-              </div>
-
-              {/* Grouping Selector */}
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-slate-400 shrink-0" />
-                <select
-                  value={groupBy}
-                  onChange={(e) =>
-                    setGroupBy(e.target.value as 'nenhum' | 'categoria' | 'curva_abc')
-                  }
-                  className="w-full py-2 px-3 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white font-semibold text-rose-700"
-                >
-                  <option value="nenhum">Sem Agrupamento</option>
-                  <option value="categoria">Agrupar por Categoria</option>
-                  <option value="curva_abc">Agrupar por Curva ABC (Pareto)</option>
-                </select>
-              </div>
-
-            </div>
-          </div>
-        )}
-      </div>
+      </FilterCollapseBar>
 
       {/* Main Table rendering with Groups */}
       <div className="space-y-6">
@@ -1092,6 +1090,18 @@ export const StockTable: React.FC<StockTableProps> = ({
           </div>
         ))}
       </div>
+
+      {/* Pagination Controls */}
+      {groupBy === 'nenhum' && filteredProducts.length > 0 && (
+        <PaginationControls
+          currentPage={currentPage}
+          totalItems={filteredProducts.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemName="produtos"
+        />
+      )}
 
     </div>
   );

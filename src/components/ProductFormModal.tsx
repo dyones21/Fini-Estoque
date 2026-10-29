@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, Save, FolderPlus, Check, Plus, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Package, Save, FolderPlus, Check, Plus, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product, ProductCategory } from '../types';
 import { parseNumber } from '../utils/inventoryUtils';
@@ -190,35 +190,74 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8">
-        
-        {/* Header */}
-        <div className="bg-slate-900 p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-rose-600 text-white">
-              <Package className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black tracking-tight">
-                {editingProduct ? 'Editar Produto' : 'Cadastrar Novo Produto'}
-              </h2>
-              <p className="text-xs text-slate-400">
-                Ajuste de metadados, valores de custo/venda e limites mínimos de estoque
-              </p>
-            </div>
-          </div>
+  useEffect(() => {
+    if (isOpen) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [isOpen]);
 
+  if (!isOpen) return null;
+
+  return (
+    <div className="w-full max-w-4xl mx-auto space-y-6 animate-in fade-in duration-200">
+      {/* Navigation & Title Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center justify-center shrink-0"
+            title="Voltar para a lista de produtos"
           >
-            <X className="w-5 h-5" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                {editingProduct ? 'Editar Produto' : 'Cadastrar Novo Produto'}
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800">
+                {editingProduct ? 'Edição' : 'Novo Produto'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-medium">
+              Ajuste de metadados, valores de custo/venda e limites mínimos de estoque
+            </p>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-colors"
+          >
+            Cancelar e Voltar
+          </button>
+          <button
+            type="submit"
+            form="product-dedicated-form"
+            disabled={isSubmitting}
+            className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-colors"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Salvando...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>{editingProduct ? 'Salvar Alterações' : 'Cadastrar Produto'}</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Dedicated Form Card */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 sm:p-8">
+        <form id="product-dedicated-form" onSubmit={handleSubmit} className="space-y-6">
           {formError && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-xs animate-in fade-in">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -502,20 +541,20 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
           </div>
 
-          {/* Footer */}
-          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
+          {/* Footer Actions */}
+          <div className="pt-4 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold transition-colors"
             >
-              Cancelar
+              Cancelar e Voltar
             </button>
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md transition-colors"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-xs transition-colors"
             >
               {isSubmitting ? (
                 <>
@@ -532,7 +571,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </div>
 
         </form>
-
       </div>
     </div>
   );

@@ -48,6 +48,7 @@ interface HeaderProps {
   onToggleMobileMenu?: () => void;
   isMobileMenuOpen?: boolean;
   onNavigateToStock?: (filters: StockFilterOptions) => void;
+  isSidebarCollapsed?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -57,6 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
   isMobileMenuOpen = false,
   onNavigateToStock,
+  isSidebarCollapsed = false,
 }) => {
   const {
     activeLocation,
@@ -198,45 +200,68 @@ export const Header: React.FC<HeaderProps> = ({
   const roleInfo = getRoleBadge(currentUser.role);
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <header
+      className={`sticky top-0 z-30 bg-white border-b border-slate-200 shadow-xs transition-all duration-300 ${
+        isSidebarCollapsed ? 'lg:ml-16' : 'lg:ml-[220px]'
+      }`}
+    >
+      <div className="w-full px-3 sm:px-6 lg:px-6">
         <div className="flex items-center justify-between h-16 gap-2 sm:gap-4">
           
-          {/* Logo, Brand & Mobile Menu Trigger */}
+          {/* Left Brand & Title: Desktop (moldado ao lado da logo fixa do sidebar) vs Mobile (com menu e logo) */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {onToggleMobileMenu && (
-              <button
-                onClick={onToggleMobileMenu}
-                className="lg:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors border border-slate-200 shrink-0"
-                title="Abrir Menu de Navegação"
-              >
-                {isMobileMenuOpen ? (
-                  <X className="w-5 h-5 text-rose-600" />
-                ) : (
-                  <Menu className="w-5 h-5" />
-                )}
-              </button>
-            )}
+            {/* Mobile Header: Botão Hamburger + Logo/Monograma */}
+            <div className="flex lg:hidden items-center gap-2 shrink-0">
+              {onToggleMobileMenu && (
+                <button
+                  onClick={onToggleMobileMenu}
+                  className="p-2 rounded-xl text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors border border-slate-200 shrink-0 cursor-pointer"
+                  title="Abrir Menu de Navegação"
+                >
+                  {isMobileMenuOpen ? (
+                    <X className="w-5 h-5 text-rose-600" />
+                  ) : (
+                    <Menu className="w-5 h-5" />
+                  )}
+                </button>
+              )}
 
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-rose-600 via-pink-500 to-amber-400 p-0.5 flex items-center justify-center shadow-md shrink-0">
-              <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center font-black text-rose-600 text-lg sm:text-xl tracking-tighter">
-                G
-              </div>
+              {companyInfo?.logoUrl ? (
+                <img
+                  src={companyInfo.logoUrl}
+                  alt={companyInfo.tradeName || 'Logo'}
+                  className="w-9 h-9 object-contain rounded-xl shadow-xs shrink-0"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-600 via-pink-500 to-amber-400 p-0.5 flex items-center justify-center shadow-md shrink-0">
+                  <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center font-black text-rose-600 text-lg tracking-tighter">
+                    G
+                  </div>
+                </div>
+              )}
+
+              <span className="font-extrabold text-slate-900 tracking-tight text-base truncate max-w-[140px] xs:max-w-[200px]">
+                {companyInfo?.tradeName || companyInfo?.name || 'GummyStock'}
+              </span>
             </div>
-            <div className="text-left hidden xs:block">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <span className="font-extrabold text-slate-900 tracking-tight text-base sm:text-lg text-left">
-                  GummyStock
-                </span>
-                {companyInfo?.name && (
-                  <span className="text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200/60 text-left hidden sm:inline max-w-48 truncate">
-                    {companyInfo.tradeName || companyInfo.name}
+
+            {/* Desktop Header: Identificação da Empresa moldada ao lado do sidebar fixo */}
+            <div className="hidden lg:flex items-center gap-3">
+              <div className="text-left">
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-slate-900 tracking-tight text-base">
+                    {companyInfo?.tradeName || companyInfo?.name || 'GummyStock'}
                   </span>
-                )}
+                  {companyInfo?.name && companyInfo?.tradeName && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200/60 max-w-64 truncate">
+                      {companyInfo.name}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Gestão Operacional de Estoque & Caixa
+                </p>
               </div>
-              <p className="text-xs text-slate-500 hidden md:block text-left">
-                Gestão de Estoque Unificada
-              </p>
             </div>
           </div>
 

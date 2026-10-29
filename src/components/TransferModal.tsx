@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ArrowRightLeft, Warehouse, Store, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, ArrowRightLeft, Warehouse, Store, CheckCircle2, AlertCircle, ArrowLeft, Loader2 } from 'lucide-react';
 import { useStock } from '../context/StockContext';
 import { Product } from '../types';
 import { ProductSearchScanner } from './ProductSearchScanner';
@@ -109,33 +109,64 @@ export const TransferModal: React.FC<TransferModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
-        
-        {/* Header */}
-        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-amber-950 p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300">
-              <ArrowRightLeft className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black tracking-tight">
-                Transferência de Estoque
-              </h2>
-              <p className="text-xs text-amber-200/80">
-                Movimentação interna: Depósito Central ➔ Loja GummyStock
-              </p>
-            </div>
-          </div>
+  useEffect(() => {
+    if (isOpen) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [isOpen]);
 
+  return (
+    <div className="w-full max-w-4xl mx-auto space-y-6 animate-in fade-in duration-200">
+      {/* Navigation & Title Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center justify-center shrink-0"
+            title="Voltar para a lista"
           >
-            <X className="w-5 h-5" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                Transferência de Estoque
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800">
+                Depósito ➔ Loja
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-medium">
+              Movimentação interna: Depósito Central ➔ Loja Friburgo
+            </p>
+          </div>
         </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-colors"
+          >
+            Cancelar e Voltar
+          </button>
+          {!successMessage && (
+            <button
+              type="submit"
+              form="transfer-dedicated-form"
+              disabled={isSubmitting || !currentProduct || currentProduct.stockDeposito < parsedQuantity || parsedQuantity <= 0}
+              className="flex items-center gap-2 bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 disabled:opacity-40 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-colors"
+            >
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+              <span>{isSubmitting ? 'Transferindo...' : 'Confirmar Transferência'}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Dedicated Card */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 sm:p-8 space-y-6">
 
         {/* Success View */}
         {successMessage ? (
@@ -182,7 +213,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
           </div>
         ) : (
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form id="transfer-dedicated-form" onSubmit={handleSubmit} className="space-y-6">
           
           {/* Error Banner */}
           {errorMessage && (
@@ -273,22 +304,22 @@ export const TransferModal: React.FC<TransferModalProps> = ({
           </div>
 
           {/* Footer Buttons */}
-          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
+          <div className="pt-4 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold cursor-pointer disabled:opacity-50"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold transition-colors disabled:opacity-50"
             >
-              Cancelar
+              Cancelar e Voltar
             </button>
 
             <button
               type="submit"
               disabled={isSubmitting || !currentProduct || currentProduct.stockDeposito < parsedQuantity || parsedQuantity <= 0}
-              className="flex items-center gap-2 bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 disabled:opacity-40 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md transition-all cursor-pointer"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 disabled:opacity-40 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-xs transition-colors"
             >
-              <CheckCircle2 className="w-4 h-4" />
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               <span>{isSubmitting ? 'Transferindo...' : 'Confirmar Transferência'}</span>
             </button>
           </div>

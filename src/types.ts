@@ -36,6 +36,7 @@ export interface CompanyInfo {
   city: string;        // Cidade
   state: string;       // Estado
   defaultMarkupPercent?: number; // Margem de Lucro Padrão (%) para sugestão de preço na importação de NF-e (ex: 85)
+  logoUrl?: string;    // Logotipo personalizado da empresa (Data URL base64 ou link de imagem)
   isConfigured?: boolean; // Se os dados reais foram cadastrados no banco
   active?: boolean;
   isMaster?: boolean;

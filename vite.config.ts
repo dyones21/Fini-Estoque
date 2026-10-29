@@ -10,10 +10,10 @@ export default defineConfig(() => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
-      dedupe: ['react', 'react-dom', 'react/jsx-runtime'],
+      dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react-is'],
     },
     optimizeDeps: {
-      include: ['react', 'react-dom'],
+      include: ['react', 'react-dom', 'react-is', 'recharts'],
     },
     server: {
       proxy: {
